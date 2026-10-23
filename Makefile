@@ -9,10 +9,10 @@ setup:
 	@echo "Created .env.local — source it before running: source .env.local"
 
 lint:
-	LD_LIBRARY_PATH=$(LIBSTDCPP):$$LD_LIBRARY_PATH ruff check jit/ tests/
+	LD_LIBRARY_PATH=$(LIBSTDCPP):$$LD_LIBRARY_PATH ruff check jit/
 
 format:
-	LD_LIBRARY_PATH=$(LIBSTDCPP):$$LD_LIBRARY_PATH ruff format jit/ tests/
+	LD_LIBRARY_PATH=$(LIBSTDCPP):$$LD_LIBRARY_PATH ruff format jit/
 
 serve:
 	LD_LIBRARY_PATH=$(LIBSTDCPP):$$LD_LIBRARY_PATH jit serve
@@ -21,5 +21,5 @@ dashboard:
 	LD_LIBRARY_PATH=$(LIBSTDCPP):$$LD_LIBRARY_PATH jit dashboard
 
 clean:
-	rm -rf .jit __pycache__ jit/__pycache__ tests/__pycache__
+	rm -rf .jit __pycache__ jit/__pycache__
 	rm -rf build dist *.egg-info .env.local
