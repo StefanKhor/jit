@@ -1,0 +1,29 @@
+{
+  "name": "jit-mcp",
+  "version": "0.1.0",
+  "description": "Just-In-Time skill loader for AI agents. O(1) context instead of O(n).",
+  "bin": {
+    "jit": "bin/jit.js",
+    "jit-mcp": "bin/jit.js"
+  },
+  "files": [
+    "bin/"
+  ],
+  "keywords": [
+    "mcp",
+    "ai-agents",
+    "skills",
+    "just-in-time",
+    "context",
+    "nemotron",
+    "nebius"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/jit-mcp.git"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

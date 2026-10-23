@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JIT — Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+  --bg: #0c0a14;
+  --bg-elevated: rgba(20, 18, 35, 0.7);
+  --bg-card: rgba(20, 18, 35, 0.5);
+  --bg-hover: rgba(30, 28, 50, 0.6);
+  --border: rgba(139, 92, 246, 0.15);
+  --border-subtle: rgba(139, 92, 246, 0.08);
+  --text: #f5f3ff;
+  --text-secondary: #c4b5fd;
+  --text-muted: #8b7ec8;
+  --text-dim: #5b5280;
+  --accent: #a78bfa;
+  --accent-2: #c084fc;
+  --accent-3: #818cf8;
+  --accent-dim: rgba(167, 139, 250, 0.12);
+  --accent-glow: rgba(167, 139, 250, 0.25);
+  --success: #34d399;
+  --success-dim: rgba(52, 211, 153, 0.12);
+  --danger: #f87171;
+  --danger-dim: rgba(248, 113, 113, 0.12);
+  --info: #60a5fa;
+  --info-dim: rgba(96, 165, 250, 0.12);
+  --radius: 20px;
+  --radius-sm: 12px;
+  --radius-xs: 8px;
+  --blur: 24px;
+}
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { font-size: 14px; }
+  body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+body::after { content: ''; position: fixed; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle at 20% 30%, rgba(167, 139, 250, 0.08) 0%, transparent 40%), radial-gradient(circle at 80% 70%, rgba(192, 132, 252, 0.06) 0%, transparent 40%), radial-gradient(circle at 50% 50%, rgba(129, 140, 248, 0.04) 0%, transparent 60%); pointer-events: none; z-index: 0; animation: bgShift 20s ease-in-out infinite alternate; }
+@keyframes bgShift { 0% { transform: translate(0, 0) rotate(0deg); } 100% { transform: translate(-5%, -5%) rotate(3deg); } }
+  body::before { content: ''; position: fixed; inset: 0; background: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E"); pointer-events: none; z-index: 9999; }
+  .container { max-width: 1280px; margin: 0 auto; padding: 32px 40px; position: relative; z-index: 1; }
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; padding-bottom: 24px; border-bottom: 1px solid var(--border-subtle); }
+  .logo { display: flex; align-items: center; gap: 12px; }
+  .logo-mark { width: 36px; height: 36px; border: 1.5px solid var(--accent); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; color: var(--accent); position: relative; background: linear-gradient(135deg, var(--accent-dim), var(--info-dim)); box-shadow: 0 0 30px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.1); }
+  .logo-mark::after { content: ''; position: absolute; inset: -4px; border: 1px solid var(--accent-dim); border-radius: 10px; }
+  .logo-text { font-size: 15px; font-weight: 500; letter-spacing: -0.02em; }
+  .logo-sub { font-size: 11px; color: var(--text-muted); margin-left: 4px; }
+  .header-right { display: flex; align-items: center; gap: 16px; }
+  .status-pill { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 20px; font-size: 12px; color: var(--text-secondary); }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); box-shadow: 0 0 8px var(--success); animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+  .tabs { display: flex; gap: 2px; margin-bottom: 32px; border-bottom: 1px solid var(--border-subtle); backdrop-filter: blur(10px); }
+  .tab { padding: 10px 20px; font-size: 13px; font-weight: 500; color: var(--text-muted); background: transparent; border: none; border-bottom: 2px solid transparent; cursor: pointer; transition: all 0.2s; font-family: inherit; }
+  .tab:hover { color: var(--text-secondary); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); text-shadow: 0 0 20px var(--accent-glow); }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+  .hero { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 32px; }
+  .hero-card { background: var(--bg-card); backdrop-filter: blur(var(--blur)); -webkit-backdrop-filter: blur(var(--blur)); border: 1px solid var(--border); border-radius: var(--radius); padding: 28px; position: relative; overflow: hidden; transition: transform 0.3s, box-shadow 0.3s; }
+.hero-card:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3); }
+  .hero-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--accent-dim), transparent); }
+  .hero-label { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 12px; }
+  .hero-value { font-family: 'JetBrains Mono', monospace; font-size: 56px; font-weight: 100; letter-spacing: -0.05em; line-height: 1; margin-bottom: 6px; background: linear-gradient(135deg, #f5f3ff 0%, #a78bfa 50%, #c084fc 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .hero-value.accent { color: var(--accent); }
+  .hero-value.success { color: var(--success); }
+  .hero-sub { font-size: 12px; color: var(--text-secondary); }
+  .hero-bar { margin-top: 16px; height: 4px; background: var(--bg); border-radius: 2px; overflow: hidden; }
+  .hero-bar-fill { height: 100%; border-radius: 2px; transition: width 1s cubic-bezier(0.16, 1, 0.3, 1); }
+  .hero-bar-fill.success { background: var(--success); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px; }
+  .card { background: var(--bg-card); backdrop-filter: blur(var(--blur)); -webkit-backdrop-filter: blur(var(--blur)); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; transition: border-color 0.3s, box-shadow 0.3s; }
+.card:hover { border-color: rgba(167, 139, 250, 0.3); box-shadow: 0 8px 40px rgba(167, 139, 250, 0.08), 0 0 0 1px rgba(167, 139, 250, 0.1); transform: translateY(-1px); }
+  .card-title { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; }
+  .card-title .badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: var(--accent-dim); color: var(--accent); text-transform: none; letter-spacing: 0; font-weight: 500; }
+  .metric-tile { background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 14px; }
+  .metric-tile .label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 6px; }
+  .metric-tile .value { font-family: 'JetBrains Mono', monospace; font-size: 22px; font-weight: 300; color: var(--text); }
+  .metric-tile .value.accent { color: var(--accent); }
+  .metric-tile .value.success { color: var(--success); }
+  .metric-tile .sub { font-size: 10px; color: var(--text-dim); margin-top: 3px; }
+  .search-box { display: flex; align-items: center; gap: 10px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 14px; margin-bottom: 16px; transition: border-color 0.2s; }
+  .search-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+  .search-box .prompt { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--accent); }
+  .search-box input { flex: 1; background: none; border: none; outline: none; color: var(--text); font-size: 13px; font-family: inherit; }
+  .search-box input::placeholder { color: var(--text-dim); }
+  .data-table { width: 100%; border-collapse: collapse; }
+  .data-table th { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  .data-table td { padding: 10px; border-bottom: 1px solid var(--border-subtle); font-size: 13px; vertical-align: middle; }
+  .data-table tr:hover td { background: var(--bg-hover); }
+  .data-table .name { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--accent); }
+  .data-table .desc { color: var(--text-secondary); max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .data-table .cat { font-size: 11px; color: var(--text-muted); }
+  .btn { padding: 6px 12px; font-size: 12px; font-weight: 500; border: 1px solid var(--border); border-radius: var(--radius-xs); background: var(--bg-elevated); color: var(--text-secondary); cursor: pointer; transition: all 0.15s; font-family: inherit; }
+  .btn:hover { background: var(--bg-hover); color: var(--text); border-color: var(--text-muted); }
+  .btn.primary { background: linear-gradient(135deg, var(--accent-dim), var(--info-dim)); color: var(--accent); border-color: var(--accent); box-shadow: 0 0 15px var(--accent-glow); }
+  .btn.primary:hover { background: var(--accent); color: var(--bg); }
+  .btn.danger { color: var(--danger); border-color: var(--danger-dim); }
+  .btn.danger:hover { background: var(--danger-dim); }
+  .btn.success { color: var(--success); border-color: var(--success-dim); }
+  .btn.sm { padding: 3px 8px; font-size: 11px; }
+  .btn-group { display: flex; gap: 4px; }
+  .toggle { width: 32px; height: 18px; border-radius: 9px; background: var(--bg); border: 1px solid var(--border); position: relative; cursor: pointer; transition: all 0.2s; display: inline-block; }
+  .toggle.on { background: var(--success-dim); border-color: var(--success); }
+  .toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--text-muted); transition: all 0.2s; }
+  .toggle.on::after { left: 16px; background: var(--success); }
+  .input { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-xs); padding: 8px 12px; color: var(--text); font-size: 13px; font-family: inherit; outline: none; transition: border-color 0.2s; }
+  .input:focus { border-color: var(--accent); }
+  .input-group { display: flex; gap: 8px; margin-bottom: 16px; }
+  .input-group .input { flex: 1; }
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center; }
+  .modal-overlay.active { display: flex; }
+  .modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; max-width: 640px; width: 90%; max-height: 80vh; overflow-y: auto; }
+  .modal-title { font-size: 16px; font-weight: 500; margin-bottom: 16px; }
+  .modal-body { margin-bottom: 20px; }
+  .modal-footer { display: flex; justify-content: flex-end; gap: 8px; }
+  .toast { position: fixed; bottom: 24px; right: 24px; padding: 12px 20px; border-radius: var(--radius-sm); background: var(--bg-card); border: 1px solid var(--border); color: var(--text); font-size: 13px; transform: translateY(100px); opacity: 0; transition: all 0.3s; z-index: 2000; }
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast.success { border-color: var(--success); color: var(--success); }
+  .toast.error { border-color: var(--danger); color: var(--danger); }
+  .context-compare { display: flex; flex-direction: column; gap: 12px; }
+  .context-row { display: flex; align-items: center; gap: 12px; }
+  .context-row .label { font-size: 12px; color: var(--text-secondary); min-width: 60px; }
+  .context-row .bar-track { flex: 1; height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+  .context-row .bar-fill { height: 100%; border-radius: 3px; transition: width 1.2s cubic-bezier(0.16, 1, 0.3, 1); }
+  .context-row .bar-fill.static { background: var(--danger); }
+  .context-row .bar-fill.jit { background: var(--success); }
+  .context-row .tokens { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text); min-width: 60px; text-align: right; }
+  footer { margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--text-dim); }
+  footer a { color: var(--text-muted); text-decoration: none; transition: color 0.15s; }
+  footer a:hover { color: var(--accent); }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+  .animate { animation: fadeUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) both; }
+  .animate-delay-1 { animation-delay: 0.1s; }
+  .animate-delay-2 { animation-delay: 0.2s; }
+  .empty { text-align: center; padding: 40px 20px; color: var(--text-muted); }
+  .empty .icon { font-size: 32px; margin-bottom: 12px; opacity: 0.5; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .search-result { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 16px; margin-top: 12px; }
+  .search-result .name { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--accent); margin-bottom: 4px; }
+  .search-result .conf { font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+  .search-result .body { font-size: 12px; color: var(--text-secondary); margin-top: 8px; white-space: pre-wrap; max-height: 200px; overflow-y: auto; background: var(--bg); padding: 10px; border-radius: 6px; }
+  .search-result .none { color: var(--text-muted); font-style: italic; }
+  .skill-cat { font-size: 11px; color: var(--text-muted); padding: 2px 8px; border: 1px solid var(--border); border-radius: 10px; white-space: nowrap; }
+  @media (max-width: 768px) { .container { padding: 20px; } .hero { grid-template-columns: 1fr; } .grid { grid-template-columns: 1fr; } .hero-value { font-size: 36px; } .tabs { overflow-x: auto; } }
+</style>
+</head>
+<body><style id="login-style">
+.login-overlay { position: fixed; inset: 0; background: var(--bg); backdrop-filter: blur(20px); display: flex; align-items: center; justify-content: center; z-index: 9999; }
+.login-box { background: var(--bg-card); backdrop-filter: blur(var(--blur)); border: 1px solid var(--border); border-radius: 20px; padding: 48px 40px; width: 380px; text-align: center; box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5), 0 0 60px var(--accent-glow); }
+.login-box .logo { font-family: 'JetBrains Mono', monospace; font-size: 32px; font-weight: 200; letter-spacing: -0.04em; background: linear-gradient(135deg, var(--text), var(--accent)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; margin-bottom: 8px; }
+.login-box p { color: var(--text-muted); font-size: 13px; margin-bottom: 32px; }
+.login-box input { width: 100%; padding: 12px 16px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--text); font-size: 14px; margin-bottom: 16px; box-sizing: border-box; transition: border-color 0.2s, box-shadow 0.2s; font-family: 'JetBrains Mono', monospace; }
+.login-box input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); outline: none; }
+.login-box button { width: 100%; padding: 12px; border: none; border-radius: var(--radius-sm); background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: var(--bg); font-size: 14px; font-weight: 600; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; }
+.login-box button:hover { transform: translateY(-1px); box-shadow: 0 4px 20px var(--accent-glow); }
+.login-box .error { color: var(--danger); font-size: 12px; margin-top: 8px; display: none; }
+.login-box .skip { margin-top: 20px; font-size: 12px; color: var(--text-muted); cursor: pointer; transition: color 0.2s; }
+.login-box .skip:hover { color: var(--text-secondary); }
+</style><div id="login-overlay" class="login-overlay" style="display:none;">
+  <div class="login-box">
+    <div class="logo">JIT</div>
+    <p>Enter your API key to continue</p>
+    <input type="password" id="login-key" placeholder="••••••••••••" autofocus>
+    <button onclick="doLogin()">Unlock</button>
+    <div class="error" id="login-error">Invalid API key</div>
+    <div class="skip" onclick="skipLogin()">Continue without key →</div>
+  </div>
+</div>
+<div class="container">
+  <header>
+    <div class="logo"><div class="logo-mark">JIT</div><span class="logo-text">Just-In-Time</span><span class="logo-sub">Skill Loader</span></div>
+    <div class="header-right"><div class="status-pill"><div class="status-dot"></div><span id="status-text">localhost:8080</span></div></div>
+  </header>
+  <div class="tabs">
+    <button class="tab active" onclick="showTab('overview', this)">Overview</button>
+    <button class="tab" onclick="showTab('skills', this)">Skills</button>
+    <button class="tab" onclick="showTab('mcps', this)">MCP Servers</button>
+    <button class="tab" onclick="showTab('search', this)">Search</button>
+    <button class="tab" onclick="showTab('manage', this)">Manage</button>
+  </div>
+  <div id="tab-overview" class="tab-content active">
+    <div class="hero">
+      <div class="hero-card"><div class="hero-label">Tokens at task start</div><div class="hero-value accent" id="hero-tokens">—</div><div class="hero-sub" id="hero-tokens-sub">loading...</div><div class="hero-bar"><div class="hero-bar-fill success" id="hero-bar" style="width: 0%"></div></div></div>
+      <div class="hero-card"><div class="hero-label">Reduction</div><div class="hero-value success" id="hero-reduction">—</div><div class="hero-sub" id="hero-reduction-sub">vs static loading</div><div class="hero-bar"><div class="hero-bar-fill success" id="hero-bar2" style="width: 0%"></div></div></div>
+    </div>
+    <div class="grid">
+      <div class="card"><div class="card-title">Context inspector</div><div class="context-compare"><div class="context-row"><span class="label">Static</span><div class="bar-track"><div class="bar-fill static" style="width: 100%"></div></div><span class="tokens" id="static-tokens">—</span></div><div class="context-row"><span class="label">JIT</span><div class="bar-track"><div class="bar-fill jit" id="jit-bar" style="width: 2.4%"></div></div><span class="tokens" id="jit-tokens">—</span></div></div><div style="margin-top: 16px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;"><div class="metric-tile"><div class="label">Skills</div><div class="value" id="m-skills">—</div><div class="sub" id="m-skills-sub">—</div></div><div class="metric-tile"><div class="label">Tools</div><div class="value" id="m-tools">—</div><div class="sub">from MCP</div></div><div class="metric-tile"><div class="label">Total</div><div class="value accent" id="m-total">—</div><div class="sub">indexed</div></div></div></div>
+      <div class="card"><div class="card-title">Categories &amp; status</div><div id="categories-list" style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px;"></div><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;"><div class="metric-tile"><div class="label">Enabled</div><div class="value success" id="m-enabled">—</div></div><div class="metric-tile"><div class="label">Disabled</div><div class="value" id="m-disabled" style="color: var(--text-muted);">—</div></div></div></div>
+    </div>
+  </div>
+  <div id="tab-skills" class="tab-content">
+    <div class="card"><div class="card-title">Skills index <span class="badge" id="skills-badge">0</span></div>
+      <div class="input-group"><input class="input" id="skill-path-input" placeholder="Path to skills directory or SKILL.md file"><button class="btn primary" onclick="addSkills()">Add</button></div>
+      <table class="data-table"><thead><tr><th>Name</th><th>Description</th><th>Categories</th><th>Status</th><th>Actions</th></tr></thead><tbody id="skills-tbody"></tbody></table>
+      <div class="empty" id="skills-empty" style="display: none;"><div class="icon">📄</div><div>No skills indexed</div></div>
+    </div>
+  </div>
+  <div id="tab-mcps" class="tab-content">
+    <div class="card"><div class="card-title">MCP Servers <span class="badge" id="mcp-badge">0</span></div>
+      <div class="input-group"><input class="input" id="mcp-server-input" placeholder="Server name from config"><button class="btn" onclick="connectMcp()">Connect</button><button class="btn primary" onclick="indexMcp()">Index Tools</button></div>
+      <table class="data-table"><thead><tr><th>Server</th><th>Status</th><th>Tools</th><th>Actions</th></tr></thead><tbody id="mcp-tbody"></tbody></table>
+      <div class="empty" id="mcp-empty" style="display: none;"><div class="icon">🔌</div><div>No MCP servers configured</div><div style="margin-top: 8px; font-size: 12px;">Add servers to ~/.cursor/mcp.json or ~/.claude.json</div></div>
+      <div id="mcp-tools-detail" style="margin-top: 16px;"></div>
+    </div>
+  </div>
+  <div id="tab-search" class="tab-content">
+    <div class="card"><div class="card-title">Live search</div>
+      <div class="search-box"><span class="prompt">›</span><input type="text" id="search-input" placeholder="create a Linear issue for the login bug" onkeydown="if(event.key==='Enter')doSearch()"><span class="enter" style="font-size: 11px; color: var(--text-dim); padding: 2px 6px; border: 1px solid var(--border); border-radius: 3px;">↵</span></div>
+      <div id="search-results"></div>
+    </div>
+  </div>
+  <div id="tab-manage" class="tab-content">
+    <div class="grid">
+      <div class="card"><div class="card-title">Settings</div><div style="margin-bottom: 12px;"><label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px;">Nebius API Key (for Nemotron reranking)</label><input class="input" id="cfg-nebius-key" placeholder="nb-..." style="width: 100%; margin-bottom: 8px;"><label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px;">Nebius API Base URL</label><input class="input" id="cfg-nebius-base" placeholder="https://api.studio.nebius.ai/v1" style="width: 100%; margin-bottom: 12px;"><button class="btn primary" onclick="saveConfig()">Save Settings</button></div><div id="cfg-status" style="font-size: 12px; color: var(--text-muted);"></div></div><div class="card"><div class="card-title">Import / Export</div><p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">Backup your index or restore from a previous export.</p><div class="btn-group" style="margin-bottom: 12px;"><button class="btn primary" onclick="exportIndex()">Export Index</button><button class="btn" onclick="document.getElementById('import-file').click()">Import Index</button><input type="file" id="import-file" accept=".json" style="display: none;" onchange="importIndex(this)"></div><div id="import-status" style="font-size: 12px; color: var(--text-muted);"></div></div>
+      <div class="card"><div class="card-title">Danger zone</div><p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">Clear the entire index. This cannot be undone.</p><button class="btn danger" onclick="clearIndex()">Clear Index</button></div>
+    </div>
+    <div class="card" style="margin-top: 24px;"><div class="card-title">MCP config files</div><div id="mcp-configs"></div></div>
+  </div>
+  <footer><span>JIT v0.1.0 — Just-In-Time Skill Loader</span><span><a href="https://github.com" target="_blank">GitHub</a> · <a href="#" onclick="showTab('manage', this)">Manage</a> · <a href="https://nebius.com" target="_blank">Nebius</a></span></footer>
+</div>
+<div class="modal-overlay" id="skill-modal"><div class="modal"><div class="modal-title" id="modal-title">Skill Detail</div><div class="modal-body" id="modal-body"></div><div class="modal-footer"><button class="btn" onclick="closeModal()">Close</button></div></div></div>
+<div class="toast" id="toast"></div>
+<script>
+  let apiKey = localStorage.getItem('jit_api_key') || '';
+  function getHeaders() { const h = { 'Content-Type': 'application/json' }; if (apiKey) h['Authorization'] = 'Bearer ' + apiKey; return h; }
+  async function api(path, opts = {}) {
+  const key = localStorage.getItem('jit_api_key');
+  if (key) {
+    opts.headers = opts.headers || {};
+    opts.headers['X-API-Key'] = key;
+  } const res = await fetch(path, { headers: getHeaders(), ...opts }); if (res.status === 401) { const key = prompt('Enter API key:'); if (key) { apiKey = key; localStorage.setItem('jit_api_key', key); return api(path, opts); } } return res.json(); }
+  function showTab(name, el) { document.querySelectorAll('.tab').forEach(t => t.classList.remove('active')); document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active')); if (el) el.classList.add('active'); document.getElementById('tab-' + name).classList.add('active'); if (name === 'skills') loadSkills(); if (name === 'mcps') loadMcps(); if (name === 'overview') checkAuth(); if (name === 'manage') { loadMcpConfigs(); loadConfig(); } }
+  function toast(msg, type = 'success') { const t = document.getElementById('toast'); t.textContent = msg; t.className = 'toast show ' + type; setTimeout(() => t.classList.remove('show'), 3000); }
+  function esc(s) { if (s === null || s === undefined) return ''; const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
+  async function loadOverview() {
+    try {
+      const [status, stats] = await Promise.all([api('/api/status'), api('/api/stats')]);
+      const s = stats.tokens || {};
+      const jit = s.jit || 0;
+      const static = s.static || 0;
+      const reduction = s.reduction_pct || 0;
+      const saved = s.saved || 0;
+      document.getElementById('hero-tokens').textContent = jit.toLocaleString();
+      document.getElementById('hero-tokens-sub').textContent = `down from ${static.toLocaleString()} — ${reduction}% reduction`;
+      document.getElementById('hero-reduction').textContent = reduction + '%';
+      document.getElementById('hero-reduction-sub').textContent = `${saved.toLocaleString()} tokens saved per turn`;
+      document.getElementById('hero-bar').style.width = reduction + '%';
+      document.getElementById('hero-bar2').style.width = reduction + '%';
+      document.getElementById('static-tokens').textContent = static.toLocaleString();
+      document.getElementById('jit-tokens').textContent = jit.toLocaleString();
+      document.getElementById('jit-bar').style.width = (static > 0 ? (jit / static * 100) : 0) + '%';
+      document.getElementById('m-skills').textContent = status.skills || 0;
+      document.getElementById('m-tools').textContent = status.tools || 0;
+      document.getElementById('m-total').textContent = status.indexed || 0;
+      document.getElementById('m-skills-sub').textContent = (status.categories || []).length + ' categories';
+      document.getElementById('categories-list').innerHTML = (status.categories || []).map(c => `<span class="skill-cat">${esc(c)}</span>`).join('');
+      const skills = await api('/api/skills');
+      const enabled = (skills.skills || []).filter(s => s.enabled).length;
+      const disabled = (skills.skills || []).filter(s => !s.enabled).length;
+      document.getElementById('m-enabled').textContent = enabled;
+      document.getElementById('m-disabled').textContent = disabled;
+    } catch (e) { console.error(e); }
+  }
+  async function loadSkills() {
+    try {
+      const data = await api('/api/skills');
+      const skills = data.skills || [];
+      document.getElementById('skills-badge').textContent = skills.length;
+      const tbody = document.getElementById('skills-tbody');
+      const empty = document.getElementById('skills-empty');
+      if (skills.length === 0) { tbody.innerHTML = ''; empty.style.display = 'block'; return; }
+      empty.style.display = 'none';
+      tbody.innerHTML = skills.map(s => `<tr>
+        <td class="name">${esc(s.name)}</td><td class="desc">${esc(s.description)}</td><td class="cat">${(s.categories || []).join(', ')}</td>
+        <td><div class="toggle ${s.enabled ? 'on' : ''}" onclick="toggleSkill('${esc(s.name)}', ${!s.enabled})"></div></td>
+        <td><div class="btn-group"><button class="btn sm" onclick="showSkill('${esc(s.name)}')">View</button><button class="btn sm danger" onclick="removeSkill('${esc(s.name)}')">Remove</button></div></td>
+      </tr>`).join('');
+    } catch (e) { console.error(e); }
+  }
+  async function addSkills() {
+    const path = document.getElementById('skill-path-input').value.trim();
+    if (!path) { toast('Enter a path', 'error'); return; }
+    try { const res = await api('/api/skills/add', { method: 'POST', body: JSON.stringify({ path }) }); toast(`Added ${res.added || 0}, skipped ${res.skipped || 0}`); document.getElementById('skill-path-input').value = ''; loadSkills(); loadOverview(); } catch (e) { toast('Failed to add skills', 'error'); }
+  }
+  async function toggleSkill(name, enabled) {
+    try { await api('/api/skills/toggle', { method: 'POST', body: JSON.stringify({ name, enabled }) }); toast(`${name} ${enabled ? 'enabled' : 'disabled'}`); loadSkills(); loadOverview(); } catch (e) { toast('Failed to toggle', 'error'); }
+  }
+  async function removeSkill(name) {
+    if (!confirm('Remove ' + name + '?')) return;
+    try { await api('/api/skills/' + encodeURIComponent(name), { method: 'DELETE' }); toast('Removed ' + name); loadSkills(); loadOverview(); } catch (e) { toast('Failed to remove', 'error'); }
+  }
+  async function showSkill(name) {
+    try {
+      const s = await api('/api/skills/' + encodeURIComponent(name));
+      document.getElementById('modal-title').textContent = s.name;
+      document.getElementById('modal-body').innerHTML = `<p style="color: var(--text-secondary); margin-bottom: 12px;">${esc(s.description)}</p><div style="margin-bottom: 6px;"><strong>Categories:</strong> ${(s.categories || []).join(', ') || '—'}</div><div style="margin-bottom: 6px;"><strong>Aliases:</strong> ${(s.aliases || []).join(', ') || '—'}</div><div style="margin-bottom: 6px;"><strong>Path:</strong> <code style="color: var(--text-muted);">${esc(s.path)}</code></div><div style="margin-bottom: 12px;"><strong>Enabled:</strong> ${s.enabled ? 'Yes' : 'No'}</div><pre style="background: var(--bg); padding: 12px; border-radius: 8px; font-size: 12px; color: var(--text-secondary); max-height: 300px; overflow-y: auto; white-space: pre-wrap;">${esc(s.body)}</pre>`;
+      document.getElementById('skill-modal').classList.add('active');
+    } catch (e) { toast('Failed to load skill', 'error'); }
+  }
+  async function loadMcps() {
+    try {
+      const data = await api('/api/mcp');
+      const servers = data.servers || [];
+      document.getElementById('mcp-badge').textContent = servers.length;
+      const tbody = document.getElementById('mcp-tbody');
+      const empty = document.getElementById('mcp-empty');
+      if (servers.length === 0) { tbody.innerHTML = ''; empty.style.display = 'block'; return; }
+      empty.style.display = 'none';
+      tbody.innerHTML = servers.map(s => `<tr><td class="name">${esc(s.name)}</td><td>${s.status === 'connected' ? '<span style="color: var(--success);">● connected</span>' : '<span style="color: var(--text-muted);">○ ' + esc(s.status) + '</span>'}</td><td>${s.tool_count}</td><td><div class="btn-group"><button class="btn sm" onclick="connectMcpByName('${esc(s.name)}')">Connect</button><button class="btn sm primary" onclick="indexMcpByName('${esc(s.name)}')">Index</button></div></td></tr>`).join('');
+    } catch (e) { console.error(e); }
+  }
+  async function connectMcp() { const name = document.getElementById('mcp-server-input').value.trim(); if (!name) { toast('Enter server name', 'error'); return; } await connectMcpByName(name); }
+  async function connectMcpByName(name) {
+    try { const res = await api('/api/mcp/connect', { method: 'POST', body: JSON.stringify({ server: name }) }); if (res.error) { toast(res.error, 'error'); return; } toast(`Connected to ${name}: ${res.tools.length} tools`); const detail = document.getElementById('mcp-tools-detail'); detail.innerHTML = '<div style="margin-top: 12px; font-size: 12px; color: var(--text-muted);">Tools on ' + esc(name) + ':</div>' + res.tools.map(t => `<div style="padding: 4px 0; font-size: 12px;"><span class="name">${esc(t.name)}</span> <span style="color: var(--text-muted);">${esc(t.description)}</span></div>`).join(''); } catch (e) { toast('Connection failed', 'error'); }
+  }
+  async function indexMcp() { const name = document.getElementById('mcp-server-input').value.trim(); if (!name) { toast('Enter server name', 'error'); return; } await indexMcpByName(name); }
+  async function indexMcpByName(name) {
+    try { const res = await api('/api/mcp/index', { method: 'POST', body: JSON.stringify({ server: name }) }); if (res.error) { toast(res.error, 'error'); return; } toast(`Indexed ${res.added || 0} tools from ${name}`); loadMcps(); loadOverview(); } catch (e) { toast('Indexing failed', 'error'); }
+  }
+  async function doSearch() {
+    const intent = document.getElementById('search-input').value.trim(); if (!intent) return;
+    const results = document.getElementById('search-results');
+    results.innerHTML = '<div style="color: var(--text-muted);"><span class="spinner"></span> Searching...</div>';
+    try {
+      const res = await api('/api/search', { method: 'POST', body: JSON.stringify({ intent }) });
+      const r = res.result;
+      if (!r) { results.innerHTML = '<div class="search-result"><div class="none">No match found (below 0.60 threshold)</div></div>'; return; }
+      const conf = r.confidence || 0;
+      const confColor = conf >= 0.8 ? 'var(--success)' : conf >= 0.6 ? 'var(--accent)' : 'var(--danger)';
+      results.innerHTML = `<div class="search-result"><div class="name">${esc(r.name)}</div><div style="margin-top: 4px;"><span style="color: var(--text-muted); font-size: 12px;">confidence:</span><span class="conf" style="color: ${confColor};">${conf.toFixed(3)}</span>${r.server ? '<span style="color: var(--text-muted); font-size: 12px; margin-left: 12px;">server: ' + esc(r.server) + '</span>' : ''}</div>${r.description ? '<div style="color: var(--text-secondary); font-size: 12px; margin-top: 8px;">' + esc(r.description) + '</div>' : ''}<div class="body">${esc(r.content || r.skill || '')}</div></div>`;
+    } catch (e) { results.innerHTML = '<div class="search-result"><div class="none">Search failed</div></div>'; }
+  }
+  async function exportIndex() {
+    try { const data = await api('/api/export', { method: 'POST' }); const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'jit-export.json'; a.click(); URL.revokeObjectURL(url); toast('Index exported'); } catch (e) { toast('Export failed', 'error'); }
+  }
+  async function importIndex(input) {
+    const file = input.files[0]; if (!file) return;
+    try { const text = await file.text(); const data = JSON.parse(text); const res = await api('/api/import', { method: 'POST', body: JSON.stringify(data) }); toast(`Imported ${res.added || 0} items, skipped ${res.skipped || 0}`); loadSkills(); loadMcps(); loadOverview(); } catch (e) { toast('Import failed', 'error'); }
+    input.value = '';
+  }
+  async function clearIndex() {
+    if (!confirm('Clear the entire index? This cannot be undone.')) return;
+    try { await api('/api/clear', { method: 'POST' }); toast('Index cleared'); loadSkills(); loadMcps(); loadOverview(); } catch (e) { toast('Clear failed', 'error'); }
+  }
+  async function saveConfig() {
+    const key = document.getElementById('cfg-nebius-key').value.trim();
+    const base = document.getElementById('cfg-nebius-base').value.trim();
+    try {
+      const body = { complete_setup: true };
+      if (key) body.nebius_api_key = key;
+      if (base) body.nebius_api_base = base;
+      await api('/api/config', { method: 'POST', body: JSON.stringify(body) });
+      toast('Settings saved');
+      document.getElementById('cfg-status').textContent = 'Settings saved. Nemotron reranking ' + (key ? 'enabled' : 'disabled') + '.';
+    } catch (e) { toast('Save failed', 'error'); }
+  }
+  async function loadConfig() {
+    try {
+      const cfg = await api('/api/config');
+      if (cfg.nebius_api_key && cfg.nebius_api_key.startsWith('***')) {
+        document.getElementById('cfg-nebius-key').placeholder = cfg.nebius_api_key;
+      }
+      if (cfg.nebius_api_base) document.getElementById('cfg-nebius-base').value = cfg.nebius_api_base;
+    } catch (e) { console.error(e); }
+  }
+  async function loadMcpConfigs() {
+    try { const data = await api('/api/mcp/configs'); const el = document.getElementById('mcp-configs'); el.innerHTML = (data.paths || []).map(p => `<div style="padding: 6px 0; font-size: 12px; font-family: 'JetBrains Mono', monospace;">${p.exists ? '✓' : '✗'} ${esc(p.path)}</div>`).join('') || '<div style="color: var(--text-muted);">No config files found</div>'; } catch (e) { console.error(e); }
+  }
+  function closeModal() { document.getElementById('skill-modal').classList.remove('active'); }
+  loadOverview();
+
+function showLogin() { document.getElementById('login-overlay').style.display = 'flex'; }
+function hideLogin() { document.getElementById('login-overlay').style.display = 'none'; }
+async function doLogin() {
+  const key = document.getElementById('login-key').value.trim();
+  if (!key) return;
+  try {
+    const res = await fetch('/api/health', { headers: { 'X-API-Key': key } });
+    if (res.ok) {
+      localStorage.setItem('jit_api_key', key);
+      hideLogin();
+      loadOverview();
+    } else {
+      document.getElementById('login-error').style.display = 'block';
+    }
+  } catch (e) {
+    document.getElementById('login-error').style.display = 'block';
+  }
+}
+function skipLogin() {
+  localStorage.removeItem('jit_api_key');
+  hideLogin();
+  loadOverview();
+}
+async function checkAuth() {
+  try {
+    const res = await fetch('/api/health');
+    if (res.status === 401) {
+      const stored = localStorage.getItem('jit_api_key');
+      if (stored) {
+        const res2 = await fetch('/api/health', { headers: { 'X-API-Key': stored } });
+        if (res2.ok) { hideLogin(); loadOverview(); return; }
+      }
+      showLogin();
+    } else {
+      hideLogin();
+      loadOverview();
+    }
+  } catch (e) {
+    showLogin();
+  }
+}
+
+</script>
+</body>
+</html>
