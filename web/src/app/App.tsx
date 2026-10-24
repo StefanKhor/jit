@@ -1,5 +1,6 @@
 import { Login } from "./Login";
 import { Shell } from "./Shell";
+import { BulkInstallDialog } from "../dialogs/BulkInstallDialog";
 import { ConfirmDialog } from "../dialogs/ConfirmDialog";
 import { MarketDialog } from "../dialogs/MarketDialog";
 import { McpAddDialog } from "../dialogs/McpAddDialog";
@@ -56,6 +57,10 @@ function Root() {
         onClose={ctx.closeSkill}
       />
       <MarketDialog item={ctx.dialogs.market} onClose={ctx.closeMarket} />
+      <BulkInstallDialog
+        items={ctx.dialogs.marketBulk}
+        onClose={ctx.closeMarketBulk}
+      />
       <McpAddDialog open={ctx.dialogs.mcpAdd} onClose={ctx.closeMcpAdd} />
       <TransferDialog
         open={ctx.dialogs.transfer}

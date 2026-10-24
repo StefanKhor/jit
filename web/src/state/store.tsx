@@ -33,6 +33,8 @@ export interface DialogState {
   skill: boolean;
   skillDetail: SkillDetail | null;
   market: MarketplaceItem | null;
+  /** The entries a bulk install was opened for, or null. */
+  marketBulk: MarketplaceItem[] | null;
   mcpAdd: boolean;
   mcpExport: boolean;
   transfer: boolean;
@@ -44,6 +46,7 @@ const NO_DIALOGS: DialogState = {
   skill: false,
   skillDetail: null,
   market: null,
+  marketBulk: null,
   mcpAdd: false,
   mcpExport: false,
   transfer: false,
@@ -97,6 +100,8 @@ export interface AppContextValue {
   closeSkill: () => void;
   openMarket: (item: MarketplaceItem) => void;
   closeMarket: () => void;
+  openMarketBulk: (items: MarketplaceItem[]) => void;
+  closeMarketBulk: () => void;
   openTransfer: (tab?: "in" | "out") => Promise<void>;
   closeTransfer: () => void;
   openMcpAdd: () => void;
@@ -413,6 +418,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     closeSkill: () => patchDialogs({ skill: false }),
     openMarket: (item) => patchDialogs({ market: item }),
     closeMarket: () => patchDialogs({ market: null }),
+    openMarketBulk: (items) => patchDialogs({ marketBulk: items }),
+    closeMarketBulk: () => patchDialogs({ marketBulk: null }),
     openTransfer,
     closeTransfer: () => patchDialogs({ transfer: false }),
     openMcpAdd: () => patchDialogs({ mcpAdd: true }),

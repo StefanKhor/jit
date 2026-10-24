@@ -25,7 +25,7 @@ function fillPreview(value: string, values: Record<string, string>): string {
 // A skill discovered on skills.sh is in no configured catalog, so the review and
 // install calls carry the source it came from. Catalog entries have no such
 // source and resolve by id alone.
-function sourceHint(item: MarketplaceItem): Record<string, string> {
+export function sourceHint(item: MarketplaceItem): Record<string, string> {
   const install = item.install || {};
   const source = String(install.skills_source || "").trim();
   const skill = String(install.skills_name || "").trim();

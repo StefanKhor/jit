@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 
 import { api } from "../api";
 import { fmt } from "../format";
@@ -6,9 +13,16 @@ import { useJit } from "../state/store";
 import type { MarketplaceItem, MarketplaceTopResponse } from "../types";
 import { Badge, Meta } from "../ui/Badge";
 import { Button } from "../ui/Button";
+import { cx } from "../ui/cx";
 import { Empty } from "../ui/Display";
-import { Input } from "../ui/Field";
+import { Checkbox, Input } from "../ui/Field";
 import { PageHead, Panel, PanelBody, PanelHead } from "../ui/Panel";
+import {
+  SelectAll,
+  SelectionBar,
+  useSelection,
+  type Selection,
+} from "../ui/Selection";
 import { Segmented } from "../ui/Segmented";
 import { Tab, TabList, TabPanel, Tabs } from "../ui/Tabs";
 
@@ -68,6 +82,66 @@ export function Marketplace() {
     void loadTop(topView);
   }, [topView, loadTop]);
 
+  const runSearch = useCallback(async (value: string): Promise<void> => {
+    if (value.length < 2) {
+      setSearchError("Type at least two characters.");
+      return;
+    }
+    setSearching(true);
+    setSearchError("");
+    try {
+      const result = await api<{ items: MarketplaceItem[]; warning: string }>(
+        `/api/marketplace/search?q=${encodeURIComponent(value)}`,
+      );
+      setFound({ query: value, items: result.items || [] });
+      if (result.warning) setSearchError(result.warning);
+    } catch (error) {
+      setFound(null);
+      setSearchError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSearching(false);
+    }
+  }, []);
+
+  // Only entries JIT does not own yet can be ticked: an installed row offers
+  // Manage instead, and a directory entry takes no configuration, so a whole
+  // selection can be installed from one button.
+  const searchable = useMemo(
+    () => (found?.items || []).filter((item) => !item.installed),
+    [found],
+  );
+  const ranked = useMemo(
+    () => (top?.items || []).filter((item) => !item.installed),
+    [top],
+  );
+  const foundSel = useSelection(searchable.map((item) => item.id));
+  const topSel = useSelection(ranked.map((item) => item.id));
+
+  const openBulk = (selection: Selection, items: MarketplaceItem[]) => {
+    const seen = new Set<string>();
+    const chosen: MarketplaceItem[] = [];
+    for (const item of items) {
+      if (!selection.has(item.id) || seen.has(item.id)) continue;
+      seen.add(item.id);
+      chosen.push(item);
+    }
+    if (chosen.length) ctx.openMarketBulk(chosen);
+  };
+
+  // When the bulk dialog finishes with the directory, re-read the lists so the
+  // freshly installed rows show their new state, and drop the stale ticks.
+  const bulkOpen = Boolean(ctx.dialogs.marketBulk);
+  const wasBulkOpen = useRef(false);
+  useEffect(() => {
+    if (wasBulkOpen.current && !bulkOpen) {
+      void loadTop(topView);
+      if (found) void runSearch(found.query);
+      foundSel.clear();
+      topSel.clear();
+    }
+    wasBulkOpen.current = bulkOpen;
+  }, [bulkOpen, found, topView, loadTop, runSearch]);
+
   const data = ctx.marketplace || { items: [], source: "", warning: "" };
   const items = data.items || [];
   const counts = { all: items.length, skill: 0, mcp: 0 };
@@ -91,27 +165,9 @@ export function Marketplace() {
     }
   };
 
-  const searchDirectory = async (event: FormEvent) => {
+  const searchDirectory = (event: FormEvent) => {
     event.preventDefault();
-    const value = needle.trim();
-    if (value.length < 2) {
-      setSearchError("Type at least two characters.");
-      return;
-    }
-    setSearching(true);
-    setSearchError("");
-    try {
-      const result = await api<{ items: MarketplaceItem[]; warning: string }>(
-        `/api/marketplace/search?q=${encodeURIComponent(value)}`,
-      );
-      setFound({ query: value, items: result.items || [] });
-      if (result.warning) setSearchError(result.warning);
-    } catch (error) {
-      setFound(null);
-      setSearchError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setSearching(false);
-    }
+    void runSearch(needle.trim());
   };
 
   const addCatalog = async (event: FormEvent) => {
@@ -178,7 +234,8 @@ export function Marketplace() {
             JSON URL, a GitHub repository (<code className="num">owner/repo</code>
             , or a repo link), or a skills.sh link. Every entry is marked
             third-party and scanned for risky patterns before it installs, and
-            nothing installs until you choose it.
+            nothing installs until you choose it. Tick several directory entries
+            to install them in one pass.
           </>
         }
         actions={
@@ -333,16 +390,54 @@ export function Marketplace() {
 
               {found ? (
                 found.items.length ? (
-                  <div className="divide-y divide-line/60 overflow-hidden rounded-xl border border-line">
-                    {found.items.map((item) => (
-                      <DiscoverRow
-                        key={item.id}
-                        item={item}
-                        onInstall={() => ctx.openMarket(item)}
-                        onManage={() => ctx.setView("skills")}
-                      />
-                    ))}
-                  </div>
+                  <>
+                    {searchable.length ? (
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <label className="flex cursor-pointer items-center gap-2 text-xs text-ink-2">
+                          <SelectAll
+                            selection={foundSel}
+                            label="Select every search result"
+                          />
+                          Select all
+                          <span className="num text-ink-3">
+                            {fmt(searchable.length)} to install
+                          </span>
+                        </label>
+                        {foundSel.count ? (
+                          <SelectionBar
+                            count={foundSel.count}
+                            onClear={foundSel.clear}
+                          >
+                            <Button
+                              size="sm"
+                              variant="accent"
+                              onClick={() => openBulk(foundSel, searchable)}
+                            >
+                              Install
+                            </Button>
+                          </SelectionBar>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    <div className="divide-y divide-line/60 overflow-hidden rounded-xl border border-line">
+                      {found.items.map((item) => (
+                        <DiscoverRow
+                          key={item.id}
+                          item={item}
+                          onInstall={() => ctx.openMarket(item)}
+                          onManage={() => ctx.setView("skills")}
+                          select={
+                            item.installed
+                              ? undefined
+                              : {
+                                  checked: foundSel.has(item.id),
+                                  onToggle: (on) => foundSel.toggle(item.id, on),
+                                }
+                          }
+                        />
+                      ))}
+                    </div>
+                  </>
                 ) : (
                   <p className="px-1 text-xs text-ink-3">
                     Nothing matched “{found.query}”.
@@ -367,6 +462,36 @@ export function Marketplace() {
               </span>
             </div>
 
+            {ranked.length ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 bg-inset/30 px-5 py-2">
+                <label className="flex cursor-pointer items-center gap-2 text-xs text-ink-2">
+                  <SelectAll
+                    selection={topSel}
+                    label="Select every listed skill"
+                  />
+                  Select all
+                  <span className="num text-ink-3">
+                    {fmt(ranked.length)} to install
+                  </span>
+                </label>
+                {topSel.count ? (
+                  <SelectionBar count={topSel.count} onClear={topSel.clear}>
+                    <Button
+                      size="sm"
+                      variant="accent"
+                      onClick={() => openBulk(topSel, ranked)}
+                    >
+                      Install
+                    </Button>
+                  </SelectionBar>
+                ) : (
+                  <span className="hidden text-xs text-ink-3 sm:block">
+                    Tick entries to install them together
+                  </span>
+                )}
+              </div>
+            ) : null}
+
             {topError ? (
               <p className="border-b border-line px-5 py-3 text-xs text-warn">
                 {topError}
@@ -383,6 +508,14 @@ export function Marketplace() {
                       rank={(top.page - 1) * 200 + index + 1}
                       onInstall={() => ctx.openMarket(item)}
                       onManage={() => ctx.setView("skills")}
+                      select={
+                        item.installed
+                          ? undefined
+                          : {
+                              checked: topSel.has(item.id),
+                              onToggle: (on) => topSel.toggle(item.id, on),
+                            }
+                      }
                     />
                   ))}
                 </div>
@@ -413,16 +546,30 @@ export function Marketplace() {
 function DiscoverRow({
   item,
   rank,
+  select,
   onInstall,
   onManage,
 }: {
   item: MarketplaceItem;
   rank?: number;
+  select?: { checked: boolean; onToggle: (on: boolean) => void };
   onInstall: () => void;
   onManage: () => void;
 }) {
   return (
-    <div className="flex items-center gap-3 px-5 py-2.5 transition-colors hover:bg-raised/40">
+    <div
+      className={cx(
+        "flex items-center gap-3 px-5 py-2.5 transition-colors hover:bg-raised/40",
+        select?.checked && "bg-accent/[0.04]",
+      )}
+    >
+      {select ? (
+        <Checkbox
+          checked={select.checked}
+          aria-label={`Select ${item.name}`}
+          onChange={(event) => select.onToggle(event.target.checked)}
+        />
+      ) : null}
       {rank != null ? (
         <span className="num w-7 shrink-0 text-right text-xs text-ink-3">
           {rank}
