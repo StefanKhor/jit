@@ -259,6 +259,16 @@ function fillPreview(value: string, values: Record<string, string>): string {
   return result;
 }
 
+// A skill discovered on skills.sh is in no configured catalog, so the review and
+// install calls carry the source it came from. Catalog entries have no such
+// source and resolve by id alone.
+function sourceHint(item: MarketplaceItem): Record<string, string> {
+  const install = item.install || {};
+  const source = String(install.skills_source || "").trim();
+  const skill = String(install.skills_name || "").trim();
+  return source ? { source, skill } : {};
+}
+
 export function MarketDialog({
   item,
   onClose,
@@ -292,7 +302,7 @@ export function MarketDialog({
     ctx
       .api<InspectResult>("/api/marketplace/inspect", {
         method: "POST",
-        body: JSON.stringify({ id: item.id }),
+        body: JSON.stringify({ id: item.id, ...sourceHint(item) }),
       })
       .then((result) => {
         if (!cancelled) setInspect(result);
@@ -363,7 +373,14 @@ export function MarketDialog({
     try {
       const result = await ctx.api<InstallResult>("/api/marketplace/install", {
         method: "POST",
-        body: JSON.stringify({ id: item.id, inputs: values, acknowledge: ack }),
+        body: JSON.stringify({
+          // Reviewing resolves the real id from SKILL.md; install with that so
+          // the two calls cannot disagree about which skill is being installed.
+          id: inspect?.id || item.id,
+          inputs: values,
+          acknowledge: ack,
+          ...sourceHint(item),
+        }),
       });
       onClose();
       if (result.connected === false) {

@@ -140,12 +140,26 @@ export interface MarketplaceItem {
   origin?: string;
   checksum_present?: boolean;
   installed?: boolean;
+  installs?: number;
 }
 
 export interface MarketplaceResponse {
   items: MarketplaceItem[];
   source: string;
   warning: string;
+}
+
+/** Results from the skills.sh directory: search hits or the ranked leaderboard. */
+export interface MarketplaceDiscovery {
+  items: MarketplaceItem[];
+  warning: string;
+}
+
+export interface MarketplaceTopResponse extends MarketplaceDiscovery {
+  view: string;
+  page: number;
+  has_more: boolean;
+  total: number;
 }
 
 export interface ScanFinding {
