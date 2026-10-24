@@ -1,8 +1,9 @@
 import {
+  cpSync,
   existsSync,
   mkdirSync,
-  rmdirSync,
-  unlinkSync,
+  readFileSync,
+  rmSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -13,11 +14,8 @@ import {
   MAX_SKILL_BYTES,
 } from "./config.js";
 import { fetchText } from "./remote.js";
-import {
-  discoverGithubRepo,
-  isGithubRef,
-  toRawGithubUrl,
-} from "./github.js";
+import { isGithubRef } from "./github.js";
+import { materializeSource, type CliSkill } from "./skillsCli.js";
 import {
   deleteItem,
   deleteToolsForServer,
@@ -107,6 +105,60 @@ async function fetchRemote(url: string): Promise<MarketplaceItem[]> {
     .filter((item): item is MarketplaceItem => item !== null);
 }
 
+// A repository source is resolved by the skills CLI; each directory it installs
+// becomes a catalog entry whose install step copies that directory into the JIT
+// store. The SKILL.md frontmatter supplies the id, name, and description.
+function itemFromCliSkill(
+  skill: CliSkill,
+  source: string,
+): MarketplaceItem | null {
+  const file = path.join(skill.path, "SKILL.md");
+  let parsed;
+  try {
+    parsed = parseSkillText(readFileSync(file, "utf8"), file);
+  } catch (error) {
+    logger.warn(
+      "skills entry %s could not be read: %s",
+      skill.name,
+      error instanceof Error ? error.message : String(error),
+    );
+    return null;
+  }
+  const id = parsed.id.trim();
+  if (!SAFE_ID.test(id)) {
+    logger.warn("skills entry %s has an unusable id '%s'", skill.name, id);
+    return null;
+  }
+  return {
+    id,
+    kind: "skill",
+    name: parsed.name || skill.name,
+    description: parsed.description,
+    category: parsed.categories[0] || "Skill",
+    author: source.split("/")[0] || "",
+    origin: `skills:${source}`,
+    checksum_present: true,
+    inputs: [],
+    install: {
+      skills_source: source,
+      skills_name: skill.name,
+      skills_hash: skill.hash,
+    },
+  };
+}
+
+function pickCliSkill(
+  skills: CliSkill[],
+  item: MarketplaceItem,
+): CliSkill | null {
+  const name = String(item.install.skills_name || "").trim();
+  return (
+    skills.find((skill) => skill.name === name) ||
+    skills.find((skill) => skill.path === String(item.install.skills_path || "")) ||
+    null
+  );
+}
+
 export async function catalog(): Promise<{
   items: MarketplaceItem[];
   source: string;
@@ -135,17 +187,16 @@ export async function catalog(): Promise<{
     const errors: string[] = [];
     const merged = new Map<string, MarketplaceItem>();
     for (const entered of urls) {
-      const url = toRawGithubUrl(entered);
       try {
-        if (isGithubRef(url)) {
-          const found = await discoverGithubRepo(url);
-          for (const raw of found.items) {
-            const item = normalizeItem(raw, found.origin);
+        if (isGithubRef(entered)) {
+          const found = await materializeSource(entered);
+          for (const skill of found.skills) {
+            const item = itemFromCliSkill(skill, entered);
             if (item) merged.set(item.id, item);
           }
           if (found.warning) errors.push(found.warning);
         } else {
-          for (const item of await fetchRemote(url)) merged.set(item.id, item);
+          for (const item of await fetchRemote(entered)) merged.set(item.id, item);
         }
       } catch (error) {
         errors.push(
@@ -302,12 +353,86 @@ async function installMcp(
   return { ...result, ...indexed };
 }
 
+// Copy a skills-CLI-provided skill directory into the JIT store. The CLI owns
+// the download; JIT owns the scan, the index, and where the files live.
+async function installCliSkill(
+  item: MarketplaceItem,
+  source: string,
+  acknowledge: boolean,
+): Promise<Record<string, unknown>> {
+  const found = await materializeSource(source);
+  const skill = pickCliSkill(found.skills, item);
+  if (!skill) throw new Error(`${source} no longer provides '${item.id}'`);
+
+  const body = readFileSync(path.join(skill.path, "SKILL.md"), "utf8");
+  if (Buffer.byteLength(body, "utf8") > MAX_SKILL_BYTES) {
+    throw new Error("skill is larger than the size limit");
+  }
+  const report = scanText(body);
+  if (report.requires_ack && !acknowledge) {
+    throw new Error(ackMessage(report));
+  }
+
+  const destination = path.join(JIT_SKILLS_DIR, item.id, "SKILL.md");
+  const existing = existingSkill(item.id);
+  if (
+    existing &&
+    path.resolve(existing.path || "") !== path.resolve(destination)
+  ) {
+    throw new Error(
+      `a skill named '${item.id}' is already indexed from ${existing.path}`,
+    );
+  }
+
+  // Validate before replacing anything, so a malformed entry cannot destroy the
+  // currently installed copy.
+  const parsed = parseSkillText(body, destination);
+  if (parsed.id !== item.id) {
+    throw new Error("skill frontmatter name must match the marketplace id");
+  }
+  parsed.name = item.name;
+  if (parsed.categories.length === 0 && item.category) {
+    parsed.categories = [item.category];
+  }
+  parsed.source = item.origin || "marketplace";
+
+  const directory = path.dirname(destination);
+  rmSync(directory, { recursive: true, force: true });
+  mkdirSync(path.dirname(directory), { recursive: true });
+  cpSync(skill.path, directory, { recursive: true });
+
+  const warnings = [...report.findings];
+  // The CLI's hash covers the whole skill. Comparing it with the hash recorded
+  // when the source was listed detects a change between review and install.
+  const expected = String(item.install.skills_hash || "").trim();
+  if (expected && skill.hash && expected !== skill.hash) {
+    warnings.push({
+      level: "low",
+      rule: "content-changed",
+      detail: "the skill changed at the source since it was listed",
+    });
+  }
+  const indexed = await indexItems([parsed], "skill");
+  return {
+    ok: true,
+    id: item.id,
+    kind: "skill",
+    installed: true,
+    connected: true,
+    warnings,
+    ...indexed,
+  };
+}
+
 async function installSkill(
   item: MarketplaceItem,
   _values: Record<string, string>,
   acknowledge: boolean,
 ): Promise<Record<string, unknown>> {
   const spec = item.install;
+  const cliSource = String(spec.skills_source || "").trim();
+  if (cliSource) return installCliSkill(item, cliSource, acknowledge);
+
   let body = spec.body;
   if (body === undefined || body === null) {
     const url = String(spec.url || "").trim();
@@ -401,32 +526,39 @@ export async function inspect(itemId: string): Promise<InspectResult> {
   }
   const spec = item.install;
   const url = String(spec.url || "").trim();
-  const checksumRequired = Boolean(url);
-  const checksumPresent = Boolean(String(spec.sha256 || "").trim());
+  const cliSource = String(spec.skills_source || "").trim();
+  const checksumRequired = Boolean(url) && !cliSource;
+  const checksumPresent = cliSource
+    ? true
+    : Boolean(String(spec.sha256 || "").trim());
+  const failed = (detail: string): InspectResult => ({
+    id: item.id,
+    kind: "skill",
+    checksum_required: checksumRequired,
+    checksum_present: checksumPresent,
+    report: {
+      ok: false,
+      requires_ack: true,
+      findings: [{ level: "medium", rule: "fetch-failed", detail }],
+    },
+  });
   let body: string | undefined;
   if (typeof spec.body === "string") {
     body = spec.body;
+  } else if (cliSource) {
+    try {
+      const found = await materializeSource(cliSource);
+      const skill = pickCliSkill(found.skills, item);
+      if (!skill) throw new Error(`${cliSource} no longer provides '${item.id}'`);
+      body = readFileSync(path.join(skill.path, "SKILL.md"), "utf8");
+    } catch (error) {
+      return failed(error instanceof Error ? error.message : String(error));
+    }
   } else if (url) {
     try {
       body = await fetchSkill(url, String(spec.sha256 || ""));
     } catch (error) {
-      return {
-        id: item.id,
-        kind: "skill",
-        checksum_required: checksumRequired,
-        checksum_present: checksumPresent,
-        report: {
-          ok: false,
-          requires_ack: true,
-          findings: [
-            {
-              level: "medium",
-              rule: "fetch-failed",
-              detail: error instanceof Error ? error.message : String(error),
-            },
-          ],
-        },
-      };
+      return failed(error instanceof Error ? error.message : String(error));
     }
   }
   return {
@@ -458,7 +590,8 @@ export async function uninstall(
     };
   }
 
-  const destination = path.join(JIT_SKILLS_DIR, itemId, "SKILL.md");
+  const directory = path.join(JIT_SKILLS_DIR, itemId);
+  const destination = path.join(directory, "SKILL.md");
   const existing = existingSkill(itemId);
   if (
     existing &&
@@ -471,12 +604,8 @@ export async function uninstall(
 
   const fileRemoved = existsSync(destination);
   if (fileRemoved) {
-    unlinkSync(destination);
-    try {
-      rmdirSync(path.dirname(destination));
-    } catch {
-      // Directory is not empty; leave it.
-    }
+    // A skill is a directory: resources it references live alongside SKILL.md.
+    rmSync(directory, { recursive: true, force: true });
   }
   const indexRemoved = deleteItem(itemId);
   return {

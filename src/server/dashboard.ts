@@ -20,7 +20,7 @@ import {
   publicConfig,
   saveConfig,
 } from "../config.js";
-import { isGithubRef, toRawGithubUrl } from "../github.js";
+import { isGithubRef } from "../github.js";
 import {
   clearIndex,
   deleteItem,
@@ -312,7 +312,7 @@ export function createApp(): Hono {
       // configured that would only fail later at fetch time. A GitHub
       // repository is accepted as `owner/repo`, `owner/repo@ref`, or a URL.
       for (const url of urls) {
-        if (isGithubRef(toRawGithubUrl(url)) || isSecureApiBase(url)) continue;
+        if (isGithubRef(url) || isSecureApiBase(url)) continue;
         throw new HttpError(
           400,
           "catalog entries must be https:// URLs or GitHub repositories",

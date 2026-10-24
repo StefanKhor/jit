@@ -191,7 +191,7 @@ export interface MarketplaceItem {
   requires?: string;
   inputs: MarketplaceInput[];
   install: Record<string, unknown>;
-  /** Which catalog this entry came from: a URL or a GitHub repository. */
+  /** Which source this entry came from: a catalog URL or a repository. */
   origin?: string;
   checksum_present?: boolean;
   installed?: boolean;

@@ -1,275 +1,166 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
-import {
-  discoverGithubRepo,
-  isGithubRef,
-  parseGithubRef,
-  toRawGithubUrl,
-} from "../src/github.js";
-import { respond, stubFetch } from "./helpers.js";
+// Isolate the index: materialized sources and installed skills both live under
+// JIT_HOME, and installs index their entries.
+const HOME = mkdtempSync(path.join(tmpdir(), "jit-github-"));
+process.env.JIT_HOME = HOME;
+process.env.JIT_DISABLE_EMBEDDINGS = "1";
 
-const SHA = "abcdef1234567890abcdef1234567890abcdef12";
-const RAW = `https://raw.githubusercontent.com/acme/demo/${SHA}`;
+// A stand-in for the `skills` CLI. It writes what the real one writes
+// (`<cwd>/.agents/skills/<name>/SKILL.md`) and prints the same JSON shape on
+// stdout, so the wrapper is exercised without npx, git, or the network.
+const FAKE = path.join(HOME, "fake-skills.mjs");
+writeFileSync(
+  FAKE,
+  [
+    'import { mkdirSync, writeFileSync } from "node:fs";',
+    'import path from "node:path";',
+    "",
+    "const argv = process.argv.slice(2);",
+    'const source = argv[argv.indexOf("add") + 1] || "";',
+    "const root = path.join(process.cwd(), '.agents', 'skills');",
+    "",
+    "function body(name, description) {",
+    "  return ['---', 'name: ' + name, 'description: ' + description,",
+    "    'when_to_use: never', '---', 'Do the ' + name + ' thing.'].join('\\n');",
+    "}",
+    "function put(name, description) {",
+    "  const dir = path.join(root, name);",
+    "  mkdirSync(dir, { recursive: true });",
+    "  writeFileSync(path.join(dir, 'SKILL.md'), body(name, description));",
+    "  return dir;",
+    "}",
+    "",
+    "const out = [];",
+    "if (source === 'acme/ok') {",
+    "  for (const [name, description] of [['alpha-skill', 'Alpha skill'], ['beta-skill', 'Beta skill']]) {",
+    "    const dir = put(name, description);",
+    "    out.push({ name, status: 'installed', source, ref: null, hash: 'hash-' + name,",
+    "      path: dir, scope: 'project', agents: ['Universal'], mode: 'copy' });",
+    "  }",
+    "} else if (source === 'acme/partial') {",
+    "  const dir = put('alpha-skill', 'Alpha skill');",
+    "  out.push({ name: 'alpha-skill', status: 'installed', source, path: dir });",
+    "  out.push({ name: 'gamma-skill', status: 'skipped', reason: 'no matching skill found' });",
+    "} else if (source === 'acme/escape') {",
+    "  out.push({ name: 'outside', status: 'installed', source, hash: 'h',",
+    "    path: path.join(process.cwd(), 'outside') });",
+    "} else if (source === 'acme/token') {",
+    "  out.push({ name: 'token-probe', status: 'skipped',",
+    "    reason: 'token=' + (process.env.GITHUB_TOKEN || 'none') });",
+    "} else if (source === 'acme/fail') {",
+    "  process.stdout.write('not json\\n');",
+    "  process.exit(1);",
+    "}",
+    "process.stdout.write(JSON.stringify(out));",
+    "",
+  ].join("\n"),
+);
+process.env.JIT_SKILLS_CLI = `"${process.execPath}" "${FAKE}"`;
 
-const SKILL = [
-  "---",
-  "name: hello",
-  "description: says hello",
-  "---",
-  "Say hello.",
-].join("\n");
-const MCP = JSON.stringify({
-  mcpServers: { "demo-tools": { command: "npx", args: ["-y", "demo-mcp"] } },
-});
+const { parseGithubRef, isGithubRef } = await import("../src/github.js");
+const { materializeSource } = await import("../src/skillsCli.js");
+const { catalog, install } = await import("../src/marketplace.js");
+const { saveConfig, JIT_SKILLS_DIR } = await import("../src/config.js");
 
-test("parseGithubRef understands the supported spellings", () => {
-  assert.deepEqual(parseGithubRef("anthropics/skills"), {
-    owner: "anthropics",
-    repo: "skills",
+test("a GitHub reference is parsed from shorthand and from a URL", () => {
+  assert.deepEqual(parseGithubRef("vercel-labs/agent-skills"), {
+    owner: "vercel-labs",
+    repo: "agent-skills",
     ref: "",
     subpath: "",
   });
-  assert.deepEqual(parseGithubRef("owner/repo@v1.2.3#skills/web"), {
+  assert.deepEqual(parseGithubRef("owner/repo@v1#skills/web"), {
     owner: "owner",
     repo: "repo",
-    ref: "v1.2.3",
+    ref: "v1",
     subpath: "skills/web",
   });
-  assert.deepEqual(parseGithubRef("https://github.com/owner/repo"), {
-    owner: "owner",
-    repo: "repo",
-    ref: "",
-    subpath: "",
-  });
   assert.deepEqual(
-    parseGithubRef("https://github.com/owner/repo/tree/main/skills/web"),
-    { owner: "owner", repo: "repo", ref: "main", subpath: "skills/web" },
+    parseGithubRef("https://github.com/owner/repo/tree/main/skills"),
+    { owner: "owner", repo: "repo", ref: "main", subpath: "skills" },
   );
-  // A `.git` suffix and a trailing slash are common in copied links.
-  assert.deepEqual(parseGithubRef("https://github.com/owner/repo.git"), {
-    owner: "owner",
-    repo: "repo",
-    ref: "",
-    subpath: "",
-  });
 });
 
-test("parseGithubRef rejects anything that is not a repository", () => {
-  // A catalog URL is handled by the plain-URL path, not the GitHub one.
-  assert.equal(
-    parseGithubRef("https://raw.githubusercontent.com/o/r/main/marketplace.json"),
-    null,
+test("a catalog URL is not mistaken for a repository", () => {
+  assert.equal(isGithubRef("https://example.com/catalog.json"), false);
+  assert.equal(isGithubRef("https://github.com/owner/repo"), true);
+  assert.equal(isGithubRef("not a source"), false);
+  assert.equal(isGithubRef(""), false);
+});
+
+test("materializing a source lists the skills the CLI installed", async () => {
+  const result = await materializeSource("acme/ok");
+  assert.equal(result.warning, "");
+  assert.deepEqual(
+    result.skills.map((skill) => skill.name).sort(),
+    ["alpha-skill", "beta-skill"],
   );
-  assert.equal(parseGithubRef("https://example.com/catalog.json"), null);
-  assert.equal(parseGithubRef("marketplace.json"), null);
-  assert.equal(parseGithubRef(""), null);
-  assert.equal(isGithubRef("acme/demo"), true);
-  assert.equal(isGithubRef("acme"), false);
+  for (const skill of result.skills) {
+    const file = path.join(skill.path, "SKILL.md");
+    assert.ok(existsSync(file), `expected ${file}`);
+    assert.match(skill.path, /\.agents[\\/]skills[\\/]alpha-skill|\.agents[\\/]skills[\\/]beta-skill/);
+  }
 });
 
-test("toRawGithubUrl rewrites blob links and leaves other URLs alone", () => {
-  assert.equal(
-    toRawGithubUrl("https://github.com/acme/demo/blob/main/marketplace.json"),
-    "https://raw.githubusercontent.com/acme/demo/main/marketplace.json",
+test("a skipped entry becomes a warning instead of a skill", async () => {
+  const result = await materializeSource("acme/partial");
+  assert.deepEqual(result.skills.map((skill) => skill.name), ["alpha-skill"]);
+  assert.match(result.warning, /gamma-skill/);
+});
+
+test("a skill installed outside the target directory is refused", async () => {
+  const result = await materializeSource("acme/escape");
+  assert.deepEqual(result.skills, []);
+  assert.match(result.warning, /unexpected install path/);
+});
+
+test("a CLI failure surfaces a readable error", async () => {
+  await assert.rejects(
+    () => materializeSource("acme/fail"),
+    /skills CLI returned no result/,
   );
-  assert.equal(
-    toRawGithubUrl("https://example.com/catalog.json"),
-    "https://example.com/catalog.json",
+});
+
+test("JIT_GITHUB_TOKEN is forwarded to the CLI as GITHUB_TOKEN", async () => {
+  const saved = process.env.GITHUB_TOKEN;
+  delete process.env.GITHUB_TOKEN;
+  process.env.JIT_GITHUB_TOKEN = "secret-token";
+  try {
+    const result = await materializeSource("acme/token");
+    assert.match(result.warning, /token=secret-token/);
+  } finally {
+    if (saved === undefined) delete process.env.GITHUB_TOKEN;
+    else process.env.GITHUB_TOKEN = saved;
+    delete process.env.JIT_GITHUB_TOKEN;
+  }
+});
+
+test("a repository source installs into the JIT store", async () => {
+  saveConfig({ marketplace_urls: ["acme/ok"] });
+  const listed = await catalog();
+  assert.equal(listed.source, "remote");
+  assert.equal(listed.warning, "");
+  assert.deepEqual(
+    listed.items.map((item) => item.id).sort(),
+    ["alpha-skill", "beta-skill"],
   );
-  assert.equal(toRawGithubUrl("acme/demo"), "acme/demo");
-});
+  const alpha = listed.items.find((item) => item.id === "alpha-skill");
+  assert.ok(alpha);
+  assert.equal(alpha.origin, "skills:acme/ok");
+  assert.equal(alpha.install.skills_source, "acme/ok");
+  assert.equal(alpha.checksum_present, true);
 
-test("a repository without a catalog is crawled for skills and MCP configs", async () => {
-  const stub = stubFetch([
-    [/\/repos\/acme\/demo\/commits\/HEAD$/, (url) => respond(url, JSON.stringify({ sha: SHA }))],
-    [
-      /\/git\/trees\//,
-      (url) =>
-        respond(
-          url,
-          JSON.stringify({
-            tree: [
-              { type: "blob", path: "README.md" },
-              { type: "blob", path: "skills/hello/SKILL.md" },
-              { type: "blob", path: ".mcp.json" },
-            ],
-          }),
-        ),
-    ],
-    [/\/skills\/hello\/SKILL\.md$/, (url) => respond(url, SKILL)],
-    [/\/\.mcp\.json$/, (url) => respond(url, MCP)],
-  ]);
-  try {
-    const found = await discoverGithubRepo("acme/demo");
-    assert.equal(found.origin, `github:acme/demo@${SHA.slice(0, 7)}`);
-    assert.equal(found.warning, "");
-    assert.equal(found.items.length, 2);
-
-    const skill = found.items.find(
-      (item) => (item as { kind: string }).kind === "skill",
-    ) as Record<string, unknown>;
-    assert.equal(skill.id, "hello");
-    assert.equal(skill.description, "says hello");
-    assert.deepEqual(skill.install, {
-      url: `${RAW}/skills/hello/SKILL.md`,
-      sha256: createHash("sha256").update(SKILL).digest("hex"),
-    });
-
-    const mcp = found.items.find(
-      (item) => (item as { kind: string }).kind === "mcp",
-    ) as Record<string, unknown>;
-    assert.equal(mcp.id, "demo-tools");
-    assert.deepEqual(mcp.install, { command: "npx", args: ["-y", "demo-mcp"] });
-  } finally {
-    stub.restore();
-  }
-});
-
-test("a pinned commit is reused for every body, so nothing can change under review", async () => {
-  const stub = stubFetch([
-    [/\/commits\/main$/, (url) => respond(url, JSON.stringify({ sha: SHA }))],
-    [
-      /\/git\/trees\//,
-      (url) =>
-        respond(url, JSON.stringify({ tree: [{ type: "blob", path: "skills/hello/SKILL.md" }] })),
-    ],
-    [/\/skills\/hello\/SKILL\.md$/, (url) => respond(url, SKILL)],
-  ]);
-  try {
-    await discoverGithubRepo("acme/demo@main");
-    // Every raw body must be requested at the resolved commit, never at the branch.
-    const bodies = stub.seen.filter((url) => url.includes("raw.githubusercontent.com"));
-    assert.ok(bodies.length > 0);
-    for (const url of bodies) assert.ok(url.includes(`/${SHA}/`), url);
-    assert.ok(!bodies.some((url) => url.includes("/main/")));
-  } finally {
-    stub.restore();
-  }
-});
-
-test("a repository catalog is resolved against the pinned commit", async () => {
-  const catalog = JSON.stringify({
-    items: [
-      {
-        id: "one",
-        kind: "skill",
-        name: "One",
-        description: "a relative body",
-        install: { url: "skills/one/SKILL.md" },
-      },
-      {
-        id: "two",
-        kind: "skill",
-        name: "Two",
-        description: "a body that is not in the repository",
-        install: { url: "skills/two/SKILL.md" },
-      },
-      {
-        id: "three",
-        kind: "mcp",
-        name: "Three",
-        install: { command: "npx", args: ["-y", "three"] },
-      },
-    ],
-  });
-  const body = ["---", "name: one", "---", "One."].join("\n");
-  const stub = stubFetch([
-    [/\/commits\/HEAD$/, (url) => respond(url, JSON.stringify({ sha: SHA }))],
-    [
-      /\/git\/trees\//,
-      (url) =>
-        respond(
-          url,
-          JSON.stringify({
-            tree: [
-              { type: "blob", path: "marketplace.json" },
-              { type: "blob", path: "skills/one/SKILL.md" },
-            ],
-          }),
-        ),
-    ],
-    [/\/marketplace\.json$/, (url) => respond(url, catalog)],
-    [/\/skills\/one\/SKILL\.md$/, (url) => respond(url, body)],
-  ]);
-  try {
-    const found = await discoverGithubRepo("acme/demo");
-    assert.deepEqual(
-      found.items.map((item) => (item as { id: string }).id),
-      ["one", "three"],
-    );
-    const one = found.items[0] as Record<string, unknown>;
-    assert.deepEqual(one.install, {
-      url: `${RAW}/skills/one/SKILL.md`,
-      sha256: createHash("sha256").update(body).digest("hex"),
-    });
-    assert.match(found.warning, /two.*is not in the repository/);
-  } finally {
-    stub.restore();
-  }
-});
-
-test("an absolute catalog URL is never re-fetched and its checksum is kept", async () => {
-  const catalog = JSON.stringify({
-    items: [
-      {
-        id: "abs",
-        kind: "skill",
-        name: "Abs",
-        install: { url: "https://example.com/abs.md", sha256: "a".repeat(64) },
-      },
-    ],
-  });
-  const stub = stubFetch([
-    [/\/commits\/HEAD$/, (url) => respond(url, JSON.stringify({ sha: SHA }))],
-    [
-      /\/git\/trees\//,
-      (url) => respond(url, JSON.stringify({ tree: [{ type: "blob", path: "marketplace.json" }] })),
-    ],
-    [/\/marketplace\.json$/, (url) => respond(url, catalog)],
-  ]);
-  try {
-    const found = await discoverGithubRepo("acme/demo");
-    assert.equal(found.items.length, 1);
-    assert.deepEqual((found.items[0] as Record<string, unknown>).install, {
-      url: "https://example.com/abs.md",
-      sha256: "a".repeat(64),
-    });
-    assert.equal(
-      stub.seen.filter((url) => url.includes("example.com")).length,
-      0,
-    );
-  } finally {
-    stub.restore();
-  }
-});
-
-test("an unreadable repository fails with the repository in the message", async () => {
-  const stub = stubFetch([]);
-  try {
-    await assert.rejects(
-      () => discoverGithubRepo("acme/missing"),
-      /could not read acme\/missing: HTTP 404/,
-    );
-  } finally {
-    stub.restore();
-  }
-});
-
-test("a tree too large to read fully is reported instead of silently truncated", async () => {
-  const stub = stubFetch([
-    [/\/commits\/HEAD$/, (url) => respond(url, JSON.stringify({ sha: SHA }))],
-    [
-      /\/git\/trees\//,
-      (url) => respond(url, JSON.stringify({ tree: [], truncated: true })),
-    ],
-  ]);
-  try {
-    const found = await discoverGithubRepo("acme/demo");
-    assert.match(found.warning, /too large to read fully/);
-    assert.equal(found.items.length, 0);
-  } finally {
-    stub.restore();
-  }
+  const result = await install("alpha-skill");
+  assert.equal(result.ok, true);
+  assert.equal(result.installed, true);
+  assert.ok(existsSync(path.join(JIT_SKILLS_DIR, "alpha-skill", "SKILL.md")));
+  // Nothing changed between listing and installing, so the CLI hash matches and
+  // there is no staleness warning.
+  const warnings = result.warnings as Array<{ rule: string }>;
+  assert.equal(warnings.some((finding) => finding.rule === "content-changed"), false);
 });

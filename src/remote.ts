@@ -2,10 +2,10 @@ import { createHash } from "node:crypto";
 
 import { MAX_SKILL_BYTES } from "./config.js";
 
-// URLs JIT will fetch on a user's behalf: catalog files, skill bodies, and the
-// GitHub API. The policy is the same everywhere — HTTPS, or plain HTTP only for
-// loopback during development — so it lives in one place instead of being
-// re-implemented per call site.
+// URLs JIT will fetch on a user's behalf: catalog files and skill bodies. The
+// policy is the same everywhere — HTTPS, or plain HTTP only for loopback during
+// development — so it lives in one place instead of being re-implemented per
+// call site.
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 
 export function isLoopback(hostname: string): boolean {
