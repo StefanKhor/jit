@@ -1,26 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-
-import { api, authKey, setAuthKey, setUnauthorizedHandler } from "./api";
-import { AppContext, type AppContextValue } from "./context";
-import { Login } from "./components/Login";
-import { Shell } from "./components/Shell";
 import {
-  ConfirmDialog,
-  MarketDialog,
-  McpAddDialog,
-  McpExportDialog,
-  SetupDialog,
-  SkillDialog,
-  Toast,
-  TransferDialog,
-} from "./components/Dialogs";
-import { Brand } from "./components/ui";
-import { Overview } from "./views/Overview";
-import { Skills } from "./views/Skills";
-import { Marketplace } from "./views/Marketplace";
-import { Mcp } from "./views/Mcp";
-import { Search } from "./views/Search";
-import { Settings } from "./views/Settings";
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+
+import { api, authKey, setAuthKey, setUnauthorizedHandler } from "../api";
 import type {
   ConfirmRequest,
   Health,
@@ -34,9 +22,105 @@ import type {
   ToastKind,
   ToastMessage,
   View,
-} from "./types";
+} from "../types";
 
-export function App() {
+/**
+ * Dialog state is one object rather than eight flags: they are mutually
+ * independent panels over the dashboard, and keeping them together means one
+ * setter instead of eight and no risk of a stale sibling.
+ */
+export interface DialogState {
+  skill: boolean;
+  skillDetail: SkillDetail | null;
+  market: MarketplaceItem | null;
+  mcpAdd: boolean;
+  mcpExport: boolean;
+  transfer: boolean;
+  transferTab: "in" | "out";
+  setup: boolean;
+}
+
+const NO_DIALOGS: DialogState = {
+  skill: false,
+  skillDetail: null,
+  market: null,
+  mcpAdd: false,
+  mcpExport: false,
+  transfer: false,
+  transferTab: "in",
+  setup: false,
+};
+
+export interface AppContextValue {
+  /* boot & session */
+  booting: boolean;
+  loginRequired: boolean;
+  loginError: string;
+  login: (key: string) => Promise<void>;
+  logout: () => void;
+
+  /* server state */
+  health: Health | null;
+  online: boolean;
+  config: PublicConfig | null;
+  stats: Stats | null;
+  saveConfig: (updates: Record<string, unknown>) => Promise<PublicConfig>;
+  setConfig: (config: PublicConfig) => void;
+  loadConfig: () => Promise<PublicConfig>;
+
+  /* index contents */
+  skills: SkillListItem[];
+  mcpServers: McpServerSummary[];
+  loadSkills: () => Promise<SkillListItem[]>;
+  loadMcp: () => Promise<McpServerSummary[]>;
+  refreshAll: () => Promise<void>;
+
+  /* marketplace */
+  marketplace: MarketplaceResponse | null;
+  marketLoaded: boolean;
+  loadMarketplace: (force?: boolean) => Promise<void>;
+
+  /* navigation & chrome */
+  view: View;
+  setView: (view: View) => void;
+
+  /* feedback */
+  toast: (message: string, kind?: ToastKind) => void;
+  toastMessage: ToastMessage | null;
+  confirmAction: (title: string, text: string, label?: string) => Promise<boolean>;
+  confirmRequest: ConfirmRequest | null;
+  clearConfirm: () => void;
+
+  /* dialogs */
+  dialogs: DialogState;
+  openSkill: (id: string) => Promise<void>;
+  closeSkill: () => void;
+  openMarket: (item: MarketplaceItem) => void;
+  closeMarket: () => void;
+  openTransfer: (tab?: "in" | "out") => Promise<void>;
+  closeTransfer: () => void;
+  openMcpAdd: () => void;
+  closeMcpAdd: () => void;
+  openMcpExport: () => Promise<void>;
+  closeMcpExport: () => void;
+  setSetupOpen: (open: boolean) => void;
+
+  api: typeof api;
+}
+
+const AppContext = createContext<AppContextValue | null>(null);
+
+export function useJit(): AppContextValue {
+  const value = useContext(AppContext);
+  if (!value) throw new Error("useJit must be used inside AppProvider");
+  return value;
+}
+
+/**
+ * The one place that talks to the JIT server. Views read state and call the
+ * handful of actions they need; nothing is threaded through props.
+ */
+export function AppProvider({ children }: { children: ReactNode }) {
   const [booting, setBooting] = useState(true);
   const [loginRequired, setLoginRequired] = useState(false);
   const [loginError, setLoginError] = useState("");
@@ -49,16 +133,14 @@ export function App() {
   const [marketplace, setMarketplace] = useState<MarketplaceResponse | null>(null);
   const [marketLoaded, setMarketLoaded] = useState(false);
   const [view, setViewState] = useState<View>("overview");
-  const [toast, setToast] = useState<ToastMessage | null>(null);
+  const [toastMessage, setToastMessage] = useState<ToastMessage | null>(null);
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
-  const [skillOpen, setSkillOpen] = useState(false);
-  const [skillDetail, setSkillDetail] = useState<SkillDetail | null>(null);
-  const [marketItem, setMarketItem] = useState<MarketplaceItem | null>(null);
-  const [transferOpen, setTransferOpen] = useState(false);
-  const [transferTab, setTransferTab] = useState<"in" | "out">("in");
-  const [mcpAddOpen, setMcpAddOpen] = useState(false);
-  const [mcpExportOpen, setMcpExportOpen] = useState(false);
-  const [setupOpen, setSetupOpen] = useState(false);
+  const [dialogs, setDialogs] = useState<DialogState>(NO_DIALOGS);
+
+  const patchDialogs = useCallback(
+    (patch: Partial<DialogState>) => setDialogs((current) => ({ ...current, ...patch })),
+    [],
+  );
 
   const booted = useRef(false);
   const setupShown = useRef(false);
@@ -66,10 +148,19 @@ export function App() {
   const previousConfirm = useRef<((value: boolean) => void) | null>(null);
 
   const showToast = useCallback((message: string, kind: ToastKind = "ok") => {
-    setToast({ id: Date.now(), message, kind });
+    setToastMessage({ id: Date.now(), message, kind });
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(null), 4200);
+    toastTimer.current = window.setTimeout(() => setToastMessage(null), 4200);
   }, []);
+
+  const reportError = useCallback(
+    (error: unknown) => {
+      // A 401 is handled by the unauthorized handler, not by a toast.
+      if (error instanceof Error && error.message === "Unauthorized") return;
+      showToast(error instanceof Error ? error.message : String(error), "error");
+    },
+    [showToast],
+  );
 
   const confirmAction = useCallback(
     (title: string, text: string, label = "Confirm") =>
@@ -81,6 +172,8 @@ export function App() {
     [],
   );
 
+  const clearConfirm = useCallback(() => setConfirmRequest(null), []);
+
   const loadConfig = useCallback(async (): Promise<PublicConfig> => {
     const data = await api<PublicConfig>("/api/config");
     setConfig(data);
@@ -91,11 +184,9 @@ export function App() {
     try {
       setStats(await api<Stats>("/api/stats"));
     } catch (error) {
-      if (!(error instanceof Error) || error.message !== "Unauthorized") {
-        showToast(error instanceof Error ? error.message : String(error), "error");
-      }
+      reportError(error);
     }
-  }, [showToast]);
+  }, [reportError]);
 
   const loadSkills = useCallback(async (): Promise<SkillListItem[]> => {
     try {
@@ -103,12 +194,10 @@ export function App() {
       setSkills(data.skills || []);
       return data.skills || [];
     } catch (error) {
-      if (!(error instanceof Error) || error.message !== "Unauthorized") {
-        showToast(error instanceof Error ? error.message : String(error), "error");
-      }
+      reportError(error);
       return [];
     }
-  }, [showToast]);
+  }, [reportError]);
 
   const loadMcp = useCallback(async (): Promise<McpServerSummary[]> => {
     try {
@@ -116,12 +205,10 @@ export function App() {
       setMcpServers(data.servers || []);
       return data.servers || [];
     } catch (error) {
-      if (!(error instanceof Error) || error.message !== "Unauthorized") {
-        showToast(error instanceof Error ? error.message : String(error), "error");
-      }
+      reportError(error);
       return [];
     }
-  }, [showToast]);
+  }, [reportError]);
 
   const refreshAll = useCallback(async (): Promise<void> => {
     await Promise.allSettled([loadStats(), loadSkills(), loadMcp()]);
@@ -131,24 +218,21 @@ export function App() {
     async (force = false): Promise<void> => {
       if (marketLoaded && !force) return;
       try {
-        const data = await api<MarketplaceResponse>("/api/marketplace");
-        setMarketplace(data);
+        setMarketplace(await api<MarketplaceResponse>("/api/marketplace"));
         setMarketLoaded(true);
       } catch (error) {
-        if (!(error instanceof Error) || error.message !== "Unauthorized") {
-          showToast(error instanceof Error ? error.message : String(error), "error");
-        }
+        reportError(error);
       }
     },
-    [marketLoaded, showToast],
+    [marketLoaded, reportError],
   );
 
   const saveConfig = useCallback(
     async (updates: Record<string, unknown>): Promise<PublicConfig> => {
-      const data = await api<{ saved: boolean; config: PublicConfig }>(
-        "/api/config",
-        { method: "POST", body: JSON.stringify(updates) },
-      );
+      const data = await api<{ saved: boolean; config: PublicConfig }>("/api/config", {
+        method: "POST",
+        body: JSON.stringify(updates),
+      });
       setConfig(data.config);
       return data.config;
     },
@@ -160,9 +244,9 @@ export function App() {
     await refreshAll();
     if (cfg.first_run && !setupShown.current) {
       setupShown.current = true;
-      setSetupOpen(true);
+      patchDialogs({ setup: true });
     }
-  }, [loadConfig, refreshAll]);
+  }, [loadConfig, refreshAll, patchDialogs]);
 
   const login = useCallback(
     async (key: string): Promise<void> => {
@@ -245,9 +329,7 @@ export function App() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) {
-        return;
-      }
+      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
       const tag = document.activeElement?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       if (loginRequired || booting) return;
@@ -272,25 +354,21 @@ export function App() {
   const openSkill = useCallback(
     async (id: string) => {
       try {
-        const detail = await api<SkillDetail>(
-          `/api/skills/${encodeURIComponent(id)}`,
-        );
-        setSkillDetail(detail);
-        setSkillOpen(true);
+        const detail = await api<SkillDetail>(`/api/skills/${encodeURIComponent(id)}`);
+        patchDialogs({ skillDetail: detail, skill: true });
       } catch (error) {
-        showToast(error instanceof Error ? error.message : String(error), "error");
+        reportError(error);
       }
     },
-    [showToast],
+    [patchDialogs, reportError],
   );
 
   const openTransfer = useCallback(
     async (tab: "in" | "out" = "in") => {
-      setTransferTab(tab);
       await loadSkills();
-      setTransferOpen(true);
+      patchDialogs({ transferTab: tab, transfer: true });
     },
-    [loadSkills],
+    [loadSkills, patchDialogs],
   );
 
   const openMcpExport = useCallback(async () => {
@@ -299,115 +377,51 @@ export function App() {
       showToast("No JIT-managed MCP servers to export.", "error");
       return;
     }
-    setMcpExportOpen(true);
-  }, [loadMcp, showToast]);
+    patchDialogs({ mcpExport: true });
+  }, [loadMcp, patchDialogs, showToast]);
 
   const value: AppContextValue = {
-    view,
-    setView,
+    booting,
+    loginRequired,
+    loginError,
+    login,
+    logout,
     health,
     online,
     config,
     stats,
-    skills,
-    mcpServers,
-    marketplace,
-    marketLoaded,
-    loadConfig,
-    loadSkills,
-    loadMcp,
-    loadMarketplace,
-    refreshAll,
     saveConfig,
     setConfig,
+    loadConfig,
+    skills,
+    mcpServers,
+    loadSkills,
+    loadMcp,
+    refreshAll,
+    marketplace,
+    marketLoaded,
+    loadMarketplace,
+    view,
+    setView,
     toast: showToast,
+    toastMessage,
     confirmAction,
-    api,
-    skillOpen,
-    skillDetail,
+    confirmRequest,
+    clearConfirm,
+    dialogs,
     openSkill,
-    closeSkill: () => setSkillOpen(false),
-    marketItem,
-    openMarket: setMarketItem,
-    closeMarket: () => setMarketItem(null),
-    transferOpen,
-    transferTab,
+    closeSkill: () => patchDialogs({ skill: false }),
+    openMarket: (item) => patchDialogs({ market: item }),
+    closeMarket: () => patchDialogs({ market: null }),
     openTransfer,
-    closeTransfer: () => setTransferOpen(false),
-    mcpAddOpen,
-    openMcpAdd: () => setMcpAddOpen(true),
-    closeMcpAdd: () => setMcpAddOpen(false),
-    mcpExportOpen,
+    closeTransfer: () => patchDialogs({ transfer: false }),
+    openMcpAdd: () => patchDialogs({ mcpAdd: true }),
+    closeMcpAdd: () => patchDialogs({ mcpAdd: false }),
     openMcpExport,
-    closeMcpExport: () => setMcpExportOpen(false),
-    setupOpen,
-    setSetupOpen,
-    logout,
+    closeMcpExport: () => patchDialogs({ mcpExport: false }),
+    setSetupOpen: (open) => patchDialogs({ setup: open }),
+    api,
   };
 
-  if (booting) {
-    return (
-      <div className="boot-screen">
-        <Brand size={28} />
-        <div className="wordmark">JIT</div>
-        <div className="boot-copy">Reading the index…</div>
-      </div>
-    );
-  }
-
-  if (loginRequired) {
-    return <Login onLogin={login} initialError={loginError} />;
-  }
-
-  if (!config) {
-    return (
-      <div className="boot-screen">
-        <Brand size={28} />
-        <div className="wordmark">JIT</div>
-        <div className="boot-copy">The dashboard is unavailable.</div>
-      </div>
-    );
-  }
-
-  return (
-    <AppContext.Provider value={value}>
-      <Shell>
-        {view === "overview" ? <Overview /> : null}
-        {view === "skills" ? <Skills /> : null}
-        {view === "marketplace" ? <Marketplace /> : null}
-        {view === "mcp" ? <Mcp /> : null}
-        {view === "search" ? <Search /> : null}
-        {view === "settings" ? <Settings /> : null}
-      </Shell>
-
-      <SetupDialog
-        open={setupOpen}
-        onClose={() => setSetupOpen(false)}
-      />
-      <SkillDialog
-        open={skillOpen}
-        detail={skillDetail}
-        onClose={() => setSkillOpen(false)}
-      />
-      <MarketDialog item={marketItem} onClose={() => setMarketItem(null)} />
-      <McpAddDialog
-        open={mcpAddOpen}
-        onClose={() => setMcpAddOpen(false)}
-      />
-      <TransferDialog
-        open={transferOpen}
-        initialTab={transferTab}
-        onClose={() => setTransferOpen(false)}
-      />
-      <McpExportDialog
-        open={mcpExportOpen}
-        onClose={() => setMcpExportOpen(false)}
-      />
-      <ConfirmDialog
-        request={confirmRequest}
-        onDone={() => setConfirmRequest(null)}
-      />
-      <Toast toast={toast} />
-    </AppContext.Provider>
-  );
+  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
