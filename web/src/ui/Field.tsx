@@ -1,0 +1,135 @@
+import type {
+  ChangeEvent,
+  InputHTMLAttributes,
+  ReactNode,
+  TextareaHTMLAttributes,
+} from "react";
+
+import { cx } from "./cx";
+import { Switch } from "./Switch";
+
+const CONTROL =
+  "w-full rounded-lg border border-line-2 bg-inset px-3 text-ink transition-colors " +
+  "placeholder:text-ink-3 hover:border-ink-3/50 focus:border-accent/60 focus:outline-none " +
+  "focus-visible:outline-none focus:ring-2 focus:ring-accent/15 " +
+  "disabled:cursor-not-allowed disabled:opacity-50";
+
+export function Input({
+  className,
+  ...props
+}: InputHTMLAttributes<HTMLInputElement>) {
+  return <input className={cx(CONTROL, "h-9", className)} {...props} />;
+}
+
+export function Textarea({
+  className,
+  ...props
+}: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return (
+    <textarea
+      className={cx(CONTROL, "min-h-28 resize-y py-2.5 font-mono text-xs", className)}
+      {...props}
+    />
+  );
+}
+
+export function Checkbox({
+  className,
+  ...props
+}: InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <input
+      type="checkbox"
+      className={cx(
+        "size-4 shrink-0 cursor-pointer rounded border-line-2 bg-inset accent-[var(--color-accent)]",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
+/** Label + control + hint, the vertical form unit used across the settings panes. */
+export function Field({
+  label,
+  hint,
+  error,
+  children,
+  className,
+}: {
+  label: string;
+  hint?: ReactNode;
+  error?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <label className={cx("block space-y-2", className)}>
+      <span className="block text-xs font-medium text-ink-2">{label}</span>
+      {children}
+      {error ? (
+        <span className="block text-xs text-bad">{error}</span>
+      ) : hint ? (
+        <span className="block text-xs leading-relaxed text-ink-3">{hint}</span>
+      ) : null}
+    </label>
+  );
+}
+
+/**
+ * A labelled switch — the house toggle row. Accepts either `onCheckedChange`
+ * (preferred) or a native-style `onChange`, so either call site reads cleanly.
+ */
+export function ToggleRow({
+  label,
+  hint,
+  checked,
+  onCheckedChange,
+  onChange,
+  disabled,
+  id,
+  className,
+}: {
+  label: string;
+  hint?: ReactNode;
+  checked?: boolean;
+  onCheckedChange?: (checked: boolean) => void;
+  onChange?: (event: ChangeEvent<HTMLInputElement>) => void;
+  disabled?: boolean;
+  id?: string;
+  className?: string;
+}) {
+  const handle = (next: boolean) => {
+    onCheckedChange?.(next);
+    onChange?.({
+      target: { checked: next },
+      currentTarget: { checked: next },
+    } as unknown as ChangeEvent<HTMLInputElement>);
+  };
+
+  return (
+    <label
+      className={cx(
+        "flex cursor-pointer items-start justify-between gap-4 rounded-lg border border-line bg-panel px-4 py-3 transition-colors hover:border-line-2",
+        disabled && "cursor-not-allowed opacity-50",
+        className,
+      )}
+    >
+      <span className="min-w-0">
+        <span className="block text-sm text-ink">{label}</span>
+        {hint ? (
+          <span className="mt-1 block text-xs leading-relaxed text-ink-3">
+            {hint}
+          </span>
+        ) : null}
+      </span>
+      <Switch
+        id={id}
+        checked={Boolean(checked)}
+        onCheckedChange={handle}
+        disabled={disabled}
+        className="mt-0.5"
+      />
+    </label>
+  );
+}
