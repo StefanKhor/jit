@@ -1,5 +1,13 @@
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, platform } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -109,6 +117,7 @@ export const DEFAULT_CONFIG: Config = {
   nemotron_ultra_model: DEFAULT_NEMOTRON_ULTRA_MODEL,
   api_key: "",
   rerank_enabled: true,
+  confidence_threshold: CONFIDENCE_THRESHOLD,
   first_run: true,
   marketplace_urls: [],
 };
@@ -120,6 +129,7 @@ const FILE_KEYS = new Set<keyof Config>([
   "nemotron_ultra_model",
   "api_key",
   "rerank_enabled",
+  "confidence_threshold",
   "first_run",
   "marketplace_urls",
 ]);
@@ -186,6 +196,13 @@ function readStoredConfig(): Partial<Config> {
       }
       continue;
     }
+    if (key === "confidence_threshold") {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) {
+        stored.confidence_threshold = parsed;
+      }
+      continue;
+    }
     if (typeof value === "string") {
       (stored as Record<string, unknown>)[key] = value;
     }
@@ -198,8 +215,37 @@ function readStoredConfig(): Partial<Config> {
   return stored;
 }
 
+// `loadConfig` is on the hot path (every API request, the auth check, every
+// retrieval). Avoid re-reading and re-parsing config.json when it has not
+// changed on disk. `saveConfig` invalidates this explicitly.
+let storedConfigCache: {
+  mtimeMs: number;
+  size: number;
+  value: Partial<Config>;
+} | null = null;
+
+function readStoredConfigCached(): Partial<Config> {
+  let stat;
+  try {
+    stat = statSync(CONFIG_FILE);
+  } catch {
+    storedConfigCache = null;
+    return {};
+  }
+  if (
+    storedConfigCache &&
+    storedConfigCache.mtimeMs === stat.mtimeMs &&
+    storedConfigCache.size === stat.size
+  ) {
+    return storedConfigCache.value;
+  }
+  const value = readStoredConfig();
+  storedConfigCache = { mtimeMs: stat.mtimeMs, size: stat.size, value };
+  return value;
+}
+
 export function loadConfig(): Config {
-  const config: Config = { ...DEFAULT_CONFIG, ...readStoredConfig() };
+  const config: Config = { ...DEFAULT_CONFIG, ...readStoredConfigCached() };
   for (const [key, envName] of Object.entries(ENV_KEYS) as Array<
     [keyof Config, string]
   >) {
@@ -210,6 +256,13 @@ export function loadConfig(): Config {
   }
   config.first_run = Boolean(config.first_run);
   config.rerank_enabled = Boolean(config.rerank_enabled);
+  const envThreshold = Number(process.env.JIT_CONFIDENCE_THRESHOLD);
+  if (process.env.JIT_CONFIDENCE_THRESHOLD && Number.isFinite(envThreshold)) {
+    config.confidence_threshold = envThreshold;
+  }
+  config.confidence_threshold = Number.isFinite(Number(config.confidence_threshold))
+    ? Math.min(1, Math.max(0, Number(config.confidence_threshold)))
+    : CONFIDENCE_THRESHOLD;
   const envUrls = (process.env.JIT_MARKETPLACE_URL || "")
     .split(",")
     .map((value) => value.trim())
@@ -240,6 +293,7 @@ export function saveConfig(updates: Partial<Config>): Config {
   }
   ensureJitDir();
   atomicWriteFile(CONFIG_FILE, JSON.stringify(stored, null, 2) + "\n", 0o600);
+  storedConfigCache = null;
   return loadConfig();
 }
 

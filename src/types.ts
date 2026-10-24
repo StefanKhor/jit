@@ -15,6 +15,9 @@ export interface IndexItem {
   params?: string[];
   required?: string[];
   schema?: Record<string, unknown>;
+  // Where the entry came from (a catalog URL, "bundled", "mcp:<server>", or
+  // undefined for first-party local files). Not part of the content hash.
+  source?: string;
 }
 
 export interface StoredItem extends IndexItem {
@@ -63,6 +66,9 @@ export interface Stats {
     largest_item: number;
     saved: number;
     reduction_pct: number;
+    // Entries required before JIT's per-task cost beats loading everything
+    // statically (startup / average_item). Below this the index is a net cost.
+    break_even: number;
   };
 }
 
@@ -79,6 +85,7 @@ export interface Config {
   nemotron_ultra_model: string;
   api_key: string;
   rerank_enabled: boolean;
+  confidence_threshold: number;
   first_run: boolean;
   marketplace_urls: string[];
 }
@@ -185,6 +192,10 @@ export interface MarketplaceItem {
   requires?: string;
   inputs: MarketplaceInput[];
   install: Record<string, unknown>;
+  /** Which catalog this entry came from: a URL, or "bundled". */
+  origin?: string;
+  bundled?: boolean;
+  checksum_present?: boolean;
   installed?: boolean;
 }
 
@@ -202,7 +213,19 @@ export interface SearchCandidate {
   cosine: number;
   rrf: number;
   rerank: number | null;
+  lexical: number;
+  // The score the decision actually used: rerank when reranked, else cosine,
+  // else the lexical fallback.
+  score: number;
   passes_threshold: boolean;
+}
+
+export interface NearMiss {
+  id: string;
+  name: string;
+  description: string;
+  kind: ItemKind;
+  score: number;
 }
 
 export interface SearchResult {
@@ -213,6 +236,9 @@ export interface SearchResult {
   content: string;
   confidence: number;
   reranked: boolean;
+  keyword_only?: boolean;
+  source?: string;
+  trust?: "first-party" | "third-party";
   server?: string;
   tool_id?: string;
 }
@@ -220,9 +246,62 @@ export interface SearchResult {
 export interface SearchResponse {
   result: SearchResult | null;
   candidates: SearchCandidate[];
+  near_misses: NearMiss[];
   reranked: boolean;
+  keyword_only: boolean;
   threshold: number;
   elapsed_ms: number;
+}
+
+export type RetrievalDecision = "hit" | "miss";
+
+export interface RetrievalLogEntry {
+  id: number;
+  ts: string;
+  source: string;
+  intent: string;
+  best_id: string;
+  best_name: string;
+  score: number;
+  cosine: number;
+  rerank: number | null;
+  lexical: number;
+  candidates: number;
+  decision: RetrievalDecision;
+  keyword_only: boolean;
+  elapsed_ms: number;
+}
+
+export interface RetrievalStats {
+  total: number;
+  hits: number;
+  misses: number;
+  miss_rate: number;
+  keyword_only: number;
+  threshold: number;
+  recent: RetrievalLogEntry[];
+  misses_recent: RetrievalLogEntry[];
+  top_misses: Array<{ intent: string; count: number; best_name: string }>;
+}
+
+export interface ScanFinding {
+  level: "high" | "medium" | "low";
+  rule: string;
+  detail: string;
+}
+
+export interface ScanReport {
+  ok: boolean;
+  requires_ack: boolean;
+  findings: ScanFinding[];
+}
+
+export interface InspectResult {
+  id: string;
+  kind: "skill" | "mcp";
+  checksum_required: boolean;
+  checksum_present: boolean;
+  report: ScanReport;
 }
 
 export interface TransferResult {

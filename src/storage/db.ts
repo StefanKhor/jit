@@ -32,9 +32,27 @@ CREATE TABLE IF NOT EXISTS skills (
     server        TEXT,
     params        TEXT,
     required      TEXT,
-    schema        TEXT
+    schema        TEXT,
+    source        TEXT
 );
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS retrieval_log (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts           TEXT NOT NULL,
+    source       TEXT,
+    intent       TEXT,
+    best_id      TEXT,
+    best_name    TEXT,
+    score        REAL,
+    cosine       REAL,
+    rerank       REAL,
+    lexical      REAL,
+    candidates   INTEGER,
+    decision     TEXT,
+    keyword_only INTEGER,
+    elapsed_ms   REAL
+);
+CREATE INDEX IF NOT EXISTS idx_retrieval_id ON retrieval_log(id DESC);
 `;
 
 const MIGRATIONS: Record<string, string> = {
@@ -47,6 +65,7 @@ const MIGRATIONS: Record<string, string> = {
   params: "TEXT",
   required: "TEXT",
   schema: "TEXT",
+  source: "TEXT",
 };
 
 export function openDb(): DatabaseSync {
@@ -58,8 +77,7 @@ export function openDb(): DatabaseSync {
   return db;
 }
 
-export function initDb(): DatabaseSync {
-  const db = openDb();
+function migrate(db: DatabaseSync): void {
   db.exec(SCHEMA);
   const columns = new Set(
     (db.prepare("PRAGMA table_info(skills)").all() as Row[]).map((row) =>
@@ -77,13 +95,52 @@ export function initDb(): DatabaseSync {
   }
   db.exec("CREATE INDEX IF NOT EXISTS idx_skills_kind ON skills(kind)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_skills_server ON skills(server)");
+}
+
+// Each call opens its own handle for now. A follow-up commit moves this to one
+// process-wide connection; `node:sqlite` is synchronous, so a shared handle is
+// safe for the dashboard's concurrent async requests.
+export function initDb(): DatabaseSync {
+  const db = openDb();
+  migrate(db);
   return db;
+}
+
+// Nothing process-wide to close yet; reserved for the shared-handle change
+// above so callers can already stop managing connection lifetimes themselves.
+export function closeDb(): void {}
+
+export function getMeta(db: DatabaseSync, key: string): string | null {
+  const row = db.prepare("SELECT value FROM meta WHERE key = ?").get(key) as
+    | Row
+    | undefined;
+  return row && row.value !== undefined && row.value !== null
+    ? String(row.value)
+    : null;
+}
+
+export function setMeta(db: DatabaseSync, key: string, value: string): void {
+  db.prepare(
+    `INSERT INTO meta (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+  ).run(key, value);
+}
+
+// A monotonic change counter shared through SQLite so a separate `jit serve`
+// process observes dashboard edits. Every mutation bumps it; retrieval caches
+// key off it.
+export function bumpChangeSeq(db: DatabaseSync): void {
+  db.prepare(
+    `INSERT INTO meta (key, value) VALUES ('change_seq', '1')
+       ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)`,
+  ).run();
 }
 
 export function transaction<T>(db: DatabaseSync, fn: () => T): T {
   db.exec("BEGIN IMMEDIATE");
   try {
     const result = fn();
+    bumpChangeSeq(db);
     db.exec("COMMIT");
     return result;
   } catch (error) {
@@ -152,6 +209,7 @@ export function rowToItem(row: Row, includeBody = true): StoredItem {
     params: parseJsonArray(row.params),
     required: parseJsonArray(row.required),
     schema: parseJsonObject(row.schema),
+    source: row.source ? String(row.source) : undefined,
   };
   return item;
 }
@@ -159,16 +217,11 @@ export function rowToItem(row: Row, includeBody = true): StoredItem {
 export function dataVersion(db: DatabaseSync): string {
   const row = db
     .prepare(
-      `SELECT COUNT(*) AS n,
-              COALESCE(SUM(enabled), 0) AS enabled,
-              COALESCE(MAX(updated_at), '') AS updated,
-              COALESCE(MAX(content_hash), '') AS digest
-         FROM skills`,
+      `SELECT (SELECT value FROM meta WHERE key = 'change_seq') AS seq,
+              (SELECT COUNT(*) FROM skills) AS n`,
     )
     .get() as Row;
-  return `${Number(row.n || 0)}:${Number(row.enabled || 0)}:${String(
-    row.updated || "",
-  )}:${String(row.digest || "")}`;
+  return `${String(row.seq ?? 0)}:${Number(row.n || 0)}`;
 }
 
 export function getAllItems(
@@ -308,8 +361,8 @@ export function upsertItem(db: DatabaseSync, row: UpsertRow): void {
     `INSERT INTO skills
        (id, name, description, when_to_use, categories, body, path,
         aliases, embedding, kind, enabled, content_hash, updated_at,
-        server, params, required, schema)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        server, params, required, schema, source)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        name=excluded.name,
        description=excluded.description,
@@ -344,12 +397,15 @@ export function upsertItem(db: DatabaseSync, row: UpsertRow): void {
     JSON.stringify(item.params || []),
     JSON.stringify(item.required || []),
     item.schema ? JSON.stringify(item.schema) : null,
+    item.source || null,
   );
 }
 
 export function deleteItem(db: DatabaseSync, id: string): boolean {
   const result = db.prepare("DELETE FROM skills WHERE id = ?").run(id);
-  return Number(result.changes) > 0;
+  const changed = Number(result.changes) > 0;
+  if (changed) bumpChangeSeq(db);
+  return changed;
 }
 
 export function deleteToolsForServer(db: DatabaseSync, server: string): number {
@@ -360,7 +416,9 @@ export function deleteToolsForServer(db: DatabaseSync, server: string): number {
         "AND (server = ? OR (server IS NULL AND substr(id, 1, ?) = ?))",
     )
     .run(server, prefix.length, prefix);
-  return Number(result.changes);
+  const removed = Number(result.changes);
+  if (removed > 0) bumpChangeSeq(db);
+  return removed;
 }
 
 export function setEnabled(
@@ -371,16 +429,138 @@ export function setEnabled(
   const result = db
     .prepare("UPDATE skills SET enabled = ? WHERE id = ?")
     .run(enabled ? 1 : 0, id);
-  return Number(result.changes) > 0;
+  const changed = Number(result.changes) > 0;
+  if (changed) bumpChangeSeq(db);
+  return changed;
 }
 
 export function clearIndex(): void {
   const db = initDb();
-  try {
-    db.exec("DELETE FROM skills");
-  } finally {
-    db.close();
+  db.exec("DELETE FROM skills");
+  bumpChangeSeq(db);
+}
+
+// Provenance travels with the item on insert. The upsert's conflict clause
+// deliberately leaves `source` untouched so a re-index never loses it.
+const RETRIEVAL_LOG_LIMIT = 500;
+
+export interface RetrievalRecord {
+  source: string;
+  intent: string;
+  bestId: string;
+  bestName: string;
+  score: number;
+  cosine: number;
+  rerank: number | null;
+  lexical: number;
+  candidates: number;
+  decision: "hit" | "miss";
+  keywordOnly: boolean;
+  elapsedMs: number;
+}
+
+export function logRetrieval(db: DatabaseSync, record: RetrievalRecord): void {
+  db.prepare(
+    `INSERT INTO retrieval_log
+       (ts, source, intent, best_id, best_name, score, cosine, rerank,
+        lexical, candidates, decision, keyword_only, elapsed_ms)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    new Date().toISOString(),
+    record.source,
+    record.intent.slice(0, 2000),
+    record.bestId,
+    record.bestName,
+    record.score,
+    record.cosine,
+    record.rerank,
+    record.lexical,
+    record.candidates,
+    record.decision,
+    record.keywordOnly ? 1 : 0,
+    record.elapsedMs,
+  );
+  // Keep the log bounded; it is telemetry, not an audit trail.
+  db.prepare(
+    "DELETE FROM retrieval_log WHERE id <= (SELECT MAX(id) FROM retrieval_log) - ?",
+  ).run(RETRIEVAL_LOG_LIMIT);
+}
+
+function rowToRetrieval(row: Row): import("../types.js").RetrievalLogEntry {
+  return {
+    id: Number(row.id || 0),
+    ts: String(row.ts || ""),
+    source: String(row.source || ""),
+    intent: String(row.intent || ""),
+    best_id: String(row.best_id || ""),
+    best_name: String(row.best_name || ""),
+    score: Number(row.score || 0),
+    cosine: Number(row.cosine || 0),
+    rerank: row.rerank === null || row.rerank === undefined ? null : Number(row.rerank),
+    lexical: Number(row.lexical || 0),
+    candidates: Number(row.candidates || 0),
+    decision: row.decision === "hit" ? "hit" : "miss",
+    keyword_only: row.keyword_only === 1,
+    elapsed_ms: Number(row.elapsed_ms || 0),
+  };
+}
+
+export function listRetrievals(db: DatabaseSync, limit = 100): import("../types.js").RetrievalLogEntry[] {
+  const rows = db
+    .prepare("SELECT * FROM retrieval_log ORDER BY id DESC LIMIT ?")
+    .all(Math.max(1, Math.min(1000, limit))) as Row[];
+  return rows.map(rowToRetrieval);
+}
+
+export function retrievalStats(
+  db: DatabaseSync,
+  recentLimit = 50,
+): import("../types.js").RetrievalStats {
+  const totals = db
+    .prepare(
+      `SELECT COUNT(*) AS total,
+              COALESCE(SUM(decision = 'hit'), 0) AS hits,
+              COALESCE(SUM(decision = 'miss'), 0) AS misses,
+              COALESCE(SUM(keyword_only = 1), 0) AS keyword_only
+         FROM retrieval_log`,
+    )
+    .get() as Row;
+  const total = Number(totals.total || 0);
+  const hits = Number(totals.hits || 0);
+  const misses = Number(totals.misses || 0);
+  const recent = listRetrievals(db, recentLimit);
+  const missRows = db
+    .prepare(
+      "SELECT * FROM retrieval_log WHERE decision = 'miss' ORDER BY id DESC LIMIT 20",
+    )
+    .all() as Row[];
+  const grouped = new Map<string, { count: number; best_name: string }>();
+  for (const row of missRows) {
+    const key = String(row.intent || "").trim().toLowerCase();
+    if (!key) continue;
+    const current = grouped.get(key);
+    if (current) current.count += 1;
+    else grouped.set(key, { count: 1, best_name: String(row.best_name || "") });
   }
+  return {
+    total,
+    hits,
+    misses,
+    miss_rate: total ? Number(((misses / total) * 100).toFixed(1)) : 0,
+    keyword_only: Number(totals.keyword_only || 0),
+    threshold: 0,
+    recent,
+    misses_recent: recent.filter((entry) => entry.decision === "miss"),
+    top_misses: [...grouped.entries()]
+      .map(([intent, value]) => ({ intent, ...value }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5),
+  };
+}
+
+export function clearRetrievals(db: DatabaseSync): number {
+  const result = db.prepare("DELETE FROM retrieval_log").run();
+  return Number(result.changes);
 }
 
 export function indexedToolCounts(db: DatabaseSync): Map<string, number> {

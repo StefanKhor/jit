@@ -1,13 +1,18 @@
-import { CONFIDENCE_THRESHOLD, TOP_K_RETRIEVE } from "../config.js";
-import { loadConfig } from "../config.js";
+import { TOP_K_RETRIEVE, loadConfig } from "../config.js";
 import { cosineSimilarity, embedQuery } from "../embedding.js";
 import { logger } from "../logger.js";
 import {
   dataVersion,
   getAllItems,
   initDb,
+  logRetrieval,
 } from "../storage/db.js";
-import type { SearchCandidate, SearchResult, StoredItem } from "../types.js";
+import type {
+  NearMiss,
+  SearchCandidate,
+  SearchResult,
+  StoredItem,
+} from "../types.js";
 import { BM25Index, bm25Text } from "./bm25.js";
 import { nanoRerank } from "./rerank.js";
 
@@ -20,23 +25,34 @@ interface Corpus {
 
 let cache: Corpus | null = null;
 
+// Raw BM25 scores are unbounded and scale with the corpus's idf, so a fixed
+// curve would score a two-entry index differently from a two-thousand-entry one.
+// Normalize against the corpus's mean idf instead; the resulting confidence is
+// roughly "how many of the query's terms this entry explains". The keyword-only
+// path (no embeddings, no reranker) is flagged so callers know the ranking is
+// lexical.
+const LEXICAL_SCALE = 1.4;
+const MIN_LEXICAL_SCALE = 0.05;
+
+export function lexicalConfidence(score: number, scale = LEXICAL_SCALE): number {
+  if (!(score > 0)) return 0;
+  const denominator = score + Math.max(scale, MIN_LEXICAL_SCALE);
+  return score / denominator;
+}
+
 function loadCorpus(): Corpus | null {
   const db = initDb();
-  try {
-    const version = dataVersion(db);
-    if (cache && cache.version === version) return cache;
-    const items = getAllItems(db);
-    const corpus: Corpus = {
-      version,
-      items,
-      bm25: items.length ? new BM25Index(items.map(bm25Text)) : null,
-      byId: new Map(items.map((item) => [item.id, item])),
-    };
-    cache = corpus;
-    return corpus;
-  } finally {
-    db.close();
-  }
+  const version = dataVersion(db);
+  if (cache && cache.version === version) return cache;
+  const items = getAllItems(db);
+  const corpus: Corpus = {
+    version,
+    items,
+    bm25: items.length ? new BM25Index(items.map(bm25Text)) : null,
+    byId: new Map(items.map((item) => [item.id, item])),
+  };
+  cache = corpus;
+  return corpus;
 }
 
 function rrf(
@@ -60,31 +76,51 @@ async function rank(
 ): Promise<{
   candidates: Array<StoredItem & { rrf: number }>;
   cosine: Map<string, number>;
+  lexical: Map<string, number>;
+  vectorUsed: boolean;
 }> {
   const corpus = loadCorpus();
   if (!corpus || corpus.items.length === 0) {
-    return { candidates: [], cosine: new Map() };
+    return {
+      candidates: [],
+      cosine: new Map(),
+      lexical: new Map(),
+      vectorUsed: false,
+    };
   }
 
   const enabled = new Set(
     corpus.items.filter((item) => item.enabled).map((item) => item.id),
   );
-  if (enabled.size === 0) return { candidates: [], cosine: new Map() };
+  if (enabled.size === 0) {
+    return {
+      candidates: [],
+      cosine: new Map(),
+      lexical: new Map(),
+      vectorUsed: false,
+    };
+  }
 
   const bm25Hits = corpus.bm25
     ? corpus.bm25.search(intent, TOP_K_RETRIEVE * 2)
     : [];
-  const bm25Ranked = bm25Hits
-    .map((hit) => corpus.items[hit.index]?.id)
-    .filter((id): id is string => Boolean(id && enabled.has(id)))
-    .slice(0, TOP_K_RETRIEVE);
+  const lexicalScale = LEXICAL_SCALE * (corpus.bm25?.meanIdf || 0);
+  const lexical = new Map<string, number>();
+  const bm25Ranked: string[] = [];
+  for (const hit of bm25Hits) {
+    const id = corpus.items[hit.index]?.id;
+    if (!id || !enabled.has(id)) continue;
+    lexical.set(id, lexicalConfidence(hit.score, lexicalScale));
+    if (bm25Ranked.length < TOP_K_RETRIEVE) bm25Ranked.push(id);
+  }
 
   let queryVector: Float32Array | null = null;
   try {
     queryVector = await embedQuery(intent);
   } catch (error) {
-    logger.warn(
-      "query embedding failed; using BM25 only: %s",
+    // embedding.ts already warned once when the model became unavailable.
+    logger.debug(
+      "query embedding failed; using keyword search only: %s",
       error instanceof Error ? error.message : String(error),
     );
   }
@@ -96,7 +132,10 @@ async function rank(
       .filter((item) => item.enabled && item.embedding)
       .map((item) => ({
         id: item.id,
-        score: cosineSimilarity(queryVector as Float32Array, item.embedding as Float32Array),
+        score: cosineSimilarity(
+          queryVector as Float32Array,
+          item.embedding as Float32Array,
+        ),
       }))
       .sort((a, b) => b.score - a.score)
       .slice(0, TOP_K_RETRIEVE);
@@ -112,26 +151,39 @@ async function rank(
     const item = corpus.byId.get(hit.id);
     if (item) candidates.push({ ...item, rrf: hit.score });
   }
-  return { candidates, cosine };
+  return { candidates, cosine, lexical, vectorUsed: Boolean(queryVector) };
 }
 
 export interface Evaluation {
   result: SearchResult | null;
   candidates: SearchCandidate[];
+  nearMisses: NearMiss[];
   reranked: boolean;
+  keywordOnly: boolean;
+  threshold: number;
 }
+
+const EMPTY: Evaluation = {
+  result: null,
+  candidates: [],
+  nearMisses: [],
+  reranked: false,
+  keywordOnly: false,
+  threshold: 0,
+};
 
 export async function evaluate(
   intent: string,
   topN = 5,
 ): Promise<Evaluation> {
-  const empty: Evaluation = { result: null, candidates: [], reranked: false };
+  const settings = loadConfig();
+  const threshold = Number(settings.confidence_threshold);
+  const empty: Evaluation = { ...EMPTY, threshold };
   if (!intent || !intent.trim()) return empty;
 
-  const { candidates, cosine } = await rank(intent);
+  const { candidates, cosine, lexical, vectorUsed } = await rank(intent);
   if (candidates.length === 0) return empty;
 
-  const settings = loadConfig();
   let rerankScores = new Map<string, number>();
   if (settings.nebius_api_key && settings.rerank_enabled) {
     rerankScores = await nanoRerank(intent, candidates, settings);
@@ -142,30 +194,51 @@ export async function evaluate(
     }
   }
 
+  const reranked = rerankScores.size > 0;
+  const keywordOnly = !vectorUsed && !reranked;
+
+  // Two-stage gate: trust the reranker (a real 0..1 relevance judgment) when it
+  // ran; otherwise cosine; otherwise a lexical fallback. Never mix scales.
+  const scoreOf = (id: string): number => {
+    if (reranked) return rerankScores.get(id) || 0;
+    if (cosine.has(id)) return cosine.get(id) || 0;
+    return lexical.get(id) || 0;
+  };
+
   const debug: SearchCandidate[] = candidates.slice(0, topN).map((item) => {
-    const cosineScore = cosine.get(item.id) || 0;
+    const score = scoreOf(item.id);
     const rerankScore = rerankScores.get(item.id);
     return {
       id: item.id,
       name: item.name,
       description: item.description,
       kind: item.kind,
-      cosine: Number(cosineScore.toFixed(4)),
+      cosine: Number((cosine.get(item.id) || 0).toFixed(4)),
       rrf: Number(item.rrf.toFixed(5)),
       rerank:
         rerankScore === undefined ? null : Number(rerankScore.toFixed(4)),
-      passes_threshold:
-        Math.max(cosineScore, rerankScore || 0) >= CONFIDENCE_THRESHOLD,
+      lexical: Number((lexical.get(item.id) || 0).toFixed(4)),
+      score: Number(score.toFixed(4)),
+      passes_threshold: score >= threshold,
     };
   });
 
+  const nearMisses: NearMiss[] = [...debug]
+    .filter((candidate) => candidate.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3)
+    .map((candidate) => ({
+      id: candidate.id,
+      name: candidate.name,
+      description: candidate.description,
+      kind: candidate.kind,
+      score: candidate.score,
+    }));
+
   const best = candidates[0];
-  if (!best) return empty;
-  const confidence = Math.max(
-    cosine.get(best.id) || 0,
-    rerankScores.get(best.id) || 0,
-  );
-  if (confidence < CONFIDENCE_THRESHOLD) {
+  if (!best) return { ...empty, candidates: debug, nearMisses };
+  const confidence = scoreOf(best.id);
+  if (confidence < threshold) {
     logger.debug(
       "no match for %r (best=%s, confidence=%.3f)",
       intent,
@@ -175,7 +248,10 @@ export async function evaluate(
     return {
       result: null,
       candidates: debug,
-      reranked: rerankScores.size > 0,
+      nearMisses,
+      reranked,
+      keywordOnly,
+      threshold,
     };
   }
 
@@ -186,8 +262,15 @@ export async function evaluate(
     description: best.description,
     content: best.body,
     confidence: Number(confidence.toFixed(4)),
-    reranked: rerankScores.size > 0,
+    reranked,
   };
+  if (keywordOnly) result.keyword_only = true;
+  if (best.source) {
+    result.source = best.source;
+    result.trust = "third-party";
+  } else {
+    result.trust = "first-party";
+  }
   if (best.kind === "tool") {
     result.server = best.server || best.id.split("__", 1)[0];
     result.tool_id = best.id;
@@ -195,7 +278,10 @@ export async function evaluate(
   return {
     result,
     candidates: debug,
-    reranked: rerankScores.size > 0,
+    nearMisses,
+    reranked,
+    keywordOnly,
+    threshold,
   };
 }
 
@@ -208,6 +294,38 @@ export async function searchDebug(
   topN = 5,
 ): Promise<SearchCandidate[]> {
   return (await evaluate(intent, topN)).candidates;
+}
+
+// Persist one retrieval for the dashboard's recall view. Telemetry only; a
+// failure here must never break retrieval.
+export function recordRetrieval(
+  evaluation: Evaluation,
+  intent: string,
+  source: string,
+  elapsedMs: number,
+): void {
+  try {
+    const top = evaluation.candidates[0];
+    logRetrieval(initDb(), {
+      source,
+      intent,
+      bestId: top?.id || "",
+      bestName: top?.name || "",
+      score: top?.score || 0,
+      cosine: top?.cosine || 0,
+      rerank: top ? top.rerank : null,
+      lexical: top?.lexical || 0,
+      candidates: evaluation.candidates.length,
+      decision: evaluation.result ? "hit" : "miss",
+      keywordOnly: evaluation.keywordOnly,
+      elapsedMs: Number(elapsedMs.toFixed(1)),
+    });
+  } catch (error) {
+    logger.debug(
+      "could not record retrieval: %s",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
 }
 
 export function invalidateRetrievalCache(): void {

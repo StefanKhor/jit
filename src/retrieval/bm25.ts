@@ -91,8 +91,17 @@ export class BM25Index {
     }
   }
 
-  search(query: string, limit: number): BM25Hit[] {
-    const tokens = tokenize(query);
+  // Mean idf across the indexed vocabulary. Raw BM25 scores scale with idf, so
+  // this is what lets the lexical confidence be comparable between a two-entry
+  // index and a two-thousand-entry one.
+  get meanIdf(): number {
+    if (this.idf.size === 0) return 0;
+    let sum = 0;
+    for (const value of this.idf.values()) sum += value;
+    return sum / this.idf.size;
+  }
+
+  search(query: string, limit: number): BM25Hit[] {    const tokens = tokenize(query);
     if (tokens.length === 0 || this.documents.length === 0) return [];
     const scores = this.documents.map((document) => {
       if (document.length === 0) return 0;
