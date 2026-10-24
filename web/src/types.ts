@@ -23,6 +23,7 @@ export interface PublicConfig {
   api_key: string;
   rerank_enabled: boolean;
   first_run: boolean;
+  marketplace_urls: string[];
   nebius_key_env: boolean;
   auth_env: boolean;
   auth_enabled: boolean;

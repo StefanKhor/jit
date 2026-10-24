@@ -12,7 +12,6 @@ import path from "node:path";
 import {
   atomicWriteFile,
   JIT_SKILLS_DIR,
-  MARKETPLACE_FILE,
   MAX_SKILL_BYTES,
 } from "./config.js";
 import {
@@ -22,6 +21,7 @@ import {
   parseSkillText,
 } from "./indexer.js";
 import { logger } from "./logger.js";
+import { loadConfig } from "./config.js";
 import { defaultManager } from "./mcp/client.js";
 import { getItem, initDb, listItems } from "./storage/db.js";
 import type {
@@ -71,30 +71,6 @@ function normalizeItem(raw: unknown): MarketplaceItem | null {
     inputs,
     install: install as Record<string, unknown>,
   };
-}
-
-function loadBundled(): MarketplaceItem[] {
-  if (!existsSync(MARKETPLACE_FILE)) {
-    logger.warn("marketplace catalog missing: %s", MARKETPLACE_FILE);
-    return [];
-  }
-  try {
-    const parsed = JSON.parse(readFileSync(MARKETPLACE_FILE, "utf8")) as unknown;
-    const items =
-      parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? (parsed as { items?: unknown }).items
-        : parsed;
-    if (!Array.isArray(items)) return [];
-    return items
-      .map(normalizeItem)
-      .filter((item): item is MarketplaceItem => item !== null);
-  } catch (error) {
-    logger.warn(
-      "could not read marketplace catalog: %s",
-      error instanceof Error ? error.message : String(error),
-    );
-    return [];
-  }
 }
 
 async function fetchRemote(url: string): Promise<MarketplaceItem[]> {
@@ -159,41 +135,43 @@ export async function catalog(): Promise<{
   source: string;
   warning: string;
 }> {
-  const bundled = loadBundled();
-  const url = (process.env.JIT_MARKETPLACE_URL || "").trim();
-  if (!url) return { items: bundled, source: "bundled", warning: "" };
+  const urls = [...new Set((loadConfig().marketplace_urls || []).map((value) => String(value).trim()).filter(Boolean))];
+  if (urls.length === 0) {
+    return { items: [], source: "none", warning: "No marketplace catalogs configured." };
+  }
 
   const now = Date.now();
-  let remote: MarketplaceItem[];
-  let warning: string;
-  if (remoteCache.url === url && now - remoteCache.at < REMOTE_TTL_MS) {
-    remote = remoteCache.items;
+  const cacheKey = urls.join("\n");
+  let remoteItems: MarketplaceItem[] = [];
+  let warning = "";
+  if (remoteCache.url === cacheKey && now - remoteCache.at < REMOTE_TTL_MS) {
+    remoteItems = remoteCache.items;
     warning = remoteCache.error;
   } else {
-    try {
-      remote = await fetchRemote(url);
-      warning = "";
-    } catch (error) {
-      remote = [];
-      warning = `Remote catalog unavailable: ${
-        error instanceof Error ? error.message : String(error)
-      }`;
-      logger.warn("remote marketplace failed: %s", warning);
+    const errors: string[] = [];
+    const merged = new Map<string, MarketplaceItem>();
+    for (const url of urls) {
+      try {
+        const items = await fetchRemote(url);
+        for (const item of items) merged.set(item.id, item);
+      } catch (error) {
+        errors.push(
+          `${url}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
-    remoteCache.url = url;
+    remoteItems = [...merged.values()];
+    warning = errors.join("; ");
+    if (warning) logger.warn("remote marketplace failed: %s", warning);
+    remoteCache.url = cacheKey;
     remoteCache.at = now;
-    remoteCache.items = remote;
+    remoteCache.items = remoteItems;
     remoteCache.error = warning;
   }
 
-  if (remote.length === 0) {
-    return { items: bundled, source: "bundled", warning };
-  }
-  const merged = new Map(bundled.map((item) => [item.id, item]));
-  for (const item of remote) merged.set(item.id, item);
   return {
-    items: [...merged.values()],
-    source: "bundled+remote",
+    items: remoteItems,
+    source: urls.length ? "remote" : "none",
     warning,
   };
 }

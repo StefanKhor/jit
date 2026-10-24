@@ -80,6 +80,7 @@ export interface Config {
   api_key: string;
   rerank_enabled: boolean;
   first_run: boolean;
+  marketplace_urls: string[];
 }
 
 export interface PublicConfig extends Config {

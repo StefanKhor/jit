@@ -23,7 +23,6 @@ export const VERSION = readPackageVersion();
 export const PACKAGE_DIR = PACKAGE_ROOT;
 export const STATIC_DIR = path.join(PACKAGE_ROOT, "static");
 export const DASHBOARD_HTML = path.join(STATIC_DIR, "dashboard.html");
-export const MARKETPLACE_FILE = path.join(PACKAGE_ROOT, "marketplace.json");
 
 export const INDEX_DIR = path.resolve(
   (process.env.JIT_HOME || path.join(homedir(), ".jit")).replace(/^~(?=$|\/)/, homedir()),
@@ -111,6 +110,7 @@ export const DEFAULT_CONFIG: Config = {
   api_key: "",
   rerank_enabled: true,
   first_run: true,
+  marketplace_urls: [],
 };
 
 const FILE_KEYS = new Set<keyof Config>([
@@ -121,6 +121,7 @@ const FILE_KEYS = new Set<keyof Config>([
   "api_key",
   "rerank_enabled",
   "first_run",
+  "marketplace_urls",
 ]);
 
 const ENV_KEYS: Partial<Record<keyof Config, string>> = {
@@ -189,6 +190,11 @@ function readStoredConfig(): Partial<Config> {
       (stored as Record<string, unknown>)[key] = value;
     }
   }
+  if (Array.isArray(raw.marketplace_urls)) {
+    stored.marketplace_urls = raw.marketplace_urls
+      .map((value) => String(value).trim())
+      .filter(Boolean);
+  }
   return stored;
 }
 
@@ -204,6 +210,16 @@ export function loadConfig(): Config {
   }
   config.first_run = Boolean(config.first_run);
   config.rerank_enabled = Boolean(config.rerank_enabled);
+  const envUrls = (process.env.JIT_MARKETPLACE_URL || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (envUrls.length) {
+    config.marketplace_urls = [...new Set([...(config.marketplace_urls || []), ...envUrls])];
+  }
+  config.marketplace_urls = Array.isArray(config.marketplace_urls)
+    ? config.marketplace_urls.map((value) => String(value).trim()).filter(Boolean)
+    : [];
   config.nebius_api_base =
     config.nebius_api_base || DEFAULT_NEBIUS_API_BASE;
   config.nemotron_nano_model =

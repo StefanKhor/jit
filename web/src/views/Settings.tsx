@@ -15,6 +15,8 @@ export function Settings() {
   const [rerank, setRerank] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState("");
+  const [marketUrls, setMarketUrls] = useState<string[]>([]);
+  const [newMarketUrl, setNewMarketUrl] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -23,6 +25,7 @@ export function Settings() {
     setNano(config.nemotron_nano_model || "");
     setUltra(config.nemotron_ultra_model || "");
     setRerank(Boolean(config.rerank_enabled));
+    setMarketUrls(Array.isArray(config.marketplace_urls) ? config.marketplace_urls : []);
   }, [config]);
 
   const saveRerank = async (event: FormEvent) => {
@@ -44,6 +47,35 @@ export function Settings() {
     } finally {
       setSaving("");
     }
+  };
+
+  const saveMarketplaces = async (next: string[]) => {
+    setSaving("market");
+    try {
+      await ctx.saveConfig({ marketplace_urls: next });
+      setMarketUrls(next);
+      ctx.toast("Marketplace catalogs saved.");
+    } catch (error) {
+      ctx.toast(error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      setSaving("");
+    }
+  };
+
+  const addMarketplace = async (event: FormEvent) => {
+    event.preventDefault();
+    const value = newMarketUrl.trim();
+    if (!value) return;
+    if (marketUrls.includes(value)) {
+      setNewMarketUrl("");
+      return;
+    }
+    await saveMarketplaces([...marketUrls, value]);
+    setNewMarketUrl("");
+  };
+
+  const removeMarketplace = async (url: string) => {
+    await saveMarketplaces(marketUrls.filter((item) => item !== url));
   };
 
   const removeKey = async () => {
@@ -349,6 +381,51 @@ export function Settings() {
                 }}
               />
             </div>
+          </div>
+
+
+          <div className="panel">
+            <div className="panel-head">
+              <h2>Marketplace catalogs</h2>
+            </div>
+            <p className="panel-copy">
+              JIT has no bundled catalog. Add one or more remote catalog URLs
+              (JSON with an items array).
+            </p>
+            <form className="add-row" onSubmit={addMarketplace}>
+              <input
+                type="url"
+                placeholder="https://example.com/catalog.json"
+                spellCheck={false}
+                autoComplete="off"
+                value={newMarketUrl}
+                onChange={(event) => setNewMarketUrl(event.target.value)}
+              />
+              <button
+                className="btn btn-solid"
+                type="submit"
+                disabled={saving === "market" || !newMarketUrl.trim()}
+              >
+                {saving === "market" ? "Saving…" : "Add"}
+              </button>
+            </form>
+            {marketUrls.length === 0 ? (
+              <p className="field-help">No catalogs configured.</p>
+            ) : (
+              <ul className="market-url-list">
+                {marketUrls.map((url) => (
+                  <li key={url}>
+                    <span>{url}</span>
+                    <button
+                      className="btn-mini danger"
+                      onClick={() => void removeMarketplace(url)}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           <div className="panel">

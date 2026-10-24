@@ -110,9 +110,9 @@ export function Marketplace() {
       </div>
 
       <p className={`market-note${data.warning ? " is-warn" : ""}`}>
-        {data.source === "bundled+remote"
-          ? "Bundled + remote catalog"
-          : "Bundled catalog"}
+        {data.source === "remote"
+          ? "Remote catalog"
+          : "No catalog configured"}
         {data.warning ? ` · ${data.warning}` : ""}
       </p>
 
@@ -122,7 +122,7 @@ export function Marketplace() {
         >
           {items.length
             ? "Try a different filter, or refresh the catalog."
-            : "No marketplace items are available."}
+            : "No marketplace catalogs configured. Add one in Settings."}
         </Empty>
       ) : (
         <div className="market-grid">
