@@ -24,6 +24,7 @@ import {
   totalIndexed,
 } from "./indexer.js";
 import { logger } from "./logger.js";
+import { fetchText } from "./remote.js";
 import { closeDb, getItem, initDb } from "./storage/db.js";
 import { defaultManager } from "./mcp/client.js";
 import { validateToolArguments } from "./mcp/validate.js";
@@ -48,49 +49,7 @@ function textResult(payload: unknown, isError = false) {
 }
 
 async function fetchSkill(url: string): Promise<string> {
-  const parsedUrl = new URL(url);
-  if (parsedUrl.protocol === "http:") {
-    if (!["127.0.0.1", "localhost", "::1"].includes(parsedUrl.hostname)) {
-      throw new Error("skill URLs must use https://");
-    }
-  } else if (parsedUrl.protocol !== "https:") {
-    throw new Error("skill URLs must use https://");
-  }
-
-  const response = await fetch(url, {
-    redirect: "follow",
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const finalUrl = new URL(response.url);
-  if (
-    finalUrl.protocol !== "https:" &&
-    !(
-      finalUrl.protocol === "http:" &&
-      ["127.0.0.1", "localhost", "::1"].includes(finalUrl.hostname)
-    )
-  ) {
-    throw new Error("skill redirect must use https://");
-  }
-  const length = Number(response.headers.get("content-length") || 0);
-  if (length > MAX_SKILL_BYTES) {
-    throw new Error("remote skill exceeds the size limit");
-  }
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  if (response.body) {
-    const reader = response.body.getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > MAX_SKILL_BYTES) {
-        throw new Error("remote skill exceeds the size limit");
-      }
-      chunks.push(value);
-    }
-  }
-  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString("utf8");
+  return fetchText(url, { label: "remote skill", timeoutMs: 30_000 });
 }
 
 function createServer(): McpServer {

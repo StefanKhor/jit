@@ -20,6 +20,7 @@ import {
   publicConfig,
   saveConfig,
 } from "../config.js";
+import { isGithubRef, toRawGithubUrl } from "../github.js";
 import {
   clearIndex,
   deleteItem,
@@ -264,7 +265,6 @@ export function createApp(): Hono {
       "nebius_api_key",
       "nebius_api_base",
       "nemotron_nano_model",
-      "nemotron_ultra_model",
     ]) {
       if (key in body) updates[key] = String(body[key] || "").trim();
     }
@@ -281,7 +281,7 @@ export function createApp(): Hono {
         "",
       );
     }
-    for (const key of ["nemotron_nano_model", "nemotron_ultra_model"]) {
+    for (const key of ["nemotron_nano_model"]) {
       if (key in updates && !updates[key]) delete updates[key];
     }
     if ("rerank_enabled" in body) {
@@ -309,14 +309,14 @@ export function createApp(): Hono {
         throw new HttpError(400, "at most 10 marketplace catalogs are supported");
       }
       // Match the fetch policy in marketplace.ts so a catalog cannot be
-      // configured that would only fail later at fetch time.
+      // configured that would only fail later at fetch time. A GitHub
+      // repository is accepted as `owner/repo`, `owner/repo@ref`, or a URL.
       for (const url of urls) {
-        if (!isSecureApiBase(url)) {
-          throw new HttpError(
-            400,
-            "catalog URLs must use https:// (http:// is allowed only for localhost)",
-          );
-        }
+        if (isGithubRef(toRawGithubUrl(url)) || isSecureApiBase(url)) continue;
+        throw new HttpError(
+          400,
+          "catalog entries must be https:// URLs or GitHub repositories",
+        );
       }
       updates.marketplace_urls = urls;
     }

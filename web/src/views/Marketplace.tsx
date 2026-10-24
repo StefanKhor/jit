@@ -107,25 +107,29 @@ export function Marketplace() {
         </div>
       </div>
 
-      <p className="section-copy">
-        Ships with a small offline catalog, and merges any catalogs you add.
-        Skills from a catalog are marked third-party, scanned for risky patterns,
-        and fetched with a pinned checksum. Nothing installs until you choose it.
-      </p>
+        <p className="section-copy">
+          JIT ships no catalog of its own: the marketplace is exactly the
+          sources you add. A source is a catalog JSON URL or a GitHub repository
+          (<code>owner/repo</code>, or a repo link) — JIT pins the repo to a
+          commit and reads its <code>marketplace.json</code>, <code>SKILL.md</code>
+          files, and MCP configs. Everything is marked third-party, scanned for
+          risky patterns, and fetched with a pinned checksum. Nothing installs
+          until you choose it.
+        </p>
 
-      <form className="add-row" onSubmit={addCatalog}>
-        <input
-          type="url"
-          placeholder="https://example.com/catalog.json"
-          spellCheck={false}
-          autoComplete="off"
-          value={catalogUrl}
-          onChange={(event) => setCatalogUrl(event.target.value)}
-        />
-        <button className="btn btn-solid" type="submit" disabled={adding}>
-          {adding ? "Adding…" : "Add catalog"}
-        </button>
-      </form>
+        <form className="add-row" onSubmit={addCatalog}>
+          <input
+            type="text"
+            placeholder="https://example.com/catalog.json or owner/repo"
+            spellCheck={false}
+            autoComplete="off"
+            value={catalogUrl}
+            onChange={(event) => setCatalogUrl(event.target.value)}
+          />
+          <button className="btn btn-solid" type="submit" disabled={adding}>
+            {adding ? "Adding…" : "Add catalog"}
+          </button>
+        </form>
 
       <div className="market-toolbar">
         <div className="market-filters">
@@ -151,13 +155,7 @@ export function Marketplace() {
       </div>
 
       <p className={`market-note${data.warning ? " is-warn" : ""}`}>
-        {data.source === "remote"
-          ? "Remote catalog"
-          : data.source === "bundled"
-            ? "Bundled catalog (offline)"
-            : data.source === "bundled+remote"
-              ? "Bundled + remote catalog"
-              : "No catalog available"}
+        {data.source === "remote" ? "Configured catalogs" : "No catalogs configured"}
         {data.warning ? ` · ${data.warning}` : ""}
       </p>
 
@@ -167,7 +165,7 @@ export function Marketplace() {
         >
           {items.length
             ? "Try a different filter, or refresh the catalog."
-            : "No catalog entries available. Add a catalog URL above, or check that JIT shipped with marketplace.json."}
+            : "No catalog entries. Add a catalog URL or a GitHub repository above."}
         </Empty>
       ) : (
         <div className="market-grid">
@@ -219,8 +217,11 @@ function MarketCard({
       <div className="market-meta">
         <span>{item.author || "Unknown"}</span>
         <span>{item.license || "See source"}</span>
-        <span>{item.bundled ? "Bundled" : "Third-party"}</span>
-        {item.checksum_present === false && !item.bundled ? (
+        <span>Third-party</span>
+        {item.origin ? (
+          <span className="market-origin">{item.origin}</span>
+        ) : null}
+        {item.checksum_present === false ? (
           <span className="market-warn">unpinned</span>
         ) : null}
         {item.requires ? <span>{item.requires}</span> : null}

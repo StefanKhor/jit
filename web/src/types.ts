@@ -19,7 +19,6 @@ export interface PublicConfig {
   nebius_api_key: string;
   nebius_api_base: string;
   nemotron_nano_model: string;
-  nemotron_ultra_model: string;
   api_key: string;
   rerank_enabled: boolean;
   confidence_threshold: number;
@@ -139,7 +138,6 @@ export interface MarketplaceItem {
   inputs: MarketplaceInput[];
   install: Record<string, unknown>;
   origin?: string;
-  bundled?: boolean;
   checksum_present?: boolean;
   installed?: boolean;
 }

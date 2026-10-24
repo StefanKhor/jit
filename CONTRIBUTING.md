@@ -33,12 +33,13 @@ npm run build
 ```
 
 There is a small suite in `tests/` covering storage/versioning, BM25, retrieval
-gating (including the keyword-only fallback), the marketplace end to end (bundled
-catalog, catalog merging, checksum enforcement, scanner acknowledgement, catalog
-URL validation), `JIT_CALL` argument validation, and the embedding path
-(dimension, normalization, determinism, semantic ordering, and paraphrase
-retrieval through the vector route). It uses Node's built-in test runner through
-`tsx`, so there is no extra dependency.
+gating (including the keyword-only fallback), the HTTP API surface, the MCP stdio
+handshake, the GitHub resolver, the shared fetch policy, the marketplace end to
+end (catalog merging, checksum enforcement, scanner acknowledgement, catalog URL
+validation), `JIT_CALL` argument validation, and the embedding path (dimension,
+normalization, determinism, semantic ordering, and paraphrase retrieval through
+the vector route). It uses Node's built-in test runner through `tsx`, so there is
+no extra dependency.
 
 `tests/embedding.test.ts` loads the real model from `JIT_MODEL_CACHE`. With a
 warm cache it runs in about two seconds; offline with no cache it reports and
@@ -80,14 +81,19 @@ Useful smoke checks:
 - A marketplace MCP install connects and indexes its tools.
 - Import and export leave the external side untouched.
 - A query with no match returns `near_misses`, not a silent empty result.
-- `GET /api/marketplace` lists the bundled catalog with no network.
+- `GET /api/marketplace` reports `source: "none"` until you add a source.
+- A GitHub source (`owner/repo`) resolves to a pinned commit with checksummed
+  bodies; `POST /api/marketplace/inspect` shows the findings before you install.
 
-## Bundled catalog
+## Marketplace sources
 
-`marketplace.json` at the repo root ships with the package and is loaded as the
-default catalog. Skills there use inline bodies (no fetch, no checksum needed)
-and must pass the scanner. Keep it small and review every entry: it is
-first-party content that ships to every user.
+JIT ships no catalog of its own, so the marketplace is whatever the user points
+it at: an HTTPS catalog URL, or a GitHub repository (`owner/repo[@ref][#dir]`)
+that JIT pins to a commit. `src/github.ts` resolves a repo, and
+`src/marketplace.ts` normalizes every entry. Remote skill bodies must carry a
+`sha256`; relative paths inside a GitHub-hosted catalog get one computed at
+discovery time. Never relax the checksum requirement, and keep every entry
+scanned before install.
 
 ## Pull requests
 

@@ -1,9 +1,9 @@
-# syntax=docker/dockerfile:1
-
 FROM node:24-bookworm-slim AS build
 
-WORKDIR /app
+# model warmup can reach their registries:
 ENV npm_config_update_notifier=false
+
+WORKDIR /app
 
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -11,15 +11,23 @@ RUN npm ci
 COPY tsconfig.json ./
 COPY src ./src
 COPY web ./web
-COPY marketplace.json README.md LICENSE ./
+COPY README.md LICENSE ./
 
 RUN npm run build
 
 # Download the local embedding model into the image so the first dashboard
 # request does not depend on the network. The model cache is separate from the
-# user's /data volume.
-RUN JIT_MODEL_CACHE=/app/models node --input-type=module \
-    -e "import('./dist/embedding.js').then((m) => m.warmupEmbeddingModel())"
+# user's /data volume. An air-gapped or offline build can pass
+# --build-arg JIT_SKIP_MODEL_WARMUP=1 and supply the model at run time; JIT
+# falls back to lexical retrieval until it is there.
+ARG JIT_SKIP_MODEL_WARMUP=0
+RUN mkdir -p /app/models \
+    && if [ "$JIT_SKIP_MODEL_WARMUP" = "1" ]; then \
+         echo "skipping embedding model warmup"; \
+       else \
+         JIT_MODEL_CACHE=/app/models node --input-type=module \
+           -e "import('./dist/embedding.js').then((m) => m.warmupEmbeddingModel())"; \
+       fi
 
 RUN npm prune --omit=dev
 
@@ -27,7 +35,7 @@ FROM node:24-bookworm-slim AS runtime
 
 ENV NODE_ENV=production \
     JIT_HOME=/data \
-    JIT_MODEL_CACHE=/app/models
+    JIT_MODEL_CACHE=/app/models \
 
 WORKDIR /app
 
@@ -46,7 +54,6 @@ COPY --from=build --chown=jit:jit /app/dist ./dist
 COPY --from=build --chown=jit:jit /app/static ./static
 COPY --from=build --chown=jit:jit /app/models ./models
 COPY --from=build --chown=jit:jit \
-      /app/marketplace.json \
       /app/README.md \
       /app/LICENSE \
       ./

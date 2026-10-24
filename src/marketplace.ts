@@ -1,8 +1,6 @@
-import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
-  readFileSync,
   rmdirSync,
   unlinkSync,
 } from "node:fs";
@@ -13,8 +11,13 @@ import {
   atomicWriteFile,
   JIT_SKILLS_DIR,
   MAX_SKILL_BYTES,
-  PACKAGE_DIR,
 } from "./config.js";
+import { fetchText } from "./remote.js";
+import {
+  discoverGithubRepo,
+  isGithubRef,
+  toRawGithubUrl,
+} from "./github.js";
 import {
   deleteItem,
   deleteToolsForServer,
@@ -36,8 +39,6 @@ import type {
 
 const REMOTE_TTL_MS = 300_000;
 const SAFE_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/;
-const BUNDLED_ORIGIN = "bundled";
-const BUNDLED_CATALOG = path.join(PACKAGE_DIR, "marketplace.json");
 const remoteCache: {
   url: string;
   at: number;
@@ -85,82 +86,15 @@ function normalizeItem(
     inputs,
     install: installRecord,
     origin,
-    bundled: origin === BUNDLED_ORIGIN,
     checksum_present: hasUrlBody
       ? Boolean(String(installRecord.sha256 || "").trim())
       : true,
   };
 }
 
-// A small, offline, vetted catalog so a first run is not a dead end. Every body
-// is inline, so nothing is fetched and no checksum is required. Catalogs the
-// user adds are merged over this one.
-function loadBundledCatalog(): MarketplaceItem[] {
-  if (!existsSync(BUNDLED_CATALOG)) return [];
-  try {
-    const parsed = JSON.parse(readFileSync(BUNDLED_CATALOG, "utf8")) as unknown;
-    const items =
-      parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? (parsed as { items?: unknown }).items
-        : parsed;
-    if (!Array.isArray(items)) return [];
-    return items
-      .map((raw) => normalizeItem(raw, BUNDLED_ORIGIN))
-      .filter((item): item is MarketplaceItem => item !== null);
-  } catch (error) {
-    logger.warn(
-      "bundled catalog could not be read: %s",
-      error instanceof Error ? error.message : String(error),
-    );
-    return [];
-  }
-}
-
 async function fetchRemote(url: string): Promise<MarketplaceItem[]> {
-  const parsedUrl = new URL(url);
-  if (parsedUrl.protocol === "http:") {
-    if (!["127.0.0.1", "localhost", "::1"].includes(parsedUrl.hostname)) {
-      throw new Error("catalog URLs must use https://");
-    }
-  } else if (parsedUrl.protocol !== "https:") {
-    throw new Error("catalog URLs must use https://");
-  }
-
-  const response = await fetch(url, {
-    redirect: "follow",
-    signal: AbortSignal.timeout(12_000),
-  });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const finalUrl = new URL(response.url);
-  if (
-    finalUrl.protocol !== "https:" &&
-    !(
-      finalUrl.protocol === "http:" &&
-      ["127.0.0.1", "localhost", "::1"].includes(finalUrl.hostname)
-    )
-  ) {
-    throw new Error("catalog redirect must use https://");
-  }
-  const length = Number(response.headers.get("content-length") || 0);
-  if (length > MAX_SKILL_BYTES) {
-    throw new Error("catalog is larger than the size limit");
-  }
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  if (response.body) {
-    const reader = response.body.getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > MAX_SKILL_BYTES) {
-        throw new Error("catalog is larger than the size limit");
-      }
-      chunks.push(value);
-    }
-  }
-  const buffer = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
-  const parsed = JSON.parse(buffer.toString("utf8")) as unknown;
+  const body = await fetchText(url, { label: "catalog", timeoutMs: 12_000 });
+  const parsed = JSON.parse(body) as unknown;
   const items =
     parsed && typeof parsed === "object" && !Array.isArray(parsed)
       ? (parsed as { items?: unknown }).items
@@ -178,13 +112,15 @@ export async function catalog(): Promise<{
   source: string;
   warning: string;
 }> {
-  const bundled = loadBundledCatalog();
   const urls = [...new Set((loadConfig().marketplace_urls || []).map((value) => String(value).trim()).filter(Boolean))];
   if (urls.length === 0) {
+    // JIT ships no catalog of its own: the marketplace is exactly the sources
+    // the user pointed it at.
     return {
-      items: bundled,
-      source: bundled.length ? "bundled" : "none",
-      warning: "No marketplace catalogs configured.",
+      items: [],
+      source: "none",
+      warning:
+        "No marketplace catalogs configured. Add a catalog URL or a GitHub repository.",
     };
   }
 
@@ -198,13 +134,22 @@ export async function catalog(): Promise<{
   } else {
     const errors: string[] = [];
     const merged = new Map<string, MarketplaceItem>();
-    for (const url of urls) {
+    for (const entered of urls) {
+      const url = toRawGithubUrl(entered);
       try {
-        const items = await fetchRemote(url);
-        for (const item of items) merged.set(item.id, item);
+        if (isGithubRef(url)) {
+          const found = await discoverGithubRepo(url);
+          for (const raw of found.items) {
+            const item = normalizeItem(raw, found.origin);
+            if (item) merged.set(item.id, item);
+          }
+          if (found.warning) errors.push(found.warning);
+        } else {
+          for (const item of await fetchRemote(url)) merged.set(item.id, item);
+        }
       } catch (error) {
         errors.push(
-          `${url}: ${error instanceof Error ? error.message : String(error)}`,
+          `${entered}: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     }
@@ -217,19 +162,9 @@ export async function catalog(): Promise<{
     remoteCache.error = warning;
   }
 
-  // Bundled entries load first so a user catalog can override one by id.
-  const merged = new Map<string, MarketplaceItem>();
-  for (const item of bundled) merged.set(item.id, item);
-  for (const item of remoteItems) merged.set(item.id, item);
   return {
-    items: [...merged.values()],
-    source: remoteItems.length
-      ? bundled.length
-        ? "bundled+remote"
-        : "remote"
-      : bundled.length
-        ? "bundled"
-        : "none",
+    items: remoteItems,
+    source: remoteItems.length ? "remote" : "none",
     warning,
   };
 }
@@ -307,56 +242,11 @@ function substitute(value: unknown, values: Record<string, string>): unknown {
 }
 
 async function fetchSkill(url: string, expectedSha = ""): Promise<string> {
-  const parsed = new URL(url);
-  if (parsed.protocol === "http:") {
-    if (!["127.0.0.1", "localhost", "::1"].includes(parsed.hostname)) {
-      throw new Error("skill URLs must use https://");
-    }
-  } else if (parsed.protocol !== "https:") {
-    throw new Error("skill URLs must use https://");
-  }
-
-  const response = await fetch(url, {
-    redirect: "follow",
-    signal: AbortSignal.timeout(20_000),
+  return fetchText(url, {
+    label: "skill",
+    timeoutMs: 20_000,
+    expectedSha256: expectedSha,
   });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const finalUrl = new URL(response.url);
-  if (
-    finalUrl.protocol !== "https:" &&
-    !(
-      finalUrl.protocol === "http:" &&
-      ["127.0.0.1", "localhost", "::1"].includes(finalUrl.hostname)
-    )
-  ) {
-    throw new Error("skill redirect must use https://");
-  }
-  const length = Number(response.headers.get("content-length") || 0);
-  if (length > MAX_SKILL_BYTES) {
-    throw new Error("skill is larger than the size limit");
-  }
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  if (response.body) {
-    const reader = response.body.getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > MAX_SKILL_BYTES) {
-        throw new Error("skill is larger than the size limit");
-      }
-      chunks.push(value);
-    }
-  }
-  const data = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
-  if (expectedSha) {
-    const digest = createHash("sha256").update(data).digest("hex");
-    if (digest.toLowerCase() !== expectedSha.trim().toLowerCase()) {
-      throw new Error("skill checksum does not match the catalog");
-    }
-  }
-  return data.toString("utf8");
 }
 
 function existingSkill(itemId: string) {
@@ -423,10 +313,9 @@ async function installSkill(
     const url = String(spec.url || "").trim();
     if (!url) throw new Error("skill definition needs a body or a URL");
     const expectedSha = String(spec.sha256 || "").trim();
-    // A catalog URL is a single point of compromise, and an unpinned body can
-    // change between review and install. Bundled bodies ship with JIT and are
-    // already reviewed, so they are exempt.
-    if (!item.bundled && !expectedSha) {
+    // A catalog is a single point of compromise, and an unpinned body can
+    // change between review and install, so a URL body must carry a checksum.
+    if (!expectedSha) {
       throw new Error(
         "catalog entry is missing a sha256 checksum for its skill body",
       );
@@ -512,7 +401,7 @@ export async function inspect(itemId: string): Promise<InspectResult> {
   }
   const spec = item.install;
   const url = String(spec.url || "").trim();
-  const checksumRequired = !item.bundled && Boolean(url);
+  const checksumRequired = Boolean(url);
   const checksumPresent = Boolean(String(spec.sha256 || "").trim());
   let body: string | undefined;
   if (typeof spec.body === "string") {

@@ -151,8 +151,8 @@ A single-file React SPA served by the Node process.
   the break-even index size, index composition, heaviest entries, categories,
   and the measured retrieval miss rate.
 - **Skills** — list, read, enable/disable, index a path, transfer, and remove.
-- **Marketplace** — the bundled catalog plus the ones you add; every install is
-  reviewed before it happens.
+- **Marketplace** — the catalogs and GitHub repositories you add; every install
+  is reviewed before it happens.
 - **MCP** — connect, disconnect, index tools, import a client config, export
   JIT-managed servers, add a server manually.
 - **Search** — live retrieval with the effective score, cosine, rerank, lexical
@@ -239,7 +239,6 @@ the file and are never written back.
 | `NEBIUS_API_KEY` | Enables Nemotron Nano reranking | unset |
 | `NEBIUS_API_BASE` | Nebius Token Factory base URL | `https://api.studio.nebius.ai/v1` |
 | `NEMOTRON_NANO_MODEL` | Reranker model | `nvidia/nemotron-nano-9b-v2` |
-| `NEMOTRON_ULTRA_MODEL` | Demo agent model | `nvidia/nemotron-3-ultra` |
 | `JIT_API_KEY` | Requires a key for `/api/*` | unset |
 | `JIT_HOME` | Index and config directory | `~/.jit` |
 | `JIT_MODEL_CACHE` | Local embedding-model cache | `$JIT_HOME/models` |
@@ -250,7 +249,8 @@ the file and are never written back.
 | `JIT_DISABLE_EMBEDDINGS` | Run keyword-only, no model download | unset |
 | `JIT_EMBEDDING_MODEL` | Transformers.js model | `Xenova/bge-small-en-v1.5` |
 | `JIT_EMBEDDING_DIM` | Expected vector size | `384` |
-| `JIT_MARKETPLACE_URL` | Extra catalog URL(s), comma-separated | unset |
+| `JIT_MARKETPLACE_URL` | Catalog URL(s) or GitHub repo(s), comma-separated | unset |
+| `JIT_GITHUB_TOKEN` | Token for private GitHub repos / rate limits | unset |
 | `JIT_MAX_REQUEST_BYTES` | Dashboard API body limit | `16777216` |
 | `JIT_MAX_SKILL_BYTES` | Skill file limit | `2097152` |
 | `JIT_LOG_LEVEL` | `DEBUG`, `INFO`, `WARN`, `ERROR` | `INFO` |
@@ -318,21 +318,36 @@ Installing a skill injects its text into an agent's context, and installing an
 MCP server runs a process — both are trust decisions, so they are treated as
 such.
 
-JIT ships a small **bundled catalog** (`marketplace.json`) with a few first-party
-skills and one reference MCP server, all with inline bodies, so a first run is
-not a dead end and nothing is fetched. You can add more catalogs (JSON with an
-`items` array) on the Marketplace page or in Settings; they are stored in
-`marketplace_urls`, and `JIT_MARKETPLACE_URL` adds catalogs from the environment
-as a comma-separated list. A user catalog overrides a bundled entry with the
-same id. Remote catalog and skill URLs must use HTTPS; plain HTTP is accepted
-only for localhost.
+JIT ships **no catalog of its own**. The marketplace is exactly the sources you
+point it at, so a fresh install shows an empty Marketplace with a prompt to add
+one. There are two kinds of source:
+
+1. **A catalog URL** — JSON with an `items` array, served over HTTPS.
+2. **A GitHub repository** — `owner/repo`, `owner/repo@ref`, `owner/repo@ref#dir`,
+   or a repo link such as `https://github.com/owner/repo/tree/main/skills`.
+   JIT resolves the ref to a **commit**, lists the tree, and then either:
+   - reads the `marketplace.json` at the root of the repo (or of `#dir`), resolving
+     relative skill paths against that commit, or
+   - crawls for `**/SKILL.md` (up to 60) and MCP definitions
+     (`.mcp.json`, `mcp.json`, `mcp.servers.json`, up to 20 servers).
+
+   Every body is fetched from `raw.githubusercontent.com` at the pinned commit and
+   hashed, so nothing can change under you between review and install. Private
+   repos and GitHub rate limits are handled with a token in `JIT_GITHUB_TOKEN`
+   (or `GITHUB_TOKEN`).
+
+Sources are added on the Marketplace page or in Settings, stored in
+`marketplace_urls`, and can also come from the environment as a comma-separated
+`JIT_MARKETPLACE_URL`. A later source overrides an earlier entry with the same
+id. Remote catalog and skill URLs must use HTTPS; plain HTTP is accepted only for
+localhost.
 
 Supply-chain guardrails:
 
 - **Checksums are required.** A skill whose body is fetched from a URL must
-  carry a `sha256` in the catalog. An unpinned body can change between review
-  and install, so JIT refuses to install it. Bundled bodies ship with JIT and are
-  exempt.
+  carry a `sha256` in the catalog, because an unpinned body can change between
+  review and install. Relative paths in a GitHub-hosted catalog get their
+  checksum computed for you at discovery time.
 - **Every entry is scanned before install.** The scanner looks for prompt
   injection ("ignore previous instructions"), credential-store access
   (`~/.ssh`, `.aws/credentials`), exfiltration (`curl … | sh`), and for MCP
@@ -444,8 +459,7 @@ systems this is a no-op.
 
 Built for the Nebius x NVIDIA Global AI Hackathon.
 
-- **NVIDIA model** — Nemotron Nano for reranking; Nemotron 3 Ultra powers the
-  demo agent.
+- **NVIDIA model** — Nemotron Nano, used for reranking retrieval candidates.
 - **Nebius platform** — Token Factory for model access.
 - **Dashboard** — real measurements from the local index, not marketing copy.
 - **License** — MIT.

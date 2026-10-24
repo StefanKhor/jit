@@ -15,8 +15,8 @@ export interface IndexItem {
   params?: string[];
   required?: string[];
   schema?: Record<string, unknown>;
-  // Where the entry came from (a catalog URL, "bundled", "mcp:<server>", or
-  // undefined for first-party local files). Not part of the content hash.
+  // Where the entry came from (a catalog URL, "mcp:<server>", or undefined for
+  // first-party local files). Not part of the content hash.
   source?: string;
 }
 
@@ -82,7 +82,6 @@ export interface Config {
   nebius_api_key: string;
   nebius_api_base: string;
   nemotron_nano_model: string;
-  nemotron_ultra_model: string;
   api_key: string;
   rerank_enabled: boolean;
   confidence_threshold: number;
@@ -192,9 +191,8 @@ export interface MarketplaceItem {
   requires?: string;
   inputs: MarketplaceInput[];
   install: Record<string, unknown>;
-  /** Which catalog this entry came from: a URL, or "bundled". */
+  /** Which catalog this entry came from: a URL or a GitHub repository. */
   origin?: string;
-  bundled?: boolean;
   checksum_present?: boolean;
   installed?: boolean;
 }

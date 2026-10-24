@@ -30,7 +30,6 @@
   "files": [
     "dist",
     "static",
-    "marketplace.json",
     "README.md",
     "LICENSE"
   ],

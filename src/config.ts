@@ -90,8 +90,6 @@ export const DEFAULT_NEBIUS_API_BASE =
 export const DEFAULT_NEBIUS_API_KEY = process.env.NEBIUS_API_KEY || "";
 export const DEFAULT_NEMOTRON_NANO_MODEL =
   process.env.NEMOTRON_NANO_MODEL || "nvidia/nemotron-nano-9b-v2";
-export const DEFAULT_NEMOTRON_ULTRA_MODEL =
-  process.env.NEMOTRON_ULTRA_MODEL || "nvidia/nemotron-3-ultra";
 
 export const DEFAULT_HOST = process.env.JIT_HOST || "127.0.0.1";
 export const DEFAULT_PORT = envNumber("JIT_PORT", 3000, 1, 65535, true);
@@ -114,7 +112,6 @@ export const DEFAULT_CONFIG: Config = {
   nebius_api_key: DEFAULT_NEBIUS_API_KEY,
   nebius_api_base: DEFAULT_NEBIUS_API_BASE,
   nemotron_nano_model: DEFAULT_NEMOTRON_NANO_MODEL,
-  nemotron_ultra_model: DEFAULT_NEMOTRON_ULTRA_MODEL,
   api_key: "",
   rerank_enabled: true,
   confidence_threshold: CONFIDENCE_THRESHOLD,
@@ -126,7 +123,6 @@ const FILE_KEYS = new Set<keyof Config>([
   "nebius_api_key",
   "nebius_api_base",
   "nemotron_nano_model",
-  "nemotron_ultra_model",
   "api_key",
   "rerank_enabled",
   "confidence_threshold",
@@ -138,7 +134,6 @@ const ENV_KEYS: Partial<Record<keyof Config, string>> = {
   nebius_api_key: "NEBIUS_API_KEY",
   nebius_api_base: "NEBIUS_API_BASE",
   nemotron_nano_model: "NEMOTRON_NANO_MODEL",
-  nemotron_ultra_model: "NEMOTRON_ULTRA_MODEL",
   api_key: "JIT_API_KEY",
 };
 
@@ -277,8 +272,6 @@ export function loadConfig(): Config {
     config.nebius_api_base || DEFAULT_NEBIUS_API_BASE;
   config.nemotron_nano_model =
     config.nemotron_nano_model || DEFAULT_NEMOTRON_NANO_MODEL;
-  config.nemotron_ultra_model =
-    config.nemotron_ultra_model || DEFAULT_NEMOTRON_ULTRA_MODEL;
   return config;
 }
 

@@ -35,6 +35,14 @@ const GOOD_BODY = [
 
 const GOOD_SHA = createHash("sha256").update(GOOD_BODY).digest("hex");
 
+const PLAIN_BODY = [
+  "---",
+  "name: plain-inline",
+  "description: a benign inline entry",
+  "---",
+  "Do the plain thing.",
+].join("\n");
+
 let base = "";
 let server: Server;
 
@@ -65,6 +73,13 @@ before(async () => {
               name: "Pinned skill",
               description: "a checksum-pinned remote body",
               install: { url: `${base}/good.md`, sha256: GOOD_SHA },
+            },
+            {
+              id: "plain-inline",
+              kind: "skill",
+              name: "Plain inline skill",
+              description: "a benign inline body with no injection pattern",
+              install: { body: PLAIN_BODY },
             },
             {
               id: "bad-skill",
@@ -108,49 +123,41 @@ after(() => {
   server?.close();
 });
 
-test("the bundled catalog ships first-party entries with inline bodies", async () => {
-  const { items, source } = await catalog();
-  assert.equal(source, "bundled");
-  assert.ok(items.length >= 1, "expected a bundled catalog");
-  for (const item of items) {
-    assert.equal(item.origin, "bundled");
-    assert.equal(item.bundled, true);
-    assert.ok(item.kind === "skill" || item.kind === "mcp");
-    // Inline bodies need no checksum; URL bodies would.
-    if (item.kind === "skill" && typeof item.install.url === "string") {
-      assert.equal(item.checksum_present, true);
-    }
-  }
+test("JIT ships no catalog of its own", async () => {
+  const { items, source, warning } = await catalog();
+  assert.equal(items.length, 0);
+  assert.equal(source, "none");
+  assert.match(warning, /No marketplace catalogs configured/);
 });
 
-test("every bundled skill clears the scanner with no acknowledgement", async () => {
-  const { items } = await catalog();
-  for (const item of items.filter((entry) => entry.kind === "skill")) {
-    const result = await inspect(item.id);
-    assert.equal(
-      result.report.requires_ack,
-      false,
-      `bundled entry '${item.id}' should be clean`,
-    );
-    assert.deepEqual(result.report.findings, []);
-  }
-});
-
-test("a bundled entry installs cleanly and is indexed", async () => {
-  const result = await install("commit-message");
-  assert.equal(result.ok, true);
-  assert.equal(result.installed, true);
-  assert.deepEqual(result.warnings, []);
-});
-
-test("a remote catalog is merged over the bundled one", async () => {
+test("a configured catalog is the whole marketplace", async () => {
   saveConfig({ marketplace_urls: [`${base}/catalog.json`] });
-  const { items, source } = await catalog();
-  assert.equal(source, "bundled+remote");
+  const { items, source, warning } = await catalog();
+  assert.equal(source, "remote");
+  assert.equal(warning, "");
+  assert.ok(items.length >= 5, "expected the catalog entries");
+  for (const item of items) {
+    assert.equal(item.origin, `${base}/catalog.json`);
+    assert.ok(item.kind === "skill" || item.kind === "mcp");
+  }
   const unpinned = items.find((item) => item.id === "evil-skill");
-  assert.ok(unpinned, "expected the remote entry");
+  assert.ok(unpinned, "expected the unpinned remote entry");
   assert.equal(unpinned?.checksum_present, false);
-  assert.equal(unpinned?.origin, `${base}/catalog.json`);
+  const pinned = items.find((item) => item.id === "good-skill");
+  assert.equal(pinned?.checksum_present, true);
+});
+
+test("a benign inline entry scans clean and installs without acknowledgement", async () => {
+  const result = await inspect("plain-inline");
+  assert.equal(result.report.requires_ack, false);
+  assert.deepEqual(result.report.findings, []);
+  // An inline body carries no URL, so there is nothing to pin.
+  assert.equal(result.checksum_required, false);
+
+  const installed = await install("plain-inline");
+  assert.equal(installed.ok, true);
+  assert.equal(installed.installed, true);
+  assert.deepEqual(installed.warnings, []);
 });
 
 test("an unpinned remote body is refused", async () => {

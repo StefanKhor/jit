@@ -488,6 +488,7 @@
     font-family: var(--mono); font-size: 9px; letter-spacing: .06em; color: var(--ink-3);
   }
   .market-warn { color: var(--warn); }
+  .market-origin { overflow-wrap: anywhere; }
   .market-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin-top: 2px; }
   .market-actions .btn { padding: 7px 12px; }
   .market-installed {

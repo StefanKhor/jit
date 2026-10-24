@@ -11,7 +11,6 @@ export function Settings() {
   const [nebiusKey, setNebiusKey] = useState("");
   const [base, setBase] = useState("");
   const [nano, setNano] = useState("");
-  const [ultra, setUltra] = useState("");
   const [rerank, setRerank] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState("");
@@ -24,7 +23,6 @@ export function Settings() {
     if (!config) return;
     setBase(config.nebius_api_base || "");
     setNano(config.nemotron_nano_model || "");
-    setUltra(config.nemotron_ultra_model || "");
     setRerank(Boolean(config.rerank_enabled));
     setThreshold(Number(config.confidence_threshold ?? 0.6));
     setMarketUrls(Array.isArray(config.marketplace_urls) ? config.marketplace_urls : []);
@@ -37,7 +35,6 @@ export function Settings() {
       const updates: Record<string, unknown> = {
         nebius_api_base: base.trim(),
         nemotron_nano_model: nano.trim(),
-        nemotron_ultra_model: ultra.trim(),
         rerank_enabled: rerank,
       };
       if (nebiusKey.trim()) updates.nebius_api_key = nebiusKey.trim();
@@ -276,15 +273,6 @@ export function Settings() {
                     onChange={(event) => setNano(event.target.value)}
                   />
                 </label>
-                <label className="field">
-                  <span className="field-label">Ultra model</span>
-                  <input
-                    type="text"
-                    spellCheck={false}
-                    value={ultra}
-                    onChange={(event) => setUltra(event.target.value)}
-                  />
-                </label>
               </div>
               <label className="switch">
                 <input
@@ -445,14 +433,15 @@ export function Settings() {
               <h2>Marketplace catalogs</h2>
             </div>
             <p className="panel-copy">
-              JIT ships a small bundled catalog. Add one or more remote catalog
-              URLs (JSON with an items array) to merge over it; a remote entry
-              with the same id wins.
+              JIT has no built-in catalog. Add one or more remote catalog URLs
+              (JSON with an items array) to populate the marketplace; a later
+              source overrides an earlier entry with the same id. A GitHub
+              repository works too: enter<code> owner/repo</code> or a repo link.
             </p>
             <form className="add-row" onSubmit={addMarketplace}>
               <input
-                type="url"
-                placeholder="https://example.com/catalog.json"
+                type="text"
+                placeholder="https://example.com/catalog.json or owner/repo"
                 spellCheck={false}
                 autoComplete="off"
                 value={newMarketUrl}
