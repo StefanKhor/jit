@@ -29,6 +29,7 @@ import type {
 const CONNECT_TIMEOUT = 45_000;
 const CALL_TIMEOUT = 120_000;
 const SERVER_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const UNSAFE_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 
 function stringEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   const result: Record<string, string> = {};
@@ -127,7 +128,7 @@ export class MCPClientManager {
     const source = input as Record<string, unknown>;
     const config: McpServerConfig = {};
     for (const [key, value] of Object.entries(source)) {
-      if (key.startsWith("_")) continue;
+      if (key.startsWith("_") || UNSAFE_KEYS.has(key)) continue;
       (config as Record<string, unknown>)[key] = value;
     }
 
@@ -564,13 +565,7 @@ export class MCPClientManager {
   async statusSummary(): Promise<McpServerSummary[]> {
     await this.loadConfigs();
     const db = await import("../storage/db.js");
-    const conn = db.initDb();
-    let indexed = new Map<string, number>();
-    try {
-      indexed = db.indexedToolCounts(conn);
-    } finally {
-      conn.close();
-    }
+    const indexed = db.indexedToolCounts(db.initDb());
     return Object.entries(this.getStatus())
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([name, status]) => ({
@@ -610,6 +605,9 @@ export class MCPClientManager {
       when_to_use: String(tool.description || ""),
       body: JSON.stringify(schema, null, 2),
       path: "",
+      // Tools always come from an external MCP server, so they are never
+      // first-party. Used to label provenance in JIT_FIND results.
+      source: `mcp:${serverName}`,
     };
   }
 }

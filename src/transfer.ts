@@ -197,51 +197,47 @@ export async function exportSkills(
   const exported: Array<{ id: string; path: string }> = [];
   const skipped: string[] = [];
   const errors: string[] = [];
-  try {
-    for (const rawId of ids) {
-      const itemId = String(rawId || "").trim();
-      if (!itemId) continue;
-      const item = getItem(db, itemId);
-      if (!item) {
-        errors.push(`${itemId}: not found`);
-        continue;
-      }
-      if (item.kind !== "skill") {
-        errors.push(`${itemId}: not a skill`);
-        continue;
-      }
-      let dirName: string;
-      try {
-        dirName = skillDirName(itemId);
-      } catch (error) {
-        errors.push(
-          `${itemId}: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        continue;
-      }
-      const source = path.resolve(expandHome(item.path || ""));
-      if (!existsSync(source) || !statSync(source).isFile()) {
-        errors.push(`${itemId}: source file is missing`);
-        continue;
-      }
-      if (statSync(source).size > MAX_SKILL_BYTES) {
-        errors.push(`${itemId}: source file exceeds the size limit`);
-        continue;
-      }
-      const target = path.join(dest, dirName, "SKILL.md");
-      if (path.resolve(target) === source) {
-        skipped.push(itemId);
-        continue;
-      }
-      if (existsSync(target) && !overwrite) {
-        skipped.push(itemId);
-        continue;
-      }
-      atomicWriteFile(target, readFileSync(source, "utf8"), 0o644);
-      exported.push({ id: itemId, path: target });
+  for (const rawId of ids) {
+    const itemId = String(rawId || "").trim();
+    if (!itemId) continue;
+    const item = getItem(db, itemId);
+    if (!item) {
+      errors.push(`${itemId}: not found`);
+      continue;
     }
-  } finally {
-    db.close();
+    if (item.kind !== "skill") {
+      errors.push(`${itemId}: not a skill`);
+      continue;
+    }
+    let dirName: string;
+    try {
+      dirName = skillDirName(itemId);
+    } catch (error) {
+      errors.push(
+        `${itemId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      continue;
+    }
+    const source = path.resolve(expandHome(item.path || ""));
+    if (!existsSync(source) || !statSync(source).isFile()) {
+      errors.push(`${itemId}: source file is missing`);
+      continue;
+    }
+    if (statSync(source).size > MAX_SKILL_BYTES) {
+      errors.push(`${itemId}: source file exceeds the size limit`);
+      continue;
+    }
+    const target = path.join(dest, dirName, "SKILL.md");
+    if (path.resolve(target) === source) {
+      skipped.push(itemId);
+      continue;
+    }
+    if (existsSync(target) && !overwrite) {
+      skipped.push(itemId);
+      continue;
+    }
+    atomicWriteFile(target, readFileSync(source, "utf8"), 0o644);
+    exported.push({ id: itemId, path: target });
   }
 
   return { exported, skipped, errors, destination: dest };
@@ -412,34 +408,29 @@ export async function exportMcp(
 }
 
 export async function removeSkillCopy(id: string): Promise<boolean> {
-  const db = initDb();
+  const item = getItem(initDb(), id);
+  if (!item) return false;
   let fileRemoved = false;
-  try {
-    const item = getItem(db, id);
-    if (!item) return false;
-    const resolved = path.resolve(item.path || "");
-    const root = path.resolve(JIT_SKILLS_DIR);
-    let removeIndex = true;
-    if (inside(root, resolved) && existsSync(resolved)) {
+  const resolved = path.resolve(item.path || "");
+  const root = path.resolve(JIT_SKILLS_DIR);
+  let removeIndex = true;
+  if (inside(root, resolved) && existsSync(resolved)) {
+    try {
+      unlinkSync(resolved);
+      fileRemoved = true;
       try {
-        unlinkSync(resolved);
-        fileRemoved = true;
-        try {
-          const parent = path.dirname(resolved);
-          if (path.resolve(parent) !== root) {
-            rmdirSync(parent);
-          }
-        } catch {
-          // Directory is not empty; leave it.
+        const parent = path.dirname(resolved);
+        if (path.resolve(parent) !== root) {
+          rmdirSync(parent);
         }
-      } catch (error) {
-        removeIndex = false;
-        logger.warn("could not remove JIT skill copy: %s", error);
+      } catch {
+        // Directory is not empty; leave it.
       }
+    } catch (error) {
+      removeIndex = false;
+      logger.warn("could not remove JIT skill copy: %s", error);
     }
-    if (removeIndex) deleteItem(id);
-    return fileRemoved;
-  } finally {
-    db.close();
   }
+  if (removeIndex) deleteItem(id);
+  return fileRemoved;
 }

@@ -13,6 +13,8 @@ import matter from "gray-matter";
 
 import {
   DEFAULT_SKILL_PATHS,
+  EMBEDDING_DIM,
+  EMBEDDING_MODEL,
   INDEX_DIR,
   MAX_SKILL_BYTES,
 } from "./config.js";
@@ -25,10 +27,12 @@ import {
   deleteItem as dbDeleteItem,
   deleteToolsForServer as dbDeleteToolsForServer,
   getItem,
+  getMeta,
   getStats,
   initDb,
   listItems,
   setEnabled as dbSetEnabled,
+  setMeta,
   transaction,
   upsertItem,
   getExisting,
@@ -57,6 +61,16 @@ const SKIP_DIRS = new Set([
   "venv",
 ]);
 const MAX_SCAN_DEPTH = 6;
+
+// Embeddings are computed locally, so an oversized single call can exhaust
+// memory (the import endpoint accepts up to 50k items). Embed in batches.
+const EMBED_BATCH_SIZE = 64;
+
+// Records which embedding model produced the stored vectors. When the model or
+// dimension changes, every vector is invalid and must be recomputed even if the
+// entry text is unchanged.
+const EMBED_SIGNATURE_KEY = "embedding_signature";
+const EMBED_SIGNATURE = `${EMBEDDING_MODEL}:${EMBEDDING_DIM}`;
 
 export function expandHome(value: string): string {
   if (value === "~") return homedir();
@@ -169,7 +183,7 @@ export function parseSkillText(
       name = fallbackName;
     }
   }
-  name = name.replace(/\//g, "-");
+  name = name.replace(/[\\/]+/g, "-");
   const title = String(meta.title || name).trim();
   const description =
     String(meta.description || "").trim() ||
@@ -261,6 +275,7 @@ export async function indexItems(
   const errors: string[] = [];
 
   try {
+    const modelChanged = getMeta(db, EMBED_SIGNATURE_KEY) !== EMBED_SIGNATURE;
     const existing = getExisting(db);
     const pending: Array<{
       item: IndexItem;
@@ -286,6 +301,7 @@ export async function indexItems(
       const digest = contentHash(item);
       const current = existing.get(id);
       if (
+        !modelChanged &&
         current &&
         current.content_hash === digest &&
         current.embedding !== null
@@ -301,22 +317,32 @@ export async function indexItems(
     }
 
     let embeddings: Array<Float32Array | null> = pending.map(
-      ({ current }) => current?.embedding ?? null,
+      ({ current }) => (modelChanged ? null : current?.embedding ?? null),
     );
+    let embedded = false;
     try {
-      const vectors = await embedTexts(
-        pending.map(({ item }) => buildEmbeddingText(item)),
-      );
+      const vectors: Float32Array[] = [];
+      for (let start = 0; start < pending.length; start += EMBED_BATCH_SIZE) {
+        const batch = pending.slice(start, start + EMBED_BATCH_SIZE);
+        const batchVectors = await embedTexts(
+          batch.map(({ item }) => buildEmbeddingText(item)),
+        );
+        vectors.push(...batchVectors);
+      }
       embeddings = pending.map((_, index) => vectors[index] || null);
+      embedded = true;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.warn("embedding failed; indexing metadata only: %s", message);
       // Embeddings are an enhancement. A model download or runtime failure
       // should not make an otherwise successful index operation look failed.
-      // Keep a previous vector only when the content is unchanged. A stale
-      // vector for changed content would silently poison retrieval.
+      // Keep a previous vector only when the content and model are unchanged. A
+      // stale vector for changed content (or a changed model) would silently
+      // poison retrieval.
       embeddings = pending.map(({ current, digest }) =>
-        current?.content_hash === digest ? current.embedding : null,
+        !modelChanged && current?.content_hash === digest
+          ? current.embedding
+          : null,
       );
     }
 
@@ -337,6 +363,9 @@ export async function indexItems(
         if (current) updatedNow += 1;
         else addedNow += 1;
       }
+      // Only record the signature once vectors were actually produced, so a
+      // failed run retries instead of marking stale vectors as current.
+      if (embedded) setMeta(db, EMBED_SIGNATURE_KEY, EMBED_SIGNATURE);
     });
     added += addedNow;
     updated += updatedNow;
@@ -351,38 +380,21 @@ export async function indexItems(
     const message = error instanceof Error ? error.message : String(error);
     logger.error("indexing failed: %s", message);
     errors.push(message);
-  } finally {
-    db.close();
   }
 
   return { added, updated, skipped, errors };
 }
 
 export function deleteItem(id: string): boolean {
-  const db = initDb();
-  try {
-    return dbDeleteItem(db, id);
-  } finally {
-    db.close();
-  }
+  return dbDeleteItem(initDb(), id);
 }
 
 export function deleteToolsForServer(server: string): number {
-  const db = initDb();
-  try {
-    return dbDeleteToolsForServer(db, server);
-  } finally {
-    db.close();
-  }
+  return dbDeleteToolsForServer(initDb(), server);
 }
 
 export function setEnabled(id: string, enabled: boolean): boolean {
-  const db = initDb();
-  try {
-    return dbSetEnabled(db, id, enabled);
-  } finally {
-    db.close();
-  }
+  return dbSetEnabled(initDb(), id, enabled);
 }
 
 export async function indexDefaultPaths(
@@ -420,12 +432,7 @@ export async function indexDefaultPaths(
 }
 
 export function totalIndexed(): Counts {
-  const db = initDb();
-  try {
-    return countItems(db);
-  } finally {
-    db.close();
-  }
+  return countItems(initDb());
 }
 
 export function indexDirectory(): string {
@@ -437,19 +444,9 @@ export function tokenEstimate(text: string): number {
 }
 
 export function getListItem(id: string): ListItem | null {
-  const db = initDb();
-  try {
-    return listItems(db).find((item) => item.id === id) || null;
-  } finally {
-    db.close();
-  }
+  return listItems(initDb()).find((item) => item.id === id) || null;
 }
 
 export function getStatsSnapshot(): Stats {
-  const db = initDb();
-  try {
-    return getStats(db);
-  } finally {
-    db.close();
-  }
+  return getStats(initDb());
 }

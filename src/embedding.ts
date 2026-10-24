@@ -11,23 +11,58 @@ env.cacheDir = MODEL_CACHE_DIR;
 env.allowLocalModels = true;
 env.allowRemoteModels = true;
 
+// Air-gapped or locked-down installs can skip the model entirely and run on the
+// lexical fallback. Set JIT_DISABLE_EMBEDDINGS=1 to opt in.
+const EMBEDDINGS_DISABLED = /^(1|true|yes|on)$/i.test(
+  process.env.JIT_DISABLE_EMBEDDINGS || "",
+);
+
 let extractorPromise: Promise<FeatureExtractionPipeline> | null = null;
+// When the model cannot load (offline, missing runtime, first-run download
+// blocked) every call would otherwise pay the full load timeout again. Remember
+// the failure and refuse quickly for a cooldown so retrieval degrades to the
+// lexical fallback instead of hanging per query.
+let lastFailureAt = 0;
+const RETRY_AFTER_MS = 300_000;
 
 function getExtractor(): Promise<FeatureExtractionPipeline> {
-  if (!extractorPromise) {
-    logger.info("loading embedding model %s", EMBEDDING_MODEL);
-    extractorPromise = pipeline("feature-extraction", EMBEDDING_MODEL, {
-      dtype: "fp32",
-    }).catch((error: unknown) => {
-      extractorPromise = null;
-      throw new Error(
-        `could not load embedding model ${EMBEDDING_MODEL}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    });
+  if (EMBEDDINGS_DISABLED) {
+    return Promise.reject(
+      new Error("embeddings are disabled by JIT_DISABLE_EMBEDDINGS"),
+    );
   }
+  if (extractorPromise) return extractorPromise;
+  if (lastFailureAt && Date.now() - lastFailureAt < RETRY_AFTER_MS) {
+    return Promise.reject(
+      new Error(`embedding model ${EMBEDDING_MODEL} is unavailable (last load failed)`),
+    );
+  }
+  logger.info("loading embedding model %s", EMBEDDING_MODEL);
+  extractorPromise = pipeline("feature-extraction", EMBEDDING_MODEL, {
+    dtype: "fp32",
+  }).catch((error: unknown) => {
+    extractorPromise = null;
+    lastFailureAt = Date.now();
+    logger.warn(
+      "embedding model %s could not be loaded; remote-backed retrieval is unavailable for %ds: %s",
+      EMBEDDING_MODEL,
+      Math.round(RETRY_AFTER_MS / 1000),
+      error instanceof Error ? error.message : String(error),
+    );
+    throw new Error(
+      `could not load embedding model ${EMBEDDING_MODEL}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  });
   return extractorPromise;
+}
+
+// Allow a later attempt (for example after the model finishes downloading)
+// without restarting the process.
+export function resetEmbeddingModel(): void {
+  extractorPromise = null;
+  lastFailureAt = 0;
 }
 
 export async function embedTexts(texts: string[]): Promise<Float32Array[]> {
