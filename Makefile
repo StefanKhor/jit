@@ -1,25 +1,26 @@
-.PHONY: lint format serve dashboard clean setup
+.PHONY: install dev build start serve typecheck check clean
 
-# NixOS: find libstdc++ automatically
-LIBSTDCPP := $(shell find /nix/store -name "libstdc++.so.6" -path "*/lib/*" 2>/dev/null | head -1 | xargs dirname 2>/dev/null)
+install:
+	npm ci
 
-setup:
-	@echo "Setting up environment..."
-	@echo "export LD_LIBRARY_PATH=$(LIBSTDCPP):$$LD_LIBRARY_PATH" > .env.local
-	@echo "Created .env.local — source it before running: source .env.local"
+dev:
+	npm run dev
 
-lint:
-	LD_LIBRARY_PATH=$(LIBSTDCPP):$$LD_LIBRARY_PATH ruff check jit/
+build:
+	npm run build
 
-format:
-	LD_LIBRARY_PATH=$(LIBSTDCPP):$$LD_LIBRARY_PATH ruff format jit/
+start:
+	npm start
 
 serve:
-	LD_LIBRARY_PATH=$(LIBSTDCPP):$$LD_LIBRARY_PATH jit serve
+	npm run serve
 
-dashboard:
-	LD_LIBRARY_PATH=$(LIBSTDCPP):$$LD_LIBRARY_PATH jit dashboard
+typecheck:
+	npm run typecheck
+
+check:
+	npm run typecheck
+	npm run build
 
 clean:
-	rm -rf .jit __pycache__ jit/__pycache__
-	rm -rf build dist *.egg-info .env.local
+	npm run clean

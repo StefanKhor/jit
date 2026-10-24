@@ -1,30 +1,61 @@
-FROM python:3.11-slim
+# syntax=docker/dockerfile:1
+
+FROM node:24-bookworm-slim AS build
+
+WORKDIR /app
+ENV npm_config_update_notifier=false
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY tsconfig.json ./
+COPY src ./src
+COPY web ./web
+COPY marketplace.json README.md LICENSE ./
+
+RUN npm run build
+
+# Download the local embedding model into the image so the first dashboard
+# request does not depend on the network. The model cache is separate from the
+# user's /data volume.
+RUN JIT_MODEL_CACHE=/app/models node --input-type=module \
+    -e "import('./dist/embedding.js').then((m) => m.warmupEmbeddingModel())"
+
+RUN npm prune --omit=dev
+
+FROM node:24-bookworm-slim AS runtime
+
+ENV NODE_ENV=production \
+    JIT_HOME=/data \
+    JIT_MODEL_CACHE=/app/models
 
 WORKDIR /app
 
-# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+      ca-certificates \
+      libgomp1 \
+      libstdc++6 \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 10001 jit \
+    && mkdir -p /data \
+    && chown jit:jit /data
 
-# Copy package files
-COPY pyproject.toml .
-COPY jit/ ./jit/
-COPY skills/ ./skills/
-COPY dashboard.html .
+COPY --from=build --chown=jit:jit /app/package.json /app/package-lock.json ./
+COPY --from=build --chown=jit:jit /app/node_modules ./node_modules
+COPY --from=build --chown=jit:jit /app/dist ./dist
+COPY --from=build --chown=jit:jit /app/static ./static
+COPY --from=build --chown=jit:jit /app/models ./models
+COPY --from=build --chown=jit:jit \
+      /app/marketplace.json \
+      /app/README.md \
+      /app/LICENSE \
+      ./
 
-# Install JIT
-RUN pip install --no-cache-dir -e .
+USER jit
 
-# Create index directory
-RUN mkdir -p /root/.jit
+EXPOSE 3000
 
-# Expose dashboard port
-EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD node -e "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/api/health')" || exit 1
-
-# Default: run dashboard
-CMD ["jit", "dashboard", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["node", "dist/cli.js", "dashboard", "--host", "0.0.0.0", "--port", "3000"]

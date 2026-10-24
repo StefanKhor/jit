@@ -1,58 +1,31 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
+# Dependencies
+node_modules/
+npm-debug.log*
+
+# Build output
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-.venv/
-venv/
-ENV/
+static/
+*.tsbuildinfo
+.vite/
 
-# JIT index
+# JIT runtime state and local model cache
 .jit/
+skills.db
+models/
 
-# IDE
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Editor and OS
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
-
-# OS
 .DS_Store
 Thumbs.db
 
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-
-# Environment
-.env
-.env.local
-# Generated index files
-.jit/
-skills.faiss
-skills.db
-
-# Node
-node_modules/
-npm-debug.log*
-
-# Build artifacts
-*.egg-info/
+# Tooling caches
+coverage/

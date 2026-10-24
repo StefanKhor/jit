@@ -1,0 +1,12 @@
+.git
+.gitignore
+node_modules
+dist
+static
+coverage
+.env
+.env.*
+!.env.example
+.jit
+*.log
+.DS_Store
