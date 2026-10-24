@@ -43,9 +43,11 @@
     "build:web": "vite build --config web/vite.config.ts",
     "start": "node dist/cli.js dashboard",
     "serve": "node dist/cli.js serve",
+    "test": "node --import tsx --test tests/db.test.ts tests/bm25.test.ts tests/scan.test.ts tests/validate.test.ts tests/retrieval.test.ts tests/marketplace.test.ts tests/embedding.test.ts",
+    "eval": "node --import tsx scripts/eval.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit",
-    "check": "npm run typecheck && npm run build",
-    "clean": "rm -rf dist static",
+    "check": "npm run typecheck && npm test && npm run build",
+    "clean": "node -e \"const fs=require('node:fs');fs.rmSync('dist',{recursive:true,force:true});fs.rmSync('static',{recursive:true,force:true})\"",
     "prepack": "npm run build"
   },
   "dependencies": {
@@ -70,10 +72,5 @@
     "typescript": "^5.9.3",
     "vite": "^8.3.5",
     "vite-plugin-singlefile": "^2.3.4"
-  },
-  "allowScripts": {
-    "esbuild@0.28.2": true,
-    "onnxruntime-node@1.30.0": true,
-    "protobufjs@7.6.6": true
   }
 }
