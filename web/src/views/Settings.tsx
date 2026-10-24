@@ -17,6 +17,7 @@ export function Settings() {
   const [saving, setSaving] = useState("");
   const [marketUrls, setMarketUrls] = useState<string[]>([]);
   const [newMarketUrl, setNewMarketUrl] = useState("");
+  const [threshold, setThreshold] = useState(0.6);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -25,6 +26,7 @@ export function Settings() {
     setNano(config.nemotron_nano_model || "");
     setUltra(config.nemotron_ultra_model || "");
     setRerank(Boolean(config.rerank_enabled));
+    setThreshold(Number(config.confidence_threshold ?? 0.6));
     setMarketUrls(Array.isArray(config.marketplace_urls) ? config.marketplace_urls : []);
   }, [config]);
 
@@ -42,6 +44,19 @@ export function Settings() {
       await ctx.saveConfig(updates);
       setNebiusKey("");
       ctx.toast("Settings saved.");
+    } catch (error) {
+      ctx.toast(error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      setSaving("");
+    }
+  };
+
+  const saveThreshold = async (event: FormEvent) => {
+    event.preventDefault();
+    setSaving("threshold");
+    try {
+      await ctx.saveConfig({ confidence_threshold: threshold });
+      ctx.toast(`Confidence threshold set to ${threshold.toFixed(2)}.`);
     } catch (error) {
       ctx.toast(error instanceof Error ? error.message : String(error), "error");
     } finally {
@@ -311,6 +326,47 @@ export function Settings() {
 
           <div className="panel">
             <div className="panel-head">
+              <h2>Retrieval threshold</h2>
+              <span className="panel-note">recall vs precision</span>
+            </div>
+            <p className="panel-copy">
+              JIT returns a match only when the score clears this bar. Lower it
+              to catch more (more false positives), raise it to return only
+              confident matches. Measure the effect with{" "}
+              <code>npm run eval</code> and the Search view.
+            </p>
+            <form onSubmit={saveThreshold}>
+              <label className="field">
+                <span className="field-label">
+                  Confidence threshold <em>{threshold.toFixed(2)}</em>
+                </span>
+                <input
+                  type="range"
+                  min={0.2}
+                  max={0.95}
+                  step={0.05}
+                  value={threshold}
+                  onChange={(event) => setThreshold(Number(event.target.value))}
+                />
+                <span className="field-help">
+                  Rerank scores are 0–3 scaled to 0–1; cosine and the keyword
+                  fallback are also 0–1. Default 0.6.
+                </span>
+              </label>
+              <div className="form-actions">
+                <button
+                  className="btn btn-solid"
+                  type="submit"
+                  disabled={saving === "threshold"}
+                >
+                  {saving === "threshold" ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <div className="panel">
+            <div className="panel-head">
               <h2>Access</h2>
               <span className="panel-note">{authOn ? "enabled" : "off"}</span>
             </div>
@@ -389,8 +445,9 @@ export function Settings() {
               <h2>Marketplace catalogs</h2>
             </div>
             <p className="panel-copy">
-              JIT has no bundled catalog. Add one or more remote catalog URLs
-              (JSON with an items array).
+              JIT ships a small bundled catalog. Add one or more remote catalog
+              URLs (JSON with an items array) to merge over it; a remote entry
+              with the same id wins.
             </p>
             <form className="add-row" onSubmit={addMarketplace}>
               <input

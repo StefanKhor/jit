@@ -142,6 +142,62 @@ function Categories({ stats }: { stats: Stats }) {
   );
 }
 
+function Quality({ stats }: { stats: Stats }) {
+  const ctx = useJit();
+  const retrieval = stats.retrieval;
+  const total = retrieval?.total || 0;
+  const misses = retrieval?.misses || 0;
+  const missRate = Number(retrieval?.miss_rate || 0);
+  const threshold = Number(ctx.config?.confidence_threshold ?? 0.6);
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <h2>Retrieval quality</h2>
+        <span className="panel-note">
+          {total ? `${fmt(total)} queries logged` : "not measured yet"}
+        </span>
+      </div>
+      {total === 0 ? (
+        <p className="panel-copy" style={{ marginBottom: 0 }}>
+          Recall is JIT's core promise and it is only worth trusting if it is
+          measured. Run queries from Search; every JIT_FIND and dashboard search
+          is logged here with its decision and score.
+        </p>
+      ) : (
+        <>
+          <div className="figures" style={{ marginTop: 0, borderTop: 0 }}>
+            <figure>
+              <figcaption>Miss rate</figcaption>
+              <div className="figure-value accent">
+                <AnimatedNumber value={missRate} decimals={1} />
+                <span className="figure-unit">%</span>
+              </div>
+              <div className="figure-note">
+                <span>{fmt(misses)}</span> of {fmt(total)} returned nothing
+              </div>
+            </figure>
+            <figure>
+              <figcaption>Hit rate</figcaption>
+              <div className="figure-value">
+                <AnimatedNumber value={100 - missRate} decimals={1} />
+                <span className="figure-unit">%</span>
+              </div>
+              <div className="figure-note">
+                threshold {threshold.toFixed(2)} · tune it in Search
+              </div>
+            </figure>
+          </div>
+          <div className="empty-actions">
+            <button className="btn" onClick={() => ctx.setView("search")}>
+              Inspect retrievals
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function Overview() {
   const ctx = useJit();
   const stats = ctx.stats;
@@ -151,6 +207,8 @@ export function Overview() {
   const overhead = Math.max(0, Number(tokens?.jit || 0) - Number(tokens?.static || 0));
   const rawRatio = tokens?.static ? (tokens.jit / tokens.static) * 100 : 0;
   const fillRatio = Math.min(100, rawRatio);
+  const breakEven = Number(tokens?.break_even || 0);
+  const belowBreakEven = breakEven > 0 && total > 0 && total < breakEven;
 
   if (!stats) {
     return (
@@ -276,7 +334,26 @@ export function Overview() {
             Static loading <b>{fmt(tokens?.static || 0)} tok</b>
           </span>
         </div>
+        <p className="panel-copy" style={{ margin: "18px 0 0" }}>
+          {breakEven > 0 ? (
+            <>
+              Break-even at <b>{fmt(breakEven)}</b> entries: below that, loading
+              everything statically costs less per task than JIT's{" "}
+              {fmt(tokens?.startup || 0)}-token tool schema.{" "}
+              {belowBreakEven ? (
+                <span style={{ color: "var(--warn)" }}>
+                  This index has {fmt(total)} entries, so JIT is a net cost at
+                  this size.
+                </span>
+              ) : null}
+            </>
+          ) : (
+            "Add entries to estimate the break-even point."
+          )}
+        </p>
       </div>
+
+      <Quality stats={stats} />
 
       <div className="columns">
         <Composition stats={stats} />

@@ -5,6 +5,7 @@ import { fmt, summary } from "../format";
 import type {
   ConfigPath,
   ConfirmRequest,
+  InspectResult,
   InstallResult,
   MarketplaceInput,
   MarketplaceItem,
@@ -268,6 +269,9 @@ export function MarketDialog({
   const ctx = useJit();
   const [values, setValues] = useState<Record<string, string>>({});
   const [consent, setConsent] = useState(false);
+  const [ack, setAck] = useState(false);
+  const [inspect, setInspect] = useState<InspectResult | null>(null);
+  const [inspecting, setInspecting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -279,8 +283,29 @@ export function MarketDialog({
     }
     setValues(initial);
     setConsent(false);
+    setAck(false);
     setError("");
     setBusy(false);
+    setInspect(null);
+    setInspecting(true);
+    let cancelled = false;
+    ctx
+      .api<InspectResult>("/api/marketplace/inspect", {
+        method: "POST",
+        body: JSON.stringify({ id: item.id }),
+      })
+      .then((result) => {
+        if (!cancelled) setInspect(result);
+      })
+      .catch(() => {
+        if (!cancelled) setInspect(null);
+      })
+      .finally(() => {
+        if (!cancelled) setInspecting(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [item]);
 
   const previewValues = useMemo(() => {
@@ -318,11 +343,17 @@ export function MarketDialog({
         : [env, command].filter(Boolean).join(" ") || "—"
       : `${ctx.config?.index_dir || "~/.jit"}/skills/${item.id}/SKILL.md`;
 
+  const checksumMissing = Boolean(
+    inspect && inspect.checksum_required && !inspect.checksum_present,
+  );
+  const requiresAck = Boolean(inspect?.report.requires_ack);
   const canInstall =
+    !checksumMissing &&
     (item.inputs || [])
       .filter((input) => input.required)
       .every((input) => Boolean(values[input.key]?.trim())) &&
-    (item.kind !== "mcp" || consent);
+    (item.kind !== "mcp" || consent) &&
+    (!requiresAck || ack);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -332,7 +363,7 @@ export function MarketDialog({
     try {
       const result = await ctx.api<InstallResult>("/api/marketplace/install", {
         method: "POST",
-        body: JSON.stringify({ id: item.id, inputs: values }),
+        body: JSON.stringify({ id: item.id, inputs: values, acknowledge: ack }),
       });
       onClose();
       if (result.connected === false) {
@@ -372,6 +403,74 @@ export function MarketDialog({
           </div>
           <pre>{commandPreview}</pre>
         </div>
+
+        {inspecting ? (
+          <div className="review">
+            <div className="review-title">Reviewing this entry…</div>
+          </div>
+        ) : inspect ? (
+          <div
+            className={`review${
+              inspect.report.ok && !checksumMissing ? " is-ok" : ""
+            }`}
+          >
+            <div
+              className={`review-title${
+                inspect.report.requires_ack || checksumMissing ? " is-warn" : ""
+              }`}
+            >
+              {checksumMissing
+                ? "Unpinned — installation blocked"
+                : inspect.report.ok
+                  ? "No risky patterns found"
+                  : `${inspect.report.findings.length} pattern${
+                      inspect.report.findings.length === 1 ? "" : "s"
+                    } to review`}
+            </div>
+            {checksumMissing ? (
+              <ul className="review-list">
+                <li className="review-item">
+                  <i className="dot bad" />
+                  <span>
+                    This entry fetches a remote body with no <code>sha256</code>{" "}
+                    checksum, so its contents could change between review and
+                    install. Add a checksum to the catalog to install it.
+                  </span>
+                </li>
+              </ul>
+            ) : null}
+            {inspect.report.findings.length ? (
+              <ul className="review-list">
+                {inspect.report.findings.map((finding, index) => (
+                  <li className="review-item" key={`${finding.rule}-${index}`}>
+                    <i
+                      className={`dot ${
+                        finding.level === "high"
+                          ? "bad"
+                          : finding.level === "medium"
+                            ? "warn"
+                            : ""
+                      }`}
+                    />
+                    <span>
+                      <span className="review-rule">{finding.rule}</span> —{" "}
+                      {finding.detail}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {inspect.checksum_required && inspect.checksum_present ? (
+              <ul className="review-list">
+                <li className="review-item">
+                  <i className="dot ok" />
+                  <span>Body is pinned to a sha256 checksum.</span>
+                </li>
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+
         {(item.inputs || []).map((input: MarketplaceInput) => (
           <label className="field" key={input.key}>
             <span className="field-label">
@@ -404,6 +503,19 @@ export function MarketDialog({
               onChange={(event) => setConsent(event.target.checked)}
             />{" "}
             I understand this starts a local process.
+          </label>
+        ) : null}
+        {requiresAck ? (
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={ack}
+              onChange={(event) => setAck(event.target.checked)}
+            />
+            <span>
+              I have read the review above and want to install this entry
+              anyway. Its text will be injected into my agent's context.
+            </span>
           </label>
         ) : null}
         <p className="install-error">{error}</p>

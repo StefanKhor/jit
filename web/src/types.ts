@@ -22,6 +22,7 @@ export interface PublicConfig {
   nemotron_ultra_model: string;
   api_key: string;
   rerank_enabled: boolean;
+  confidence_threshold: number;
   first_run: boolean;
   marketplace_urls: string[];
   nebius_key_env: boolean;
@@ -51,6 +52,12 @@ export interface Stats {
     largest_item: number;
     saved: number;
     reduction_pct: number;
+    break_even: number;
+  };
+  retrieval?: {
+    total: number;
+    misses: number;
+    miss_rate: number;
   };
 }
 
@@ -131,6 +138,9 @@ export interface MarketplaceItem {
   requires?: string;
   inputs: MarketplaceInput[];
   install: Record<string, unknown>;
+  origin?: string;
+  bundled?: boolean;
+  checksum_present?: boolean;
   installed?: boolean;
 }
 
@@ -138,6 +148,34 @@ export interface MarketplaceResponse {
   items: MarketplaceItem[];
   source: string;
   warning: string;
+}
+
+export interface ScanFinding {
+  level: "high" | "medium" | "low";
+  rule: string;
+  detail: string;
+}
+
+export interface ScanReport {
+  ok: boolean;
+  requires_ack: boolean;
+  findings: ScanFinding[];
+}
+
+export interface InspectResult {
+  id: string;
+  kind: "skill" | "mcp";
+  checksum_required: boolean;
+  checksum_present: boolean;
+  report: ScanReport;
+}
+
+export interface NearMiss {
+  id: string;
+  name: string;
+  description: string;
+  kind: ItemKind;
+  score: number;
 }
 
 export interface SearchCandidate {
@@ -148,6 +186,8 @@ export interface SearchCandidate {
   cosine: number;
   rrf: number;
   rerank: number | null;
+  lexical: number;
+  score: number;
   passes_threshold: boolean;
 }
 
@@ -159,6 +199,9 @@ export interface SearchResult {
   content: string;
   confidence: number;
   reranked: boolean;
+  keyword_only?: boolean;
+  source?: string;
+  trust?: "first-party" | "third-party";
   server?: string;
   tool_id?: string;
 }
@@ -166,9 +209,40 @@ export interface SearchResult {
 export interface SearchResponse {
   result: SearchResult | null;
   candidates: SearchCandidate[];
+  near_misses: NearMiss[];
   reranked: boolean;
+  keyword_only: boolean;
   threshold: number;
   elapsed_ms: number;
+}
+
+export interface RetrievalLogEntry {
+  id: number;
+  ts: string;
+  source: string;
+  intent: string;
+  best_id: string;
+  best_name: string;
+  score: number;
+  cosine: number;
+  rerank: number | null;
+  lexical: number;
+  candidates: number;
+  decision: "hit" | "miss";
+  keyword_only: boolean;
+  elapsed_ms: number;
+}
+
+export interface RetrievalStats {
+  total: number;
+  hits: number;
+  misses: number;
+  miss_rate: number;
+  keyword_only: number;
+  threshold: number;
+  recent: RetrievalLogEntry[];
+  misses_recent: RetrievalLogEntry[];
+  top_misses: Array<{ intent: string; count: number; best_name: string }>;
 }
 
 export interface TransferResult {
@@ -207,6 +281,7 @@ export interface InstallResult {
   skipped?: number;
   errors?: string[];
   error?: string;
+  warnings?: ScanFinding[];
   tools_removed?: number;
   removed?: boolean;
 }

@@ -108,8 +108,9 @@ export function Marketplace() {
       </div>
 
       <p className="section-copy">
-        User-defined catalogs only. Add a catalog URL below; nothing is
-        installed until you choose it.
+        Ships with a small offline catalog, and merges any catalogs you add.
+        Skills from a catalog are marked third-party, scanned for risky patterns,
+        and fetched with a pinned checksum. Nothing installs until you choose it.
       </p>
 
       <form className="add-row" onSubmit={addCatalog}>
@@ -152,7 +153,11 @@ export function Marketplace() {
       <p className={`market-note${data.warning ? " is-warn" : ""}`}>
         {data.source === "remote"
           ? "Remote catalog"
-          : "No catalog configured"}
+          : data.source === "bundled"
+            ? "Bundled catalog (offline)"
+            : data.source === "bundled+remote"
+              ? "Bundled + remote catalog"
+              : "No catalog available"}
         {data.warning ? ` · ${data.warning}` : ""}
       </p>
 
@@ -162,7 +167,7 @@ export function Marketplace() {
         >
           {items.length
             ? "Try a different filter, or refresh the catalog."
-            : "No marketplace catalogs configured. Add one in Settings."}
+            : "No catalog entries available. Add a catalog URL above, or check that JIT shipped with marketplace.json."}
         </Empty>
       ) : (
         <div className="market-grid">
@@ -214,6 +219,10 @@ function MarketCard({
       <div className="market-meta">
         <span>{item.author || "Unknown"}</span>
         <span>{item.license || "See source"}</span>
+        <span>{item.bundled ? "Bundled" : "Third-party"}</span>
+        {item.checksum_present === false && !item.bundled ? (
+          <span className="market-warn">unpinned</span>
+        ) : null}
         {item.requires ? <span>{item.requires}</span> : null}
       </div>
       <div className="market-actions">
