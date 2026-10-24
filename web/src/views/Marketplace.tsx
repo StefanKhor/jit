@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 
 import { useJit } from "../context";
 import { fmt } from "../format";
@@ -12,6 +12,8 @@ export function Marketplace() {
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+  const [catalogUrl, setCatalogUrl] = useState("");
+  const [adding, setAdding] = useState(false);
 
   useEffect(() => {
     if (!ctx.marketLoaded) void ctx.loadMarketplace();
@@ -37,6 +39,30 @@ export function Marketplace() {
       await ctx.loadMarketplace(true);
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const addCatalog = async (event: FormEvent) => {
+    event.preventDefault();
+    const value = catalogUrl.trim();
+    if (!value) return;
+    const current = Array.isArray(ctx.config?.marketplace_urls)
+      ? ctx.config.marketplace_urls
+      : [];
+    if (current.includes(value)) {
+      setCatalogUrl("");
+      await ctx.loadMarketplace(true);
+      return;
+    }
+    setAdding(true);
+    try {
+      await ctx.saveConfig({ marketplace_urls: [...current, value] });
+      setCatalogUrl("");
+      await ctx.loadMarketplace(true);
+    } catch (error) {
+      ctx.toast(error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      setAdding(false);
     }
   };
 
@@ -82,9 +108,23 @@ export function Marketplace() {
       </div>
 
       <p className="section-copy">
-        A curated catalog of skills and MCP servers. Nothing is installed until
-        you choose it.
+        User-defined catalogs only. Add a catalog URL below; nothing is
+        installed until you choose it.
       </p>
+
+      <form className="add-row" onSubmit={addCatalog}>
+        <input
+          type="url"
+          placeholder="https://example.com/catalog.json"
+          spellCheck={false}
+          autoComplete="off"
+          value={catalogUrl}
+          onChange={(event) => setCatalogUrl(event.target.value)}
+        />
+        <button className="btn btn-solid" type="submit" disabled={adding}>
+          {adding ? "Adding…" : "Add catalog"}
+        </button>
+      </form>
 
       <div className="market-toolbar">
         <div className="market-filters">
