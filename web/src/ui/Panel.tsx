@@ -41,7 +41,7 @@ export function Panel({
   return (
     <section
       className={cx(
-        "overflow-hidden rounded-2xl border border-line bg-panel/80",
+        "surface overflow-hidden rounded-2xl border border-line bg-panel/80",
         className,
       )}
       {...props}

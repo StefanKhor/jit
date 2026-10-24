@@ -41,6 +41,7 @@
   --animate-dialog: dialog-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-dialog-out: dialog-out 0.14s ease-in;
   --animate-rise: rise-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-sheen: sheen 7s linear infinite;
 
   @keyframes view-in {
     from {
@@ -104,6 +105,16 @@
       transform: none;
     }
   }
+
+  /* A signal glint travelling across a hairline rule. */
+  @keyframes sheen {
+    from {
+      transform: translateX(-120%);
+    }
+    to {
+      transform: translateX(320%);
+    }
+  }
 }
 
 @layer base {
@@ -121,18 +132,52 @@
     text-rendering: optimizeLegibility;
   }
 
-  /* A single, barely-there bloom so the canvas is not a flat rectangle. */
+  /* The console backdrop: a faint instrument grid, faded out below the fold. */
   body::before {
     content: "";
     position: fixed;
     inset: 0;
     pointer-events: none;
     z-index: 0;
-    background: radial-gradient(
-      120% 60% at 50% -10%,
-      color-mix(in oklab, var(--color-accent) 5%, transparent),
-      transparent 60%
+    background-image:
+      linear-gradient(
+        to right,
+        color-mix(in oklab, var(--color-ivory) 3.5%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        to bottom,
+        color-mix(in oklab, var(--color-ivory) 3.5%, transparent) 1px,
+        transparent 1px
+      );
+    background-size: 56px 56px;
+    opacity: 0.55;
+    -webkit-mask-image: radial-gradient(
+      140% 90% at 50% -15%,
+      #000 0%,
+      transparent 72%
     );
+    mask-image: radial-gradient(140% 90% at 50% -15%, #000 0%, transparent 72%);
+  }
+
+  /* Two distant signal blooms — accent above, info below — never a flat field. */
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background:
+      radial-gradient(
+        85% 50% at 6% -10%,
+        color-mix(in oklab, var(--color-accent) 8%, transparent),
+        transparent 62%
+      ),
+      radial-gradient(
+        75% 55% at 102% 112%,
+        color-mix(in oklab, var(--color-info) 7%, transparent),
+        transparent 62%
+      );
   }
 
   #root {
@@ -212,6 +257,22 @@
 /* Fine, monospaced rule used to separate dense blocks. */
 @utility hairline {
   border-color: var(--color-line);
+}
+
+/* A faint top-light on every surface, so panels read as lit glass, not fills. */
+@utility surface {
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--color-ivory) 4%, transparent),
+    transparent 44%
+  );
+}
+
+/* The one glow: reserved for what is live or currently selected. */
+@utility glow-accent {
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--color-accent) 40%, transparent),
+    0 0 24px -10px color-mix(in oklab, var(--color-accent) 70%, transparent);
 }
 
 @media (prefers-reduced-motion: reduce) {
