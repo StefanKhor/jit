@@ -22,6 +22,7 @@ writeFileSync(
     "",
     "const argv = process.argv.slice(2);",
     'const source = argv[argv.indexOf("add") + 1] || "";',
+    'const wanted = argv[argv.indexOf("--skill") + 1] || "*";',
     "const root = path.join(process.cwd(), '.agents', 'skills');",
     "",
     "function body(name, description) {",
@@ -37,10 +38,15 @@ writeFileSync(
     "",
     "const out = [];",
     "if (source === 'acme/ok') {",
-    "  for (const [name, description] of [['alpha-skill', 'Alpha skill'], ['beta-skill', 'Beta skill']]) {",
+    "  const all = [['alpha-skill', 'Alpha skill'], ['beta-skill', 'Beta skill']];",
+    "  const chosen = wanted === '*' ? all : all.filter(([name]) => name === wanted);",
+    "  for (const [name, description] of chosen) {",
     "    const dir = put(name, description);",
     "    out.push({ name, status: 'installed', source, ref: null, hash: 'hash-' + name,",
     "      path: dir, scope: 'project', agents: ['Universal'], mode: 'copy' });",
+    "  }",
+    "  if (chosen.length === 0) {",
+    "    out.push({ name: wanted, status: 'skipped', reason: 'no matching skill found' });",
     "  }",
     "} else if (source === 'acme/partial') {",
     "  const dir = put('alpha-skill', 'Alpha skill');",
@@ -64,7 +70,9 @@ process.env.JIT_SKILLS_CLI = `"${process.execPath}" "${FAKE}"`;
 
 const { parseGithubRef, isGithubRef } = await import("../src/github.js");
 const { materializeSource } = await import("../src/skillsCli.js");
-const { catalog, install } = await import("../src/marketplace.js");
+const { catalog, inspect, install, uninstall } = await import(
+  "../src/marketplace.js"
+);
 const { saveConfig, JIT_SKILLS_DIR } = await import("../src/config.js");
 
 test("a GitHub reference is parsed from shorthand and from a URL", () => {
@@ -163,4 +171,67 @@ test("a repository source installs into the JIT store", async () => {
   // there is no staleness warning.
   const warnings = result.warnings as Array<{ rule: string }>;
   assert.equal(warnings.some((finding) => finding.rule === "content-changed"), false);
+});
+
+test("a source can be materialized for one skill instead of all of them", async () => {
+  const result = await materializeSource("acme/ok", "alpha-skill");
+  assert.equal(result.warning, "");
+  assert.deepEqual(
+    result.skills.map((skill) => skill.name),
+    ["alpha-skill"],
+  );
+
+  const missing = await materializeSource("acme/ok", "delta-skill");
+  assert.deepEqual(missing.skills, []);
+  assert.match(missing.warning, /no matching skill found/);
+
+  // A source that installs nothing at all is reported by name, not by reason.
+  const empty = await materializeSource("acme/empty", "delta-skill");
+  assert.deepEqual(empty.skills, []);
+  assert.match(empty.warning, /acme\/empty does not provide 'delta-skill'/);
+});
+
+test("a skills.sh link narrows a source to the skill it points at", async () => {
+  saveConfig({ marketplace_urls: ["https://skills.sh/acme/ok/beta-skill"] });
+  const listed = await catalog();
+  assert.equal(listed.warning, "");
+  assert.deepEqual(
+    listed.items.map((item) => item.id),
+    ["beta-skill"],
+  );
+  const beta = listed.items[0];
+  assert.equal(beta?.origin, "skills.sh:acme/ok/beta-skill");
+  assert.equal(beta?.install.skills_source, "acme/ok");
+  assert.equal(beta?.install.skills_name, "beta-skill");
+});
+
+test("an entry from the directory installs without being a configured source", async () => {
+  saveConfig({ marketplace_urls: [] });
+  // Nothing in a catalog answers to that id, so it can only come from the hint.
+  await assert.rejects(() => install("alpha-skill"), /not found/);
+
+  const reviewed = await inspect("alpha-skill", {
+    source: "acme/ok",
+    skill: "alpha-skill",
+  });
+  assert.equal(reviewed.id, "alpha-skill");
+  assert.equal(reviewed.report.requires_ack, false);
+
+  const result = await install(
+    "alpha-skill",
+    {},
+    { source: "acme/ok", skill: "alpha-skill" },
+  );
+  assert.equal(result.ok, true);
+  assert.ok(existsSync(path.join(JIT_SKILLS_DIR, "alpha-skill", "SKILL.md")));
+});
+
+test("a skill installed from the directory is removable by id alone", async () => {
+  saveConfig({ marketplace_urls: [] });
+  const removed = await uninstall("alpha-skill");
+  assert.equal(removed.ok, true);
+  assert.equal(removed.file_removed, true);
+  assert.equal(existsSync(path.join(JIT_SKILLS_DIR, "alpha-skill")), false);
+
+  await assert.rejects(() => uninstall("ghost-skill"), /not found/);
 });

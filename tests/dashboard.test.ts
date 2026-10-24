@@ -120,7 +120,19 @@ test("config writes are validated", async () => {
     const response = await post({ marketplace_urls: [entry] });
     assert.equal(response.status, 200, entry);
   }
+  // So is a link to the skills.sh directory.
+  for (const entry of [
+    "https://skills.sh/acme/demo",
+    "https://www.skills.sh/acme/demo/some-skill",
+  ]) {
+    const response = await post({ marketplace_urls: [entry] });
+    assert.equal(response.status, 200, entry);
+  }
   assert.equal((await post({ marketplace_urls: ["just-one-segment"] })).status, 400);
+  assert.equal(
+    (await post({ marketplace_urls: ["https://skills.sh/acme"] })).status,
+    400,
+  );
   await post({ marketplace_urls: [] });
 
   const threshold = await post({ confidence_threshold: 0.42 });
@@ -245,6 +257,11 @@ test("the marketplace is empty until a source is configured", async () => {
   assert.equal((await call("/api/marketplace/inspect", { id: "nope" })).status, 400);
   assert.equal((await call("/api/marketplace/install", {})).status, 400);
   assert.equal((await call("/api/marketplace/uninstall", {})).status, 400);
+
+  // The directory search needs a real query before it reaches the network, so a
+  // short one is rejected without any call.
+  assert.equal((await app.request("/api/marketplace/search")).status, 400);
+  assert.equal((await app.request("/api/marketplace/search?q=a")).status, 400);
 });
 
 test("unknown routes answer in the right shape", async () => {

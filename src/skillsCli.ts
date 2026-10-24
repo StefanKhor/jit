@@ -55,8 +55,8 @@ function command(): string[] {
 }
 
 function quote(part: string): string {
-  // The source is validated as a GitHub reference before it reaches us, so no
-  // argument can contain a quote; only whitespace needs handling.
+  // Every argument reaching this point is a validated source reference or skill
+  // name, so none can contain a quote; only whitespace needs handling.
   return /\s/.test(part) ? `"${part}"` : part;
 }
 
@@ -81,8 +81,8 @@ function execute(args: string[], cwd: string) {
   };
   if (process.platform === "win32") {
     // cmd.exe is what resolves `npx` to `npx.cmd`. A source reaches this call
-    // only after it has been validated as a GitHub reference, so no argument can
-    // carry a shell metacharacter.
+    // only after it has been validated, so no argument can carry a shell
+    // metacharacter.
     return spawnSync([...parts, ...args].map(quote).join(" "), {
       ...options,
       shell: true,
@@ -117,13 +117,22 @@ function firstLine(stderr: string, fallback: string): string {
 }
 
 /**
- * Fetch every skill a repository provides, by running the `skills` CLI in a
- * cache directory. Results are reused for a few minutes so a page load does not
- * re-clone the repository.
+ * Materialize the skills a source provides, by running the `skills` CLI in a
+ * cache directory. Pass `skill` to materialize a single skill instead of the
+ * whole repository; the CLI only writes that directory, so the copy step later
+ * has nothing else to pick from. Results are reused for a few minutes so a page
+ * load does not re-clone the repository.
  */
-export async function materializeSource(source: string): Promise<CliResult> {
-  const dir = path.join(CACHE_DIR, cacheKey(source));
-  const hit = cache.get(source);
+export async function materializeSource(
+  source: string,
+  skill = "",
+): Promise<CliResult> {
+  const scope = String(skill || "").trim();
+  // The cache is keyed by the scope too, so listing a repository and installing
+  // one of its skills do not overwrite each other's directory.
+  const key = scope ? `${source}\u0000${scope}` : source;
+  const dir = path.join(CACHE_DIR, cacheKey(key));
+  const hit = cache.get(key);
   const now = Date.now();
   if (hit && now - hit.at < CACHE_TTL_MS && existsSync(dir)) return hit.result;
 
@@ -131,7 +140,17 @@ export async function materializeSource(source: string): Promise<CliResult> {
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
   const result = execute(
-    ["add", source, "--skill", "*", "-a", "universal", "--copy", "-y", "--json"],
+    [
+      "add",
+      source,
+      "--skill",
+      scope || "*",
+      "-a",
+      "universal",
+      "--copy",
+      "-y",
+      "--json",
+    ],
     dir,
   );
   const entries = readJson(result.stdout || "");
@@ -172,12 +191,16 @@ export async function materializeSource(source: string): Promise<CliResult> {
     });
   }
   if (skills.length === 0 && notes.length === 0) {
-    notes.push(`${source} provides no installable skills`);
+    notes.push(
+      scope
+        ? `${source} does not provide '${scope}'`
+        : `${source} provides no installable skills`,
+    );
   }
 
   const payload: CliResult = { skills, warning: notes.join("; ") };
-  cache.set(source, { at: now, result: payload });
+  cache.set(key, { at: now, result: payload });
   if (payload.warning) logger.warn("skills CLI: %s", payload.warning);
-  logger.debug("skills CLI %s: %d skills", source, skills.length);
+  logger.debug("skills CLI %s %s: %d skills", source, scope || "*", skills.length);
   return payload;
 }

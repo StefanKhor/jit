@@ -15,6 +15,13 @@ import {
 } from "./config.js";
 import { fetchText } from "./remote.js";
 import { isGithubRef } from "./github.js";
+import {
+  parseSkillsShRef,
+  searchSkillsSh,
+  topSkills,
+  type SkillsShHit,
+  type TopView,
+} from "./skillsSh.js";
 import { materializeSource, type CliSkill } from "./skillsCli.js";
 import {
   deleteItem,
@@ -29,9 +36,11 @@ import { scanMcpConfig, scanText } from "./skillScan.js";
 import { getItem, initDb, listItems } from "./storage/db.js";
 import type {
   InspectResult,
+  MarketplaceDiscovery,
   MarketplaceInput,
   MarketplaceItem,
   MarketplaceResponse,
+  MarketplaceTopResponse,
   ScanReport,
 } from "./types.js";
 
@@ -111,6 +120,7 @@ async function fetchRemote(url: string): Promise<MarketplaceItem[]> {
 function itemFromCliSkill(
   skill: CliSkill,
   source: string,
+  origin = `skills:${source}`,
 ): MarketplaceItem | null {
   const file = path.join(skill.path, "SKILL.md");
   let parsed;
@@ -136,7 +146,7 @@ function itemFromCliSkill(
     description: parsed.description,
     category: parsed.categories[0] || "Skill",
     author: source.split("/")[0] || "",
-    origin: `skills:${source}`,
+    origin,
     checksum_present: true,
     inputs: [],
     install: {
@@ -166,13 +176,13 @@ export async function catalog(): Promise<{
 }> {
   const urls = [...new Set((loadConfig().marketplace_urls || []).map((value) => String(value).trim()).filter(Boolean))];
   if (urls.length === 0) {
-    // JIT ships no catalog of its own: the marketplace is exactly the sources
-    // the user pointed it at.
+    // JIT ships no catalog of its own: this list is exactly the sources the user
+    // pointed it at. The skills.sh directory is browsed separately.
     return {
       items: [],
       source: "none",
       warning:
-        "No marketplace catalogs configured. Add a catalog URL or a GitHub repository.",
+        "No marketplace catalogs configured. Add a catalog URL, a GitHub repository, or a skills.sh link.",
     };
   }
 
@@ -188,7 +198,18 @@ export async function catalog(): Promise<{
     const merged = new Map<string, MarketplaceItem>();
     for (const entered of urls) {
       try {
-        if (isGithubRef(entered)) {
+        const directory = parseSkillsShRef(entered);
+        if (directory) {
+          const found = await materializeSource(directory.source, directory.skill);
+          const origin = `skills.sh:${directory.source}${
+            directory.skill ? `/${directory.skill}` : ""
+          }`;
+          for (const skill of found.skills) {
+            const item = itemFromCliSkill(skill, directory.source, origin);
+            if (item) merged.set(item.id, item);
+          }
+          if (found.warning) errors.push(found.warning);
+        } else if (isGithubRef(entered)) {
           const found = await materializeSource(entered);
           for (const skill of found.skills) {
             const item = itemFromCliSkill(skill, entered);
@@ -248,6 +269,107 @@ export async function annotatedCatalog(): Promise<MarketplaceResponse> {
 async function find(itemId: string): Promise<MarketplaceItem | null> {
   const { items } = await catalog();
   return items.find((item) => item.id === itemId) || null;
+}
+
+export interface SourceHint {
+  /** `owner/repo` the skills CLI resolves. */
+  source?: string;
+  /** One skill inside that source; empty materializes the whole repository. */
+  skill?: string;
+}
+
+/**
+ * An id resolves against the configured catalogs first. Entries discovered on
+ * skills.sh are in no catalog, so they carry the source they came from and are
+ * materialized on demand — the same cached call a catalog listing makes, so
+ * reviewing and then installing one skill does not clone it twice.
+ */
+async function resolveItem(
+  itemId: string,
+  hint: SourceHint = {},
+): Promise<MarketplaceItem | null> {
+  const known = await find(itemId);
+  if (known) return known;
+
+  const source = String(hint.source || "").trim();
+  if (!source) return null;
+  const skill = String(hint.skill || "").trim();
+  const found = await materializeSource(source, skill);
+  const entry = skill
+    ? found.skills.find((candidate) => candidate.name === skill) || found.skills[0]
+    : found.skills[0];
+  if (!entry) throw new Error(`'${itemId}' is not provided by ${source}`);
+  const item = itemFromCliSkill(
+    entry,
+    source,
+    `skills.sh:${source}${skill ? `/${skill}` : ""}`,
+  );
+  if (!item) throw new Error(`'${itemId}' could not be read from ${source}`);
+  return item;
+}
+
+// A skills.sh listing is enough to show a card, but not to install: the real id,
+// name, and description come from SKILL.md at review time. Until then the entry
+// is a pointer the resolve step above follows.
+function itemFromHit(hit: SkillsShHit): MarketplaceItem | null {
+  const id = hit.skill.trim().toLowerCase();
+  if (!SAFE_ID.test(id)) return null;
+  return {
+    id,
+    kind: "skill",
+    name: hit.name,
+    description: "",
+    category: "Skill",
+    author: hit.source.split("/")[0] || "",
+    origin: `skills.sh:${hit.source}/${hit.skill}`,
+    checksum_present: true,
+    inputs: [],
+    install: {
+      skills_source: hit.source,
+      skills_name: hit.skill,
+      skills_hash: "",
+    },
+    installs: hit.installs,
+  };
+}
+
+async function withInstalledState(
+  items: MarketplaceItem[],
+): Promise<MarketplaceItem[]> {
+  const { skills } = await installedState();
+  for (const item of items) item.installed = skills.has(item.id);
+  return items;
+}
+
+/** Search the directory. Nothing here is downloaded or trusted yet. */
+export async function searchMarketplace(
+  query: string,
+): Promise<MarketplaceDiscovery> {
+  const hits = await searchSkillsSh(query);
+  const items = hits
+    .map(itemFromHit)
+    .filter((item): item is MarketplaceItem => item !== null);
+  return { items: await withInstalledState(items), warning: "" };
+}
+
+/** The directory's own ranking, one page at a time. */
+export async function topMarketplace(
+  view: string,
+  page = 1,
+): Promise<MarketplaceTopResponse> {
+  const current: TopView = view === "trending" ? "trending" : "all-time";
+  const result = await topSkills(current, page);
+  const items = result.hits
+    .map(itemFromHit)
+    .filter((item): item is MarketplaceItem => item !== null);
+  return {
+    items: await withInstalledState(items),
+    warning: "",
+    view: result.view,
+    page: result.page,
+    has_more: result.hasMore,
+    total: result.total,
+  };
 }
 
 function inputValues(
@@ -493,7 +615,7 @@ async function installSkill(
   };
 }
 
-export interface InstallOptions {
+export interface InstallOptions extends SourceHint {
   acknowledge?: boolean;
 }
 
@@ -502,7 +624,7 @@ export async function install(
   inputs: Record<string, unknown> = {},
   options: InstallOptions = {},
 ): Promise<Record<string, unknown>> {
-  const item = await find(itemId);
+  const item = await resolveItem(itemId, options);
   if (!item) throw new Error("not found in the marketplace");
   const values = inputValues(item, inputs);
   const acknowledge = Boolean(options.acknowledge);
@@ -512,8 +634,11 @@ export async function install(
 
 // Fetch and scan an entry without installing it, so the dashboard can warn
 // before the user commits. Nothing is written here.
-export async function inspect(itemId: string): Promise<InspectResult> {
-  const item = await find(itemId);
+export async function inspect(
+  itemId: string,
+  hint: SourceHint = {},
+): Promise<InspectResult> {
+  const item = await resolveItem(itemId, hint);
   if (!item) throw new Error("not found in the marketplace");
   if (item.kind === "mcp") {
     return {
@@ -576,10 +701,17 @@ export async function uninstall(
   itemId: string,
 ): Promise<Record<string, unknown>> {
   const item = await find(itemId);
-  if (!item) throw new Error("not found in the marketplace");
+  // A skill installed from the skills.sh directory is in no configured catalog,
+  // but it is still JIT-owned and removable by id. An id that names a managed
+  // MCP server takes the server path either way.
+  const manager = defaultManager();
+  const isMcp = item
+    ? item.kind === "mcp"
+    : await manager
+        .loadConfigs()
+        .then(() => manager.getStatus()[itemId] !== undefined);
 
-  if (item.kind === "mcp") {
-    const manager = defaultManager();
+  if (isMcp) {
     const removed = manager.removeServer(itemId);
     const toolsRemoved = deleteToolsForServer(itemId);
     return {
@@ -590,6 +722,9 @@ export async function uninstall(
     };
   }
 
+  if (!item && !existingSkill(itemId)) {
+    throw new Error("not found in the marketplace");
+  }
   const directory = path.join(JIT_SKILLS_DIR, itemId);
   const destination = path.join(directory, "SKILL.md");
   const existing = existingSkill(itemId);

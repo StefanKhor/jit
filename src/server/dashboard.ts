@@ -21,6 +21,7 @@ import {
   saveConfig,
 } from "../config.js";
 import { isGithubRef } from "../github.js";
+import { isSkillsShRef, isSkillsShUrl } from "../skillsSh.js";
 import {
   clearIndex,
   deleteItem,
@@ -44,6 +45,8 @@ import {
   annotatedCatalog,
   inspect as inspectMarketplace,
   install as installMarketplace,
+  searchMarketplace,
+  topMarketplace,
   uninstall as uninstallMarketplace,
 } from "../marketplace.js";
 import {
@@ -309,13 +312,23 @@ export function createApp(): Hono {
         throw new HttpError(400, "at most 10 marketplace catalogs are supported");
       }
       // Match the fetch policy in marketplace.ts so a catalog cannot be
-      // configured that would only fail later at fetch time. A GitHub
-      // repository is accepted as `owner/repo`, `owner/repo@ref`, or a URL.
+      // configured that would only fail later at fetch time. A repository is
+      // accepted as `owner/repo`, `owner/repo@ref`, or a URL, and a link to the
+      // skills.sh directory resolves to the repository behind it.
       for (const url of urls) {
-        if (isGithubRef(url) || isSecureApiBase(url)) continue;
+        if (isGithubRef(url) || isSkillsShRef(url)) continue;
+        // A skills.sh link that addresses neither a repository nor a skill is a
+        // mistake, not a catalog; say so instead of failing at fetch time.
+        if (isSkillsShUrl(url)) {
+          throw new HttpError(
+            400,
+            "a skills.sh link must address a repository or a skill",
+          );
+        }
+        if (isSecureApiBase(url)) continue;
         throw new HttpError(
           400,
-          "catalog entries must be https:// URLs or GitHub repositories",
+          "catalog entries must be https:// URLs, GitHub repositories, or skills.sh links",
         );
       }
       updates.marketplace_urls = urls;
@@ -441,12 +454,45 @@ export function createApp(): Hono {
     return c.json(await annotatedCatalog());
   });
 
+  // An entry discovered on skills.sh is in no configured catalog. It carries
+  // the source it came from, which is what the review and install calls below
+  // pass back so the CLI can resolve it.
+  const sourceHint = (body: Record<string, unknown>) => ({
+    source: String(body.source || "").trim(),
+    skill: String(body.skill || "").trim(),
+  });
+
+  app.get("/api/marketplace/search", async (c) => {
+    const query = String(c.req.query("q") || "").trim();
+    try {
+      return c.json(await searchMarketplace(query));
+    } catch (error) {
+      throw new HttpError(
+        400,
+        error instanceof Error ? error.message : "search failed",
+      );
+    }
+  });
+
+  app.get("/api/marketplace/top", async (c) => {
+    const view = String(c.req.query("view") || "all-time").trim();
+    const page = Number(c.req.query("page") || 1);
+    try {
+      return c.json(await topMarketplace(view, page));
+    } catch (error) {
+      throw new HttpError(
+        400,
+        error instanceof Error ? error.message : "leaderboard failed",
+      );
+    }
+  });
+
   app.post("/api/marketplace/inspect", async (c) => {
     const body = await readJson(c);
     const id = String(body.id || "").trim().toLowerCase();
     if (!id) throw new HttpError(400, "id required");
     try {
-      return c.json(await inspectMarketplace(id));
+      return c.json(await inspectMarketplace(id, sourceHint(body)));
     } catch (error) {
       throw new HttpError(400, error instanceof Error ? error.message : "inspect failed");
     }
@@ -462,7 +508,12 @@ export function createApp(): Hono {
         : {};
     const acknowledge = boolValue(body.acknowledge, false);
     try {
-      return c.json(await installMarketplace(id, inputs, { acknowledge }));
+      return c.json(
+        await installMarketplace(id, inputs, {
+          acknowledge,
+          ...sourceHint(body),
+        }),
+      );
     } catch (error) {
       throw new HttpError(400, error instanceof Error ? error.message : "install failed");
     }
