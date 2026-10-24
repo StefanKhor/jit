@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { timingSafeEqual, createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -6,7 +6,6 @@ import { serve } from "@hono/node-server";
 import { Hono, type Context } from "hono";
 
 import {
-  CONFIDENCE_THRESHOLD,
   DEFAULT_HOST,
   DEFAULT_NEBIUS_API_BASE,
   DEFAULT_PORT,
@@ -30,11 +29,19 @@ import {
   indexItems,
   listItems,
   setEnabled,
+  tokenEstimate,
 } from "../indexer.js";
-import { getAllItems, initDb } from "../storage/db.js";
+import {
+  clearRetrievals,
+  closeDb,
+  getAllItems,
+  initDb,
+  retrievalStats,
+} from "../storage/db.js";
 import { logger } from "../logger.js";
 import {
   annotatedCatalog,
+  inspect as inspectMarketplace,
   install as installMarketplace,
   uninstall as uninstallMarketplace,
 } from "../marketplace.js";
@@ -43,7 +50,8 @@ import {
   MCPClientManager,
   shutdown as shutdownMcp,
 } from "../mcp/client.js";
-import { evaluate } from "../retrieval/retriever.js";
+import { jitSchemaTokens } from "../mcp-server.js";
+import { evaluate, recordRetrieval } from "../retrieval/retriever.js";
 import {
   exportMcp,
   exportSkills,
@@ -52,11 +60,6 @@ import {
   transferSkills,
 } from "../transfer.js";
 import type { IndexItem, ItemKind } from "../types.js";
-
-// Measured from the tools/list payload returned by `jit serve` (4 chars/token,
-// the same estimate the dashboard exposes). Update this when the four MCP tool
-// schemas or descriptions change.
-export const JIT_SCHEMA_TOKENS = 617;
 
 const START_TIME = Date.now();
 
@@ -70,19 +73,15 @@ class HttpError extends Error {
 }
 
 function safeEqual(a: string, b: string): boolean {
-  const left = Buffer.from(a);
-  const right = Buffer.from(b);
-  if (left.length !== right.length) return false;
+  // Hash first so the comparison is constant-time regardless of length.
+  const left = createHash("sha256").update(a).digest();
+  const right = createHash("sha256").update(b).digest();
   return timingSafeEqual(left, right);
 }
 
 function inside(parent: string, child: string): boolean {
   const relative = path.relative(parent, child);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
-}
-
-function tokenEstimate(text: string): number {
-  return Math.max(1, Math.ceil(text.length / 4));
 }
 
 function isSecureApiBase(value: string): boolean {
@@ -210,46 +209,48 @@ export function createApp(): Hono {
   });
 
   app.get("/api/status", (c) => {
-    const db = initDb();
-    try {
-      const stats = getStats(db);
-      return c.json({
-        indexed: stats.total,
-        skills: stats.skills,
-        tools: stats.tools,
-        enabled: stats.enabled,
-      });
-    } finally {
-      db.close();
-    }
+    const stats = getStats(initDb());
+    return c.json({
+      indexed: stats.total,
+      skills: stats.skills,
+      tools: stats.tools,
+      enabled: stats.enabled,
+    });
   });
 
-  app.get("/api/stats", (c) => {
-    const db = initDb();
-    let stats;
-    try {
-      stats = getStats(db);
-    } finally {
-      db.close();
-    }
+  app.get("/api/stats", async (c) => {
+    const stats = getStats(initDb());
+    const schemaTokens = await jitSchemaTokens();
     const staticTokens = stats.body_tokens + stats.catalog_tokens;
     const taskTokens = stats.total
-      ? JIT_SCHEMA_TOKENS + stats.average_body
-      : JIT_SCHEMA_TOKENS;
+      ? schemaTokens + stats.average_body
+      : schemaTokens;
     const saved = Math.max(0, staticTokens - taskTokens);
     const reduction = staticTokens
       ? Number(((1 - taskTokens / staticTokens) * 100).toFixed(1))
       : 0;
+    // Per-task cost is roughly startup + one average entry; static cost grows
+    // with the index. Break-even is where they cross.
+    const breakEven = stats.average_body
+      ? Math.ceil(schemaTokens / stats.average_body)
+      : 0;
+    const retrieval = retrievalStats(initDb(), 1);
     return c.json({
       ...stats,
       tokens: {
         static: staticTokens,
         jit: taskTokens,
-        startup: JIT_SCHEMA_TOKENS,
+        startup: schemaTokens,
         average_item: stats.average_body,
         largest_item: stats.largest,
         saved,
         reduction_pct: reduction,
+        break_even: breakEven,
+      },
+      retrieval: {
+        total: retrieval.total,
+        misses: retrieval.misses,
+        miss_rate: retrieval.miss_rate,
       },
     });
   });
@@ -286,20 +287,46 @@ export function createApp(): Hono {
     if ("rerank_enabled" in body) {
       updates.rerank_enabled = boolValue(body.rerank_enabled, false);
     }
+    if ("confidence_threshold" in body) {
+      const parsed = Number(body.confidence_threshold);
+      if (!Number.isFinite(parsed)) {
+        throw new HttpError(400, "confidence_threshold must be a number");
+      }
+      updates.confidence_threshold = Math.min(1, Math.max(0, parsed));
+    }
     if ("api_key" in body) updates.api_key = String(body.api_key || "").trim();
+    if ("marketplace_urls" in body) {
+      const raw = body.marketplace_urls;
+      if (!Array.isArray(raw)) {
+        throw new HttpError(400, "marketplace_urls must be an array of URLs");
+      }
+      const urls: string[] = [];
+      for (const entry of raw) {
+        const url = String(entry || "").trim();
+        if (url && !urls.includes(url)) urls.push(url);
+      }
+      if (urls.length > 10) {
+        throw new HttpError(400, "at most 10 marketplace catalogs are supported");
+      }
+      // Match the fetch policy in marketplace.ts so a catalog cannot be
+      // configured that would only fail later at fetch time.
+      for (const url of urls) {
+        if (!isSecureApiBase(url)) {
+          throw new HttpError(
+            400,
+            "catalog URLs must use https:// (http:// is allowed only for localhost)",
+          );
+        }
+      }
+      updates.marketplace_urls = urls;
+    }
     if (boolValue(body.complete_setup, false)) updates.first_run = false;
     saveConfig(updates as Partial<import("../types.js").Config>);
     return c.json({ saved: true, config: publicConfig() });
   });
 
   app.get("/api/skills", (c) => {
-    const db = initDb();
-    let items;
-    try {
-      items = listItems(db);
-    } finally {
-      db.close();
-    }
+    const items = listItems(initDb());
     const root = path.resolve(JIT_SKILLS_DIR);
     return c.json({
       skills: items
@@ -322,13 +349,7 @@ export function createApp(): Hono {
 
   app.get("/api/skills/:id", (c) => {
     const id = c.req.param("id");
-    const db = initDb();
-    let item;
-    try {
-      item = getItem(db, id);
-    } finally {
-      db.close();
-    }
+    const item = getItem(initDb(), id);
     if (!item) throw new HttpError(404, "not found");
     const {
       embedding: _embedding,
@@ -347,24 +368,11 @@ export function createApp(): Hono {
     const purge = ["1", "true", "yes"].includes(
       String(c.req.query("purge") || "0").toLowerCase(),
     );
-    const db = initDb();
-    let item;
-    try {
-      item = getItem(db, id);
-    } finally {
-      db.close();
-    }
+    const item = getItem(initDb(), id);
     if (!item) throw new HttpError(404, "not found");
     if (purge) {
       const fileRemoved = await removeSkillCopy(id);
-      const check = initDb();
-      let stillIndexed;
-      try {
-        stillIndexed = getItem(check, id);
-      } finally {
-        check.close();
-      }
-      if (stillIndexed) {
+      if (getItem(initDb(), id)) {
         throw new HttpError(500, "could not remove the JIT-owned skill copy");
       }
       return c.json({ removed: id, file_removed: fileRemoved, purged: true });
@@ -433,6 +441,17 @@ export function createApp(): Hono {
     return c.json(await annotatedCatalog());
   });
 
+  app.post("/api/marketplace/inspect", async (c) => {
+    const body = await readJson(c);
+    const id = String(body.id || "").trim().toLowerCase();
+    if (!id) throw new HttpError(400, "id required");
+    try {
+      return c.json(await inspectMarketplace(id));
+    } catch (error) {
+      throw new HttpError(400, error instanceof Error ? error.message : "inspect failed");
+    }
+  });
+
   app.post("/api/marketplace/install", async (c) => {
     const body = await readJson(c);
     const id = String(body.id || "").trim().toLowerCase();
@@ -441,8 +460,9 @@ export function createApp(): Hono {
       body.inputs && typeof body.inputs === "object" && !Array.isArray(body.inputs)
         ? (body.inputs as Record<string, unknown>)
         : {};
+    const acknowledge = boolValue(body.acknowledge, false);
     try {
-      return c.json(await installMarketplace(id, inputs));
+      return c.json(await installMarketplace(id, inputs, { acknowledge }));
     } catch (error) {
       throw new HttpError(400, error instanceof Error ? error.message : "install failed");
     }
@@ -603,17 +623,23 @@ export function createApp(): Hono {
     return c.json(await search(String(body.intent || "").trim()));
   });
 
+  app.get("/api/retrieval", (c) => {
+    const raw = Number(c.req.query("limit") || 100);
+    const limit = Number.isFinite(raw) ? raw : 100;
+    const stats = retrievalStats(initDb(), limit);
+    stats.threshold = loadConfig().confidence_threshold;
+    return c.json(stats);
+  });
+
+  app.post("/api/retrieval/clear", (c) => {
+    return c.json({ cleared: clearRetrievals(initDb()) });
+  });
+
   app.get("/api/export", (c) => {
-    const db = initDb();
-    let items;
-    try {
-      items = getAllItems(db).map((item) => {
-        const { embedding: _embedding, content_hash: _hash, updated_at: _updated, ...rest } = item;
-        return rest;
-      });
-    } finally {
-      db.close();
-    }
+    const items = getAllItems(initDb()).map((item) => {
+      const { embedding: _embedding, content_hash: _hash, updated_at: _updated, ...rest } = item;
+      return rest;
+    });
     return c.json({
       version: 2,
       exported_at: Date.now() / 1000,
@@ -720,10 +746,15 @@ async function search(intent: string): Promise<Record<string, unknown>> {
   if (!intent) throw new HttpError(400, "intent required");
   if (intent.length > 2000) throw new HttpError(400, "intent too long");
   const started = performance.now();
-  const payload = await evaluate(intent, 5);
+  const evaluation = await evaluate(intent, 5);
+  recordRetrieval(evaluation, intent, "dashboard", performance.now() - started);
   return {
-    ...payload,
-    threshold: CONFIDENCE_THRESHOLD,
+    result: evaluation.result,
+    candidates: evaluation.candidates,
+    near_misses: evaluation.nearMisses,
+    reranked: evaluation.reranked,
+    keyword_only: evaluation.keywordOnly,
+    threshold: evaluation.threshold,
     elapsed_ms: Number((performance.now() - started).toFixed(1)),
   };
 }
@@ -751,7 +782,10 @@ export function startDashboard(
     const timeout = new Promise<void>((resolve) => {
       setTimeout(resolve, 5_000).unref();
     });
-    void Promise.race([shutdownMcp(), timeout]).finally(() => process.exit(0));
+    void Promise.race([shutdownMcp(), timeout]).finally(() => {
+      closeDb();
+      process.exit(0);
+    });
   };
   process.once("SIGINT", () => stop("SIGINT"));
   process.once("SIGTERM", () => stop("SIGTERM"));
