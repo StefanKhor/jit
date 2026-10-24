@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 import { viteSingleFile } from "vite-plugin-singlefile";
 
@@ -13,6 +14,7 @@ export default defineConfig({
   root,
   plugins: [
     react(),
+    tailwindcss(),
     viteSingleFile(),
     {
       name: "jit-dashboard-name",
