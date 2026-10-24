@@ -4,14 +4,22 @@
 tool at a time, instead of every skill and tool schema at startup.**
 
 The agent calls `JIT_FIND("create a Linear issue for the login bug")`. JIT
-searches a local index and returns the single best match — or
-`{"found": false}`, so the agent falls back to its built-in tools. During
-retrieval, nothing leaves the machine unless you enable the optional Nebius
-reranker.
+searches a local index and returns the single best match, or — when nothing
+clears the confidence threshold — `{"found": false}` plus a short `near_misses`
+list of the closest entries instead of a silent empty result. During retrieval,
+nothing leaves the machine unless you enable the optional Nebius reranker.
 
-The dashboard is the primary interface. Every number in it is computed from
-the actual index: real body lengths, real entry counts, real cosine scores.
-Nothing is hardcoded.
+Recall is the part of a retriever that is easiest to claim and hardest to prove,
+so JIT ships a harness for it: `npm run eval` measures recall@1, recall@3, MRR,
+and precision over a labeled query set, and sweeps the threshold. The dashboard
+logs every retrieval (from both `JIT_FIND` and Search) so misses are visible
+instead of silent.
+
+The dashboard is the primary interface. Every index number in it is computed
+from the actual index: real body lengths, real entry counts, real cosine
+scores. Nothing about your data is hardcoded. The one fixed figure — the
+context cost of JIT's own four MCP tool schemas — is measured from the live
+`tools/list` payload at runtime, not written down by hand.
 
 ## Quick start
 
@@ -77,9 +85,9 @@ Restart the client. The agent now sees four tools:
 
 | Tool | What it does |
 |---|---|
-| `JIT_FIND(intent)` | Search skills and MCP tools. Returns the best match or `{"found": false}`. |
+| `JIT_FIND(intent)` | Search skills and MCP tools. Returns the best match, or `{"found": false}` with `near_misses`. |
 | `JIT_ADD(source)` | Add a skill file, folder, URL, inline markdown, or an installed JIT MCP server. |
-| `JIT_CALL(tool_id, arguments)` | Execute an indexed MCP tool through its server. |
+| `JIT_CALL(tool_id, arguments)` | Execute an indexed MCP tool through its server. Arguments are validated against the stored schema first. |
 | `JIT_STATUS()` | Index counts, connected servers, and retrieval settings. |
 
 ### Triggering JIT
@@ -93,7 +101,9 @@ remaining ambiguity. Add this to your system prompt or `AGENTS.md`:
 ```text
 Before a multi-step task that may have a specialized workflow, call
 JIT_FIND with a concrete intent: the action, the object, and the outcome.
-Skip it for trivial tasks. If it returns {"found": false}, proceed normally.
+Skip it for trivial tasks. If it returns {"found": false} with a near_misses
+list, none cleared the threshold; retry once with a sharper intent if one
+fits, otherwise proceed normally.
 ```
 
 Do not call JIT on every message. A needless retrieval adds latency and can
@@ -105,20 +115,50 @@ A truly passive mode (retrieve on every user message and prepend the result)
 requires a client-side hook or plugin, not an MCP server. The pull model is
 cheaper and more predictable.
 
+## Where JIT fits — and where it does not
+
+Being honest about the boundary is part of being production-ready.
+
+- **Small indexes are a net cost.** JIT adds a fixed per-task cost: the schema of
+  its four tools (measured, ~630 tokens) plus one retrieved body. Static loading
+  costs the size of your whole catalog. The Overview page shows the **break-even
+  count** where the two cross. Below roughly a dozen entries, loading everything
+  is cheaper and simpler, and JIT says so on the page rather than pretending
+  otherwise. JIT earns its place when you have many skills, many MCP servers, or
+  both.
+- **Attention is still the agent's job.** An MCP server cannot push context; the
+  agent has to call `JIT_FIND`. The tool descriptions plus a one-line client
+  instruction (above) are the lever. If a client ever offers a retrieval hook,
+  that is the better integration — JIT is built to be the retrieval engine behind
+  one.
+- **Cross-client, local, and offline is the durable part.** A single client can
+  absorb "tool search" natively, but it will not index *other* clients' skills,
+  run in an air-gapped environment, or keep your catalog on your machine. JIT
+  indexes skills and MCP tools together, from paths owned by Claude, Cursor,
+  OpenCode, and plain files, with no network dependency once the model is cached.
+- **JIT is not a transparent passthrough.** `JIT_CALL` forwards a tool call and
+  validates arguments against the stored schema, because the client's own
+  validation does not apply to a forwarded call. It is not a pass-through for
+  resources, prompts, or notifications — connect those servers directly if you
+  need them. JIT is a retrieval index for skills and tools, and does that one
+  thing.
+
 ## The dashboard
 
 A single-file React SPA served by the Node process.
 
 - **Overview** — context per task vs. static loading, reduction or overhead,
-  index composition, heaviest entries, categories.
+  the break-even index size, index composition, heaviest entries, categories,
+  and the measured retrieval miss rate.
 - **Skills** — list, read, enable/disable, index a path, transfer, and remove.
-- **Marketplace** — browse a bundled catalog of skills and MCP servers; install
-  and uninstall explicitly.
+- **Marketplace** — the bundled catalog plus the ones you add; every install is
+  reviewed before it happens.
 - **MCP** — connect, disconnect, index tools, import a client config, export
   JIT-managed servers, add a server manually.
-- **Search** — live retrieval with cosine, rerank score, RRF, threshold, and
-  the exact result the agent would receive.
-- **Settings** — Nebius key and models, dashboard auth, import/export, clear.
+- **Search** — live retrieval with the effective score, cosine, rerank, lexical
+  and the threshold, plus a confidence slider and the retrieval log.
+- **Settings** — Nebius key and models, confidence threshold, dashboard auth,
+  import/export, clear.
 
 The first-run panel is skippable. The dashboard listens on `127.0.0.1` by
 default. Use `--host 0.0.0.0` only behind a trusted proxy.
@@ -155,13 +195,38 @@ Imports are explicit, read-only on the source side, and shown before they run.
 4. **Fusion** — Reciprocal Rank Fusion merges both rankings.
 5. **Rerank (optional)** — NVIDIA Nemotron Nano via Nebius Token Factory
    reorders the top candidates when an API key is configured.
-6. **Threshold** — confidence is the best cosine or rerank score. The default
-   is `0.60`; a reranked candidate can be promoted above it.
-7. **Top-1** — the agent gets one body or `{"found": false}`. There is no
-   retry loop inside the server.
+6. **Two-stage threshold** — the decision uses one scale, never a mix. A reranked
+   candidate is judged on its rerank score; otherwise on cosine; otherwise — when
+   neither embeddings nor a reranker are available — on a lexical score. All
+   three are 0–1. The default threshold is `0.60`.
+7. **Two-tier result** — a candidate above the threshold returns one body or
+   tool descriptor. Below it, `JIT_FIND` returns `{"found": false}` with up to
+   three `near_misses` (name and description), so the agent can retry once with
+   a sharper intent instead of silently giving up.
 
 The pipeline is deliberately single-pass. A miss costs one search and the agent
 continues; it never stalls on retrieval. There is no chunking.
+
+### The lexical fallback
+
+If the embedding model cannot load — offline, blocked download, or
+`JIT_DISABLE_EMBEDDINGS=1` — retrieval falls back to BM25 and marks the result
+`keyword_only: true` rather than returning nothing. The lexical score is
+normalized against the corpus's mean idf, so the same threshold means the same
+thing whether the index holds two entries or two thousand. A failed model load
+is remembered for five minutes instead of being retried on every query.
+
+### Measuring retrieval
+
+```bash
+npm run eval                                     # fixtures in eval/, no network needed
+npm run eval -- --home ~/.jit --queries mine.jsonl  # your index + your labels
+```
+
+`eval/queries.jsonl` is a JSONL file of `{"query": "...", "expected": "id"}`.
+The harness reports recall@1, recall@3, MRR, precision at the configured
+threshold, and a threshold sweep, so you can pick a threshold from data instead
+of taste. Run it with and without embeddings to see what the model is buying.
 
 ## Configuration
 
@@ -180,19 +245,30 @@ the file and are never written back.
 | `JIT_MODEL_CACHE` | Local embedding-model cache | `$JIT_HOME/models` |
 | `JIT_HOST` | Dashboard bind address | `127.0.0.1` |
 | `JIT_PORT` | Dashboard port | `3000` |
-| `JIT_CONFIDENCE_THRESHOLD` | Minimum confidence (cosine or rerank) | `0.60` |
+| `JIT_CONFIDENCE_THRESHOLD` | Minimum confidence to return a match (0–1) | `0.60` |
 | `JIT_TOP_K` | Candidates retrieved before fusion | `20` |
+| `JIT_DISABLE_EMBEDDINGS` | Run keyword-only, no model download | unset |
 | `JIT_EMBEDDING_MODEL` | Transformers.js model | `Xenova/bge-small-en-v1.5` |
 | `JIT_EMBEDDING_DIM` | Expected vector size | `384` |
-| `JIT_MARKETPLACE_URL` | Optional remote catalog URL | unset |
+| `JIT_MARKETPLACE_URL` | Extra catalog URL(s), comma-separated | unset |
 | `JIT_MAX_REQUEST_BYTES` | Dashboard API body limit | `16777216` |
 | `JIT_MAX_SKILL_BYTES` | Skill file limit | `2097152` |
 | `JIT_LOG_LEVEL` | `DEBUG`, `INFO`, `WARN`, `ERROR` | `INFO` |
 
 JIT does not load `.env` files automatically. Export variables in your shell
 or pass them to Docker; the dashboard writes persistent settings to
-`config.json`. On first use JIT downloads the embedding model once into
-`JIT_MODEL_CACHE`; after that, retrieval is fully local.
+`config.json`.
+
+### Offline and air-gapped
+
+On first use JIT downloads the embedding model once into `JIT_MODEL_CACHE`
+(about 130 MB); after that, retrieval is fully local and needs no network:
+
+- **Air-gapped.** Either copy a populated `JIT_MODEL_CACHE` to the machine, or
+  set `JIT_DISABLE_EMBEDDINGS=1` and run on the lexical fallback. Neither,
+  notably, sends any indexed content off the machine — the only outbound calls
+  JIT ever makes are the model download and, if you configure it, the Nebius
+  reranker.
 
 Auth is opt-in. When `JIT_API_KEY` is set (or a key is saved in Settings),
 `/api/*` requires `Authorization: Bearer <key>` or `X-API-Key: <key>`. The
@@ -238,9 +314,39 @@ Indexed tools are embedded alongside skills, so one `JIT_FIND` searches both.
 
 ## Marketplace
 
-The bundled catalog lives in `marketplace.json`. A remote catalog can be
-merged in with `JIT_MARKETPLACE_URL`. Remote catalog and skill URLs must use
-HTTPS; plain HTTP is accepted only for localhost. Installs are explicit:
+Installing a skill injects its text into an agent's context, and installing an
+MCP server runs a process — both are trust decisions, so they are treated as
+such.
+
+JIT ships a small **bundled catalog** (`marketplace.json`) with a few first-party
+skills and one reference MCP server, all with inline bodies, so a first run is
+not a dead end and nothing is fetched. You can add more catalogs (JSON with an
+`items` array) on the Marketplace page or in Settings; they are stored in
+`marketplace_urls`, and `JIT_MARKETPLACE_URL` adds catalogs from the environment
+as a comma-separated list. A user catalog overrides a bundled entry with the
+same id. Remote catalog and skill URLs must use HTTPS; plain HTTP is accepted
+only for localhost.
+
+Supply-chain guardrails:
+
+- **Checksums are required.** A skill whose body is fetched from a URL must
+  carry a `sha256` in the catalog. An unpinned body can change between review
+  and install, so JIT refuses to install it. Bundled bodies ship with JIT and are
+  exempt.
+- **Every entry is scanned before install.** The scanner looks for prompt
+  injection ("ignore previous instructions"), credential-store access
+  (`~/.ssh`, `.aws/credentials`), exfiltration (`curl … | sh`), and for MCP
+  entries, download-and-run commands. Findings are shown in the install dialog.
+  Anything rated high or medium requires an explicit acknowledgement, and the
+  server enforces that too — an unacknowledged install is rejected, not just
+  discouraged.
+- **Provenance is kept.** Skills installed from a catalog are recorded with their
+  origin and reported as `trust: "third-party"` by `JIT_FIND`; tools are always
+  third-party. Locally indexed files are first-party.
+- **Backend validation.** Catalog URLs are validated against the same allowlist
+  the fetcher uses, so a catalog cannot be configured that would only fail later.
+
+What an install does:
 
 - Skills are written to `~/.jit/skills/<id>/SKILL.md` and indexed.
 - MCP servers are written to `~/.jit/mcp.json`, connected, and their tools are
@@ -248,6 +354,26 @@ HTTPS; plain HTTP is accepted only for localhost. Installs are explicit:
   process” confirmation.
 - Uninstalling a marketplace skill removes JIT's copy and index entry. Removing
   an MCP server leaves external configs and processes alone.
+
+The catalog format is deliberately small:
+
+```json
+{
+  "items": [
+    {
+      "id": "commit-message",
+      "kind": "skill",
+      "name": "Write a commit message",
+      "description": "Draft a Conventional Commits message.",
+      "category": "Engineering",
+      "inputs": [],
+      "install": { "sha256": "…", "url": "https://example.com/commit-message.md" }
+    }
+  ]
+}
+```
+
+Use `"body": "…"` instead of `url`/`sha256` to inline the skill text.
 
 ## Deployment
 
@@ -295,8 +421,12 @@ src/mcp-server.ts (stdio) ──► src/mcp/client.ts ──► stdio / HTTP / S
 - **Concurrency** — the dashboard is async; the MCP client owns one connection
   per server, deduplicates concurrent connects, and times out hung connections.
 - **Security** — the API is local by default, request bodies are size-limited,
-  paths are resolved and checked before JIT-owned files are deleted, and
-  secrets are written with `0600` permissions.
+  paths are resolved and checked before JIT-owned files are deleted, secrets are
+  written with `0600` permissions, catalog bodies are pinned by sha256 and
+  scanned for injection, and keys are compared in constant time.
+- **Telemetry** — every retrieval is logged to a bounded table (date, source,
+  intent, score, hit/miss) so recall can be inspected. Nothing is sent anywhere;
+  the log is a local SQLite table, cleared from Search.
 
 ## NixOS
 
