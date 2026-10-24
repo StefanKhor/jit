@@ -311,7 +311,8 @@ export async function indexItems(
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.warn("embedding failed; indexing metadata only: %s", message);
-      errors.push(message);
+      // Embeddings are an enhancement. A model download or runtime failure
+      // should not make an otherwise successful index operation look failed.
       // Keep a previous vector only when the content is unchanged. A stale
       // vector for changed content would silently poison retrieval.
       embeddings = pending.map(({ current, digest }) =>
