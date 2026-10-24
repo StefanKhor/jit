@@ -35,6 +35,9 @@ function Figures({ stats }: { stats: Stats }) {
   const retrieval = stats.retrieval;
   const measured = Number(retrieval?.total || 0) > 0;
   const missRate = Number(retrieval?.miss_rate || 0);
+  const breakEven = Number(tokens?.break_even || 0);
+  const total = stats.total || 0;
+  const belowBreakEven = breakEven > 0 && total > 0 && total < breakEven;
 
   const cells = [
     {
@@ -81,18 +84,34 @@ function Figures({ stats }: { stats: Stats }) {
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line lg:grid-cols-4">
-      {cells.map((cell) => (
-        <div key={cell.key} className="bg-panel p-5 md:p-6">
-          <Stat
-            size="lg"
-            label={cell.label}
-            value={cell.value}
-            unit={cell.unit}
-            hint={cell.hint}
-          />
-        </div>
-      ))}
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line lg:grid-cols-4">
+        {cells.map((cell) => (
+          <div key={cell.key} className="bg-panel p-5 md:p-6">
+            <Stat
+              size="lg"
+              label={cell.label}
+              value={cell.value}
+              unit={cell.unit}
+              hint={cell.hint}
+            />
+          </div>
+        ))}
+      </div>
+      {belowBreakEven ? (
+        <p className="flex items-start gap-2.5 text-xs leading-relaxed text-ink-3">
+          <span aria-hidden="true" className="mt-1.5 size-1.5 shrink-0 rounded-full bg-warn" />
+          <span>
+            Below the <span className="num text-ink-2">{fmt(breakEven)}</span>-entry
+            break-even. JIT's{" "}
+            <span className="num text-ink-2">{fmt(tokens?.startup || 0)}</span>-token
+            tool schema is a fixed cost, so at {fmt(total)}{" "}
+            {total === 1 ? "entry" : "entries"} loading everything statically (
+            <span className="num text-ink-2">{fmt(tokens?.static || 0)}</span> tok) is
+            cheaper per task. JIT wins past {fmt(breakEven)} entries.
+          </span>
+        </p>
+      ) : null}
     </div>
   );
 }
