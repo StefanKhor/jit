@@ -1,9 +1,14 @@
 import { useState } from "react";
 
-import { useJit } from "../context";
 import { fmt, summary } from "../format";
+import { useJit } from "../state/store";
 import type { ConfigPath, McpImportServer } from "../types";
-import { Empty } from "../components/ui";
+import { StatusDot } from "../ui/Badge";
+import { Button } from "../ui/Button";
+import { Empty } from "../ui/Display";
+import { Checkbox } from "../ui/Field";
+import { PageHead, Panel, PanelBody, PanelHead } from "../ui/Panel";
+import { Table, TableWrap, Td, Th, Tr } from "../ui/Table";
 
 export function Mcp() {
   const ctx = useJit();
@@ -133,230 +138,274 @@ export function Mcp() {
     }
   };
 
+  const total = ctx.mcpServers.length;
+  const connected = ctx.mcpServers.reduce(
+    (count, server) => count + (server.status === "connected" ? 1 : 0),
+    0,
+  );
+  const foundPaths = importPaths.reduce(
+    (count, entry) => count + (entry.exists ? 1 : 0),
+    0,
+  );
+
   return (
-    <div>
-      <div className="section-head">
-        <div>
-          <div className="kicker">04 — MCP</div>
-          <h2 className="section-title">
-            The bridge.<span className="count">{ctx.mcpServers.length}</span>
-          </h2>
-        </div>
-        <div className="section-actions">
-          <button className="btn" onClick={() => ctx.setView("marketplace")}>
-            Marketplace
-          </button>
-          <button className="btn" onClick={() => void showImports()}>
-            Import configs
-          </button>
-          <button className="btn" onClick={() => void ctx.openMcpExport()}>
-            Export
-          </button>
-          <button className="btn btn-solid" onClick={ctx.openMcpAdd}>
-            Add server
-          </button>
-        </div>
-      </div>
+    <div className="space-y-6">
+      <PageHead
+        kicker="04 — MCP"
+        title={
+          <span className="flex items-baseline gap-2">
+            The bridge.
+            <span className="num text-sm text-ink-3">{total}</span>
+          </span>
+        }
+        description="JIT manages its own MCP servers. Import a client config to copy servers in, or export JIT servers back out. Neither direction changes the other side unless you choose it."
+        actions={
+          <>
+            <Button onClick={() => ctx.setView("marketplace")}>Marketplace</Button>
+            <Button onClick={() => void showImports()}>Import configs</Button>
+            <Button onClick={() => void ctx.openMcpExport()}>Export</Button>
+            <Button variant="primary" onClick={ctx.openMcpAdd}>
+              Add server
+            </Button>
+          </>
+        }
+      />
 
-      <p className="section-copy">
-        JIT manages its own MCP servers. Import a client config to copy servers
-        in, or export JIT servers back out. Neither direction changes the other
-        side unless you choose it.
-      </p>
-
-      {ctx.mcpServers.length === 0 ? (
-        <Empty
-          title="No servers yet."
-          actions={
-            <>
-              <button
-                className="btn btn-solid"
-                onClick={() => ctx.setView("marketplace")}
-              >
-                Browse marketplace
-              </button>
-              <button className="btn" onClick={() => void showImports()}>
-                Import configs
-              </button>
-            </>
-          }
-        >
-          Install one from the marketplace, or import a server you already use.
-        </Empty>
+      {total === 0 ? (
+        <Panel className="border-dashed bg-panel/60">
+          <Empty
+            title="No servers yet."
+            actions={
+              <>
+                <Button
+                  variant="primary"
+                  onClick={() => ctx.setView("marketplace")}
+                >
+                  Browse marketplace
+                </Button>
+                <Button onClick={() => void showImports()}>Import configs</Button>
+              </>
+            }
+          >
+            Install one from the marketplace, or import a server you already use.
+          </Empty>
+        </Panel>
       ) : (
-        <div className="table-wrap" id="servers-table">
-          <table className="table">
-            <thead>
-              <tr>
-                <th scope="col">Server</th>
-                <th scope="col">Status</th>
-                <th scope="col" className="num">
-                  Tools
-                </th>
-                <th scope="col" className="actions">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {ctx.mcpServers.map((server) => {
-                const dot =
-                  server.status === "connected"
-                    ? "ok"
-                    : server.status === "error"
-                      ? "bad"
-                      : server.status === "connecting"
-                        ? "warn"
-                        : "";
-                return (
-                  <tr key={server.name}>
-                    <td>
-                      <span
-                        className="row-name"
-                        style={{ cursor: "default" }}
-                        title={server.source || ""}
-                      >
-                        {server.name}
-                      </span>
-                      {server.error ? (
-                        <div className="row-sub" title={server.error}>
-                          {server.error}
-                        </div>
-                      ) : null}
-                    </td>
-                    <td>
-                      <span className="state">
-                        <i className={`dot ${dot}`} />
-                        {server.status}
-                      </span>
-                    </td>
-                    <td className="num" title="Indexed tools">
-                      {fmt(server.indexed_tool_count ?? server.tool_count)}
-                    </td>
-                    <td className="actions">
-                      {server.status === "connected" ? (
-                        <>
-                          <button
-                            className="btn-mini"
-                            disabled={busy === server.name}
-                            onClick={() => void act(server.name, "index")}
-                          >
-                            Index
-                          </button>
-                          <button
-                            className="btn-mini"
-                            disabled={busy === server.name}
-                            onClick={() => void act(server.name, "disconnect")}
-                          >
-                            Disconnect
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          className="btn-mini"
-                          disabled={busy === server.name}
-                          onClick={() => void act(server.name, "connect")}
+        <Panel id="servers-table">
+          <PanelHead
+            title="Servers"
+            hint={`${fmt(connected)} of ${fmt(total)} connected`}
+          />
+          <TableWrap>
+            <Table className="w-full min-w-[560px] table-fixed">
+              <thead>
+                <tr>
+                  <Th>Server</Th>
+                  <Th className="w-[130px]">Status</Th>
+                  <Th className="num hidden w-[80px] text-right sm:table-cell">
+                    Tools
+                  </Th>
+                  <Th className="w-[260px] text-right">Actions</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {ctx.mcpServers.map((server) => {
+                  const dot =
+                    server.status === "connected"
+                      ? "ok"
+                      : server.status === "error"
+                        ? "bad"
+                        : server.status === "connecting"
+                          ? "warn"
+                          : "neutral";
+                  return (
+                    <Tr key={server.name}>
+                      <Td>
+                        <span
+                          className="block min-w-0 truncate text-sm font-medium text-ink"
+                          title={server.source || server.name}
                         >
-                          {server.status === "error" ? "Retry" : "Connect"}
-                        </button>
-                      )}
-                      <button
-                        className="btn-mini danger"
-                        disabled={busy === server.name}
-                        title="Remove from JIT; the external config is untouched"
-                        onClick={() => void act(server.name, "remove")}
+                          {server.name}
+                        </span>
+                        {server.error ? (
+                          <p
+                            className="mt-1 min-w-0 truncate text-xs text-ink-3"
+                            title={server.error}
+                          >
+                            {server.error}
+                          </p>
+                        ) : null}
+                      </Td>
+                      <Td>
+                        <span className="inline-flex items-center gap-1.5 text-xs text-ink-2">
+                          <StatusDot tone={dot} />
+                          {server.status}
+                        </span>
+                      </Td>
+                      <Td
+                        className="num hidden text-right text-ink-2 sm:table-cell"
+                        title="Indexed tools"
                       >
-                        {busy === server.name ? "…" : "Remove"}
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                        {fmt(server.indexed_tool_count ?? server.tool_count)}
+                      </Td>
+                      <Td className="text-right">
+                        <div className="flex justify-end gap-1.5">
+                          {server.status === "connected" ? (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={busy === server.name}
+                                onClick={() => void act(server.name, "index")}
+                              >
+                                Index
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={busy === server.name}
+                                onClick={() => void act(server.name, "disconnect")}
+                              >
+                                Disconnect
+                              </Button>
+                            </>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={busy === server.name}
+                              onClick={() => void act(server.name, "connect")}
+                            >
+                              {server.status === "error" ? "Retry" : "Connect"}
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            disabled={busy === server.name}
+                            title="Remove from JIT; the external config is untouched"
+                            onClick={() => void act(server.name, "remove")}
+                          >
+                            {busy === server.name ? "…" : "Remove"}
+                          </Button>
+                        </div>
+                      </Td>
+                    </Tr>
+                  );
+                })}
+              </tbody>
+            </Table>
+          </TableWrap>
+        </Panel>
       )}
 
       {importOpen ? (
-        <div className="panel" style={{ marginTop: "22px" }}>
-          <div className="panel-head">
-            <h2>Import from client configs</h2>
-            <span className="panel-note">read-only</span>
-          </div>
-          <p className="panel-copy">
-            Choose the servers you want JIT to manage. The source config is
-            never modified.
-          </p>
-          <div className="import-paths">
-            {importPaths.map((entry) => (
-              <div key={entry.path}>
-                <i className={`dot ${entry.exists ? "ok" : ""}`} />
-                {entry.path}{" "}
-                <span className="cat-count">
-                  {entry.exists ? "found" : "missing"}
-                </span>
-              </div>
-            ))}
-          </div>
-          {importError ? (
-            <div className="empty" style={{ padding: "22px 0" }}>
-              <p>{importError}</p>
-            </div>
-          ) : imports.length === 0 ? (
-            <div className="empty" style={{ padding: "22px 0" }}>
-              <p>No servers found in client configs.</p>
-            </div>
-          ) : (
-            <div className="import-list">
-              {imports.map((server, index) => (
-                <label className="import-row" key={`${server.name}-${server.source}`}>
-                  <input
-                    type="checkbox"
-                    checked={selected.has(index)}
-                    disabled={server.managed}
-                    onChange={(event) => {
-                      setSelected((current) => {
-                        const next = new Set(current);
-                        if (event.target.checked) next.add(index);
-                        else next.delete(index);
-                        return next;
-                      });
-                    }}
+        <Panel>
+          <PanelHead
+            title="Import from client configs"
+            hint={`${fmt(foundPaths)} of ${fmt(importPaths.length)} paths found`}
+          />
+          <PanelBody className="space-y-5">
+            <p className="text-xs leading-relaxed text-ink-3">
+              Choose the servers you want JIT to manage. The source config is
+              never modified.
+            </p>
+
+            <div className="space-y-1.5">
+              {importPaths.map((entry) => (
+                <div
+                  key={entry.path}
+                  className="flex items-start gap-2 text-xs"
+                >
+                  <StatusDot
+                    tone={entry.exists ? "ok" : "neutral"}
+                    className="mt-1.5"
                   />
-                  <span>
-                    <span className="import-name">{server.name}</span>
-                    <span className="import-meta">
-                      {server.command || server.url || "MCP server"} ·{" "}
-                      {server.source}
-                      {server.managed ? " · already managed" : ""}
-                    </span>
+                  <span
+                    className="num min-w-0 break-all text-ink-2"
+                    title={entry.path}
+                  >
+                    {entry.path}
                   </span>
-                </label>
+                  <span className="shrink-0 text-ink-3">
+                    {entry.exists ? "found" : "missing"}
+                  </span>
+                </div>
               ))}
             </div>
-          )}
-          <div className="form-actions" style={{ marginTop: "18px" }}>
-            <button
-              className="btn btn-solid"
-              onClick={() => void importSelected()}
-              disabled={
-                importBusy ||
-                !imports.some((server, index) => !server.managed && selected.has(index))
-              }
-            >
-              {importBusy ? "Importing…" : "Import selected"}
-            </button>
-            <button
-              className="btn btn-quiet"
-              onClick={() => {
-                setImportOpen(false);
-                setImportError("");
-              }}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
+
+            {importError ? (
+              <p className="py-4 text-center text-sm text-ink-2">{importError}</p>
+            ) : imports.length === 0 ? (
+              <p className="py-4 text-center text-sm text-ink-2">
+                No servers found in client configs.
+              </p>
+            ) : (
+              <div className="divide-y divide-line overflow-hidden rounded-md border border-line">
+                {imports.map((server, index) => {
+                  const detail = `${server.command || server.url || "MCP server"} · ${server.source}${
+                    server.managed ? " · already managed" : ""
+                  }`;
+                  return (
+                    <label
+                      className="flex cursor-pointer items-start gap-3 px-3 py-2.5 transition-colors hover:bg-raised/50"
+                      key={`${server.name}-${server.source}`}
+                    >
+                      <Checkbox
+                        checked={selected.has(index)}
+                        disabled={server.managed}
+                        aria-label={server.name}
+                        onChange={(event) => {
+                          setSelected((current) => {
+                            const next = new Set(current);
+                            if (event.target.checked) next.add(index);
+                            else next.delete(index);
+                            return next;
+                          });
+                        }}
+                      />
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm text-ink" title={server.name}>
+                          {server.name}
+                        </span>
+                        <span
+                          className="block truncate font-mono text-[11px] text-ink-3"
+                          title={detail}
+                        >
+                          {detail}
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="primary"
+                onClick={() => void importSelected()}
+                disabled={
+                  importBusy ||
+                  !imports.some(
+                    (server, index) => !server.managed && selected.has(index),
+                  )
+                }
+              >
+                {importBusy ? "Importing…" : "Import selected"}
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setImportOpen(false);
+                  setImportError("");
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </PanelBody>
+        </Panel>
       ) : null}
     </div>
   );

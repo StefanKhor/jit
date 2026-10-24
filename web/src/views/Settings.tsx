@@ -1,9 +1,14 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import { setAuthKey } from "../api";
-import { useJit } from "../context";
 import { fmt, summary } from "../format";
+import { useJit } from "../state/store";
 import type { IndexExport } from "../types";
+import { Badge, Meta } from "../ui/Badge";
+import { Button } from "../ui/Button";
+import { Field, Input, ToggleRow } from "../ui/Field";
+import { PageHead, Panel, PanelBody, PanelHead } from "../ui/Panel";
+import { Slider } from "../ui/Slider";
 
 export function Settings() {
   const ctx = useJit();
@@ -221,298 +226,329 @@ export function Settings() {
     ? "Set by JIT_API_KEY in the environment."
     : "Changes take effect immediately. This browser keeps the new key.";
 
+  const rerankState = !hasKey
+    ? "no key"
+    : config?.rerank_enabled
+      ? "active"
+      : "key saved";
+
   return (
-    <div>
-      <div className="section-head">
-        <div>
-          <div className="kicker">06 — Settings</div>
-          <h2 className="section-title">Configuration.</h2>
-        </div>
-      </div>
+    <div className="space-y-8">
+      <PageHead
+        kicker="06 — Settings"
+        title="Configuration."
+        description="Everything JIT reads at startup: the reranker, the retrieval bar, who may connect, and where state lives."
+      />
 
-      <div className="columns">
-        <div>
-          <div className="panel">
-            <div className="panel-head">
-              <h2>Reranking</h2>
-              <span className="panel-note">Nebius Token Factory</span>
-            </div>
-            <p className="panel-copy">
-              Nemotron Nano re-scores the top candidates before JIT returns one.
-              Optional — local hybrid search works without it.
-            </p>
-            <form onSubmit={saveRerank}>
-              <label className="field">
-                <span className="field-label">API key</span>
-                <input
-                  type="password"
-                  autoComplete="off"
-                  placeholder={hasKey ? `saved · ${config?.nebius_api_key}` : "not set"}
-                  value={nebiusKey}
-                  disabled={Boolean(config?.nebius_key_env)}
-                  onChange={(event) => setNebiusKey(event.target.value)}
-                />
-                <span className="field-help">{keyHelp}</span>
-              </label>
-              <label className="field">
-                <span className="field-label">API base</span>
-                <input
-                  type="text"
-                  spellCheck={false}
-                  value={base}
-                  onChange={(event) => setBase(event.target.value)}
-                />
-              </label>
-              <div className="field-grid">
-                <label className="field">
-                  <span className="field-label">Nano model</span>
-                  <input
-                    type="text"
-                    spellCheck={false}
-                    value={nano}
-                    onChange={(event) => setNano(event.target.value)}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div className="space-y-6">
+          <Panel>
+            <PanelHead
+              title="Reranking"
+              hint="Nebius Token Factory"
+              actions={
+                <Badge
+                  tone={
+                    !hasKey ? "neutral" : config?.rerank_enabled ? "accent" : "neutral"
+                  }
+                >
+                  {rerankState}
+                </Badge>
+              }
+            />
+            <PanelBody className="space-y-5">
+              <p className="text-xs leading-relaxed text-ink-3">
+                Nemotron Nano re-scores the top candidates before JIT returns
+                one. Optional — local hybrid search works without it.
+              </p>
+              <form className="space-y-5" onSubmit={saveRerank}>
+                <Field label="API key" hint={keyHelp}>
+                  <Input
+                    type="password"
+                    autoComplete="off"
+                    placeholder={
+                      hasKey ? `saved · ${config?.nebius_api_key}` : "not set"
+                    }
+                    value={nebiusKey}
+                    disabled={Boolean(config?.nebius_key_env)}
+                    onChange={(event) => setNebiusKey(event.target.value)}
                   />
-                </label>
-              </div>
-              <label className="switch">
-                <input
-                  type="checkbox"
+                </Field>
+                <div className="grid gap-5 md:grid-cols-2">
+                  <Field label="API base">
+                    <Input
+                      type="text"
+                      spellCheck={false}
+                      value={base}
+                      onChange={(event) => setBase(event.target.value)}
+                    />
+                  </Field>
+                  <Field label="Nano model">
+                    <Input
+                      type="text"
+                      spellCheck={false}
+                      value={nano}
+                      onChange={(event) => setNano(event.target.value)}
+                    />
+                  </Field>
+                </div>
+                <ToggleRow
+                  label="Enable reranking"
+                  hint="Re-score candidates with Nemotron Nano."
                   checked={rerank}
-                  onChange={(event) => setRerank(event.target.checked)}
+                  onCheckedChange={setRerank}
                 />
-                <span className="switch-track">
-                  <span className="switch-thumb" />
-                </span>
-                <span>Enable reranking</span>
-              </label>
-              <div className="form-actions">
-                <button
-                  className="btn btn-solid"
-                  type="submit"
-                  disabled={saving === "rerank"}
-                >
-                  {saving === "rerank" ? "Saving…" : "Save"}
-                </button>
-                <button
-                  className="btn"
-                  type="button"
-                  disabled={!hasKey || Boolean(config?.nebius_key_env)}
-                  onClick={() => void removeKey()}
-                >
-                  Remove key
-                </button>
-                <span className="form-note">
-                  {!hasKey
-                    ? "Add a key to enable reranking."
-                    : config?.rerank_enabled
-                      ? "Active."
-                      : "Key saved, reranking off."}
-                </span>
-              </div>
-            </form>
-          </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    disabled={saving === "rerank"}
+                  >
+                    {saving === "rerank" ? "Saving…" : "Save"}
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={!hasKey || Boolean(config?.nebius_key_env)}
+                    onClick={() => void removeKey()}
+                  >
+                    Remove key
+                  </Button>
+                </div>
+              </form>
+            </PanelBody>
+          </Panel>
 
-          <div className="panel">
-            <div className="panel-head">
-              <h2>Retrieval threshold</h2>
-              <span className="panel-note">recall vs precision</span>
-            </div>
-            <p className="panel-copy">
-              JIT returns a match only when the score clears this bar. Lower it
-              to catch more (more false positives), raise it to return only
-              confident matches. Measure the effect with{" "}
-              <code>npm run eval</code> and the Search view.
-            </p>
-            <form onSubmit={saveThreshold}>
-              <label className="field">
-                <span className="field-label">
-                  Confidence threshold <em>{threshold.toFixed(2)}</em>
-                </span>
-                <input
-                  type="range"
-                  min={0.2}
-                  max={0.95}
-                  step={0.05}
-                  value={threshold}
-                  onChange={(event) => setThreshold(Number(event.target.value))}
-                />
-                <span className="field-help">
-                  Rerank scores are 0–3 scaled to 0–1; cosine and the keyword
-                  fallback are also 0–1. Default 0.6.
-                </span>
-              </label>
-              <div className="form-actions">
-                <button
-                  className="btn btn-solid"
-                  type="submit"
-                  disabled={saving === "threshold"}
+          <Panel>
+            <PanelHead title="Retrieval threshold" hint="recall vs precision" />
+            <PanelBody className="space-y-5">
+              <p className="text-xs leading-relaxed text-ink-3">
+                JIT returns a match only when the score clears this bar. Lower it
+                to catch more (more false positives), raise it to return only
+                confident matches. Measure the effect with{" "}
+                <code className="num rounded border border-line-2 bg-raised px-1 py-0.5 text-[11px] text-ink-2">
+                  npm run eval
+                </code>{" "}
+                and the Search view.
+              </p>
+              <form className="space-y-5" onSubmit={saveThreshold}>
+                <Field
+                  label="Confidence threshold"
+                  hint="Rerank scores are 0–3 scaled to 0–1; cosine and the keyword fallback are also 0–1. Default 0.6."
                 >
-                  {saving === "threshold" ? "Saving…" : "Save"}
-                </button>
-              </div>
-            </form>
-          </div>
+                  <div className="flex items-center gap-4">
+                    <Slider
+                      aria-label="Confidence threshold"
+                      min={0.2}
+                      max={0.95}
+                      step={0.05}
+                      value={threshold}
+                      onValueChange={setThreshold}
+                      className="flex-1"
+                    />
+                    <span className="num w-10 shrink-0 text-right text-sm text-ink">
+                      {threshold.toFixed(2)}
+                    </span>
+                  </div>
+                </Field>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    disabled={saving === "threshold"}
+                  >
+                    {saving === "threshold" ? "Saving…" : "Save"}
+                  </Button>
+                </div>
+              </form>
+            </PanelBody>
+          </Panel>
 
-          <div className="panel">
-            <div className="panel-head">
-              <h2>Access</h2>
-              <span className="panel-note">{authOn ? "enabled" : "off"}</span>
-            </div>
-            <p className="panel-copy">
-              Require a key before the dashboard and API can be used. Useful
-              when JIT listens on a network interface.
-            </p>
-            <form onSubmit={saveAuth}>
-              <label className="field">
-                <span className="field-label">Dashboard key</span>
-                <input
-                  type="password"
-                  autoComplete="new-password"
-                  placeholder={authOn ? "•••• (set)" : "not set"}
-                  value={apiKey}
-                  disabled={Boolean(config?.auth_env)}
-                  onChange={(event) => setApiKey(event.target.value)}
-                />
-                <span className="field-help">{authHelp}</span>
-              </label>
-              <div className="form-actions">
-                <button
-                  className="btn btn-solid"
-                  type="submit"
-                  disabled={saving === "auth" || Boolean(config?.auth_env)}
-                >
-                  {saving === "auth" ? "Saving…" : "Set key"}
-                </button>
-                <button
-                  className="btn"
-                  type="button"
-                  disabled={!authOn || Boolean(config?.auth_env)}
-                  onClick={() => void clearAuth()}
-                >
-                  Disable auth
-                </button>
-              </div>
-            </form>
-          </div>
+          <Panel>
+            <PanelHead
+              title="Access"
+              hint={authOn ? "enabled" : "off"}
+              actions={
+                <Badge tone={authOn ? "ok" : "neutral"}>
+                  {authOn ? "on" : "off"}
+                </Badge>
+              }
+            />
+            <PanelBody className="space-y-5">
+              <p className="text-xs leading-relaxed text-ink-3">
+                Require a key before the dashboard and API can be used. Useful
+                when JIT listens on a network interface.
+              </p>
+              <form className="space-y-5" onSubmit={saveAuth}>
+                <Field label="Dashboard key" hint={authHelp}>
+                  <Input
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder={authOn ? "•••• (set)" : "not set"}
+                    value={apiKey}
+                    disabled={Boolean(config?.auth_env)}
+                    onChange={(event) => setApiKey(event.target.value)}
+                  />
+                </Field>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    disabled={saving === "auth" || Boolean(config?.auth_env)}
+                  >
+                    {saving === "auth" ? "Saving…" : "Set key"}
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={!authOn || Boolean(config?.auth_env)}
+                    onClick={() => void clearAuth()}
+                  >
+                    Disable auth
+                  </Button>
+                </div>
+              </form>
+            </PanelBody>
+          </Panel>
         </div>
 
-        <div>
-          <div className="panel">
-            <div className="panel-head">
-              <h2>Data</h2>
-              <span className="panel-note">portable JSON</span>
-            </div>
-            <p className="panel-copy">
-              Export the index with full skill bodies, or restore a previous
-              export.
-            </p>
-            <div className="form-actions">
-              <button className="btn" onClick={() => void exportData()}>
-                Export
-              </button>
-              <button className="btn" onClick={() => fileRef.current?.click()}>
-                Import
-              </button>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="application/json,.json"
-                hidden
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) void importData(file);
-                  event.target.value = "";
-                }}
-              />
-            </div>
-          </div>
-
-
-          <div className="panel">
-            <div className="panel-head">
-              <h2>Marketplace catalogs</h2>
-            </div>
-            <p className="panel-copy">
-              JIT has no built-in catalog. Add one or more remote catalog URLs
-              (JSON with an items array) to populate the marketplace; a later
-              source overrides an earlier entry with the same id. A repository
-              works too: enter<code> owner/repo</code> or a repo link, and JIT
-              resolves it with the <code>skills</code> CLI.
-            </p>
-            <form className="add-row" onSubmit={addMarketplace}>
-              <input
-                type="text"
-                placeholder="https://example.com/catalog.json or owner/repo"
-                spellCheck={false}
-                autoComplete="off"
-                value={newMarketUrl}
-                onChange={(event) => setNewMarketUrl(event.target.value)}
-              />
-              <button
-                className="btn btn-solid"
-                type="submit"
-                disabled={saving === "market" || !newMarketUrl.trim()}
+        <div className="space-y-6">
+          <Panel>
+            <PanelHead
+              title="Marketplace catalogs"
+              hint={
+                marketUrls.length
+                  ? `${fmt(marketUrls.length)} configured`
+                  : "none configured"
+              }
+            />
+            <PanelBody className="space-y-5">
+              <p className="text-xs leading-relaxed text-ink-3">
+                JIT has no built-in catalog. Add one or more remote catalog URLs
+                (JSON with an items array) to populate the marketplace; a later
+                source overrides an earlier entry with the same id. A repository
+                works too: enter{" "}
+                <code className="num rounded border border-line-2 bg-raised px-1 py-0.5 text-[11px] text-ink-2">
+                  owner/repo
+                </code>{" "}
+                or a repo link, and JIT resolves it with the{" "}
+                <code className="num rounded border border-line-2 bg-raised px-1 py-0.5 text-[11px] text-ink-2">
+                  skills
+                </code>{" "}
+                CLI.
+              </p>
+              <form
+                className="flex flex-col gap-2 sm:flex-row"
+                onSubmit={addMarketplace}
               >
-                {saving === "market" ? "Saving…" : "Add"}
-              </button>
-            </form>
-            {marketUrls.length === 0 ? (
-              <p className="field-help">No catalogs configured.</p>
-            ) : (
-              <ul className="market-url-list">
-                {marketUrls.map((url) => (
-                  <li key={url}>
-                    <span>{url}</span>
-                    <button
-                      className="btn-mini danger"
-                      onClick={() => void removeMarketplace(url)}
+                <Input
+                  type="text"
+                  aria-label="Catalog URL"
+                  placeholder="https://example.com/catalog.json or owner/repo"
+                  spellCheck={false}
+                  autoComplete="off"
+                  value={newMarketUrl}
+                  onChange={(event) => setNewMarketUrl(event.target.value)}
+                  className="flex-1"
+                />
+                <Button
+                  type="submit"
+                  variant="primary"
+                  disabled={saving === "market" || !newMarketUrl.trim()}
+                >
+                  {saving === "market" ? "Saving…" : "Add"}
+                </Button>
+              </form>
+              {marketUrls.length === 0 ? (
+                <p className="text-xs text-ink-3">No catalogs configured.</p>
+              ) : (
+                <ul className="divide-y divide-line overflow-hidden rounded-lg border border-line">
+                  {marketUrls.map((url) => (
+                    <li
+                      key={url}
+                      className="flex items-center justify-between gap-3 px-3 py-2.5"
                     >
-                      Remove
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+                      <span
+                        className="num min-w-0 truncate text-xs text-ink-2"
+                        title={url}
+                      >
+                        {url}
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        onClick={() => void removeMarketplace(url)}
+                      >
+                        Remove
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </PanelBody>
+          </Panel>
 
-          <div className="panel">
-            <div className="panel-head">
-              <h2>Danger zone</h2>
-            </div>
-            <p className="panel-copy">
-              Remove every item from the JIT index. This cannot be undone.
-              JIT-owned skill files and your source files stay on disk.
-            </p>
-            <button className="btn btn-danger" onClick={() => void clearIndex()}>
-              Clear index
-            </button>
-          </div>
+          <Panel>
+            <PanelHead title="Data" hint="portable JSON" />
+            <PanelBody className="space-y-5">
+              <p className="text-xs leading-relaxed text-ink-3">
+                Export the index with full skill bodies, or restore a previous
+                export.
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button onClick={() => void exportData()}>Export</Button>
+                <Button onClick={() => fileRef.current?.click()}>Import</Button>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="application/json,.json"
+                  aria-label="Import index file"
+                  hidden
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void importData(file);
+                    event.target.value = "";
+                  }}
+                />
+              </div>
+            </PanelBody>
+          </Panel>
 
-          <div className="panel">
-            <div className="panel-head">
-              <h2>About</h2>
-            </div>
-            <dl className="about">
-              <div>
-                <dt>Version</dt>
-                <dd>v{ctx.health?.version || "1.0.0"}</dd>
+          <Panel>
+            <PanelHead title="Paths" hint="where JIT keeps state" />
+            <dl className="text-sm">
+              <div className="flex items-center justify-between gap-4 border-b border-line px-5 py-3">
+                <dt className="text-xs text-ink-3">Index directory</dt>
+                <dd
+                  className="num min-w-0 truncate text-ink"
+                  title={indexDir}
+                >
+                  {indexDir}
+                </dd>
               </div>
-              <div>
-                <dt>Index</dt>
-                <dd title={indexDir}>{indexDir}</dd>
-              </div>
-              <div>
-                <dt>Embeddings</dt>
-                <dd>{config?.embedding_model || "local"}</dd>
-              </div>
-              <div>
-                <dt>License</dt>
-                <dd>MIT</dd>
+              <div className="flex items-center justify-between gap-4 px-5 py-3">
+                <dt className="text-xs text-ink-3">Embeddings</dt>
+                <dd className="min-w-0 truncate text-ink">
+                  {config?.embedding_model || "local"}
+                </dd>
               </div>
             </dl>
-          </div>
+          </Panel>
+
+          <Panel className="border-bad/30">
+            <PanelHead title="Danger zone" hint="cannot be undone" />
+            <PanelBody className="space-y-5">
+              <p className="text-xs leading-relaxed text-ink-3">
+                Remove every item from the JIT index. JIT-owned skill files and
+                your source files stay on disk.
+              </p>
+              <Button variant="danger" onClick={() => void clearIndex()}>
+                Clear index
+              </Button>
+            </PanelBody>
+          </Panel>
         </div>
       </div>
+
+      <Meta>JIT v{ctx.health?.version || "1.0.0"} · MIT</Meta>
     </div>
   );
 }

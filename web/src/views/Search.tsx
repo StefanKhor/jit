@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 
-import { useJit } from "../context";
+import { useJit } from "../state/store";
 import type { RetrievalStats, SearchResponse } from "../types";
-import { Empty } from "../components/ui";
+import { Badge, Meta, StatusDot } from "../ui/Badge";
+import { Button } from "../ui/Button";
+import { Empty, Spinner, Stat } from "../ui/Display";
+import { Input } from "../ui/Field";
+import { PageHead, Panel, PanelBody, PanelHead } from "../ui/Panel";
+import { Slider } from "../ui/Slider";
+import { Table, TableWrap, Td, Th, Tr } from "../ui/Table";
 
 export function Search() {
   const ctx = useJit();
@@ -87,63 +93,76 @@ export function Search() {
   };
 
   return (
-    <div>
-      <div className="section-head">
-        <div>
-          <div className="kicker">05 — Retrieval</div>
-          <h2 className="section-title">Ask the index.</h2>
-        </div>
-      </div>
+    <div className="space-y-8">
+      <PageHead
+        kicker="05 — Retrieval"
+        title="Ask the index."
+        description="Describe a task in plain language. JIT returns the single best entry, or nothing at all — never a guess — with a quiet table of what it weighed."
+      />
 
-      <div className="slider-row">
-        <label htmlFor="threshold">Confidence threshold</label>
-        <input
-          id="threshold"
-          type="range"
-          min={0.2}
-          max={0.95}
-          step={0.05}
-          value={threshold}
-          onChange={(event) => void saveThreshold(Number(event.target.value))}
-        />
-        <span className="slider-value">{threshold.toFixed(2)}</span>
-        <span className="slider-note">
-          Below this, JIT returns nothing rather than guessing. Lower it for
-          recall, raise it for precision.
-        </span>
-      </div>
+      <Panel>
+        <PanelBody className="space-y-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+            <span className="kicker">Confidence threshold</span>
+            <span className="num text-sm text-ink">{threshold.toFixed(2)}</span>
+          </div>
+          <Slider
+            id="threshold"
+            aria-label="Confidence threshold"
+            value={threshold}
+            min={0.2}
+            max={0.95}
+            step={0.05}
+            onValueChange={(value) => void saveThreshold(value)}
+          />
+          <p className="text-xs leading-relaxed text-ink-3">
+            Below this, JIT returns nothing rather than guessing. Lower it for
+            recall, raise it for precision.
+          </p>
+        </PanelBody>
+      </Panel>
 
-      <form className="search-row" onSubmit={submit}>
-        <input
+      <form className="flex gap-2" onSubmit={submit}>
+        <Input
           type="text"
+          aria-label="Search intent"
           placeholder="create a Linear issue for the login bug"
           autoComplete="off"
           spellCheck={false}
           autoFocus
           value={intent}
           onChange={(event) => setIntent(event.target.value)}
+          className="flex-1"
         />
-        <button className="btn btn-solid" type="submit" disabled={loading}>
+        <Button type="submit" variant="primary" disabled={loading}>
           {loading ? "Searching…" : "Search"}
-        </button>
+        </Button>
       </form>
 
       {loading ? (
-        <div className="search-pending">Searching the index…</div>
+        <Panel role="status" aria-live="polite">
+          <PanelBody className="flex items-center gap-3 text-sm text-ink-2">
+            <Spinner />
+            Searching the index…
+          </PanelBody>
+        </Panel>
       ) : error ? (
-        <div className="no-result">
-          <div className="empty-title">Search failed.</div>
-          <p>{error}</p>
-        </div>
+        <Panel className="border-dashed bg-panel/60">
+          <Empty title="Search failed.">{error}</Empty>
+        </Panel>
       ) : !data ? (
-        <Empty title="Nothing asked yet.">
-          Describe a task in plain language. JIT returns the best entry, or
-          nothing with a short list of what was close.
-        </Empty>
+        <Panel className="border-dashed bg-panel/60">
+          <Empty title="Nothing asked yet.">
+            Describe a task in plain language. JIT returns the best entry, or
+            nothing with a short list of what was close.
+          </Empty>
+        </Panel>
       ) : (data.candidates || []).length === 0 ? (
-        <Empty title="The index is empty.">
-          Add a skill or index an MCP server first.
-        </Empty>
+        <Panel className="border-dashed bg-panel/60">
+          <Empty title="The index is empty.">
+            Add a skill or index an MCP server first.
+          </Empty>
+        </Panel>
       ) : (
         <SearchOutput data={data} />
       )}
@@ -158,16 +177,16 @@ export function Search() {
 
 function TrustBadge({ result }: { result: NonNullable<SearchResponse["result"]> }) {
   return (
-    <span className="badge-row">
-      <span className="tag">{result.kind}</span>
+    <span className="flex flex-wrap items-center gap-1.5">
+      <Badge tone="neutral">{result.kind}</Badge>
       {result.trust === "third-party" ? (
-        <span className="badge badge-third" title={result.source || ""}>
-          third-party
+        <span title={result.source || ""}>
+          <Badge tone="warn">third-party</Badge>
         </span>
       ) : null}
       {result.keyword_only ? (
-        <span className="badge badge-keyword" title="No embeddings or reranker available; ranked by keywords only.">
-          keyword-only
+        <span title="No embeddings or reranker available; ranked by keywords only.">
+          <Badge tone="neutral">keyword-only</Badge>
         </span>
       ) : null}
     </span>
@@ -179,140 +198,214 @@ function SearchOutput({ data }: { data: SearchResponse }) {
   const result = data.result;
   const nearMisses = data.near_misses || [];
   const tick = Math.min(100, Math.max(0, Number(data.threshold || 0) * 100));
+  const threshold = Number(data.threshold || 0);
+  const closest = candidates[0] ?? null;
+  const mode = data.keyword_only
+    ? "keyword-only fallback"
+    : data.reranked
+      ? "reranked · Nemotron Nano"
+      : "local hybrid search";
 
   return (
-    <div id="search-output">
-      <div className="search-meta">
-        <span>{Number(data.elapsed_ms || 0).toFixed(1)} ms</span>
-        <span>threshold {Number(data.threshold || 0).toFixed(2)}</span>
+    <div id="search-output" role="status" aria-live="polite" className="space-y-8">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-ink-3">
         <span>
-          {data.keyword_only
-            ? "keyword-only fallback"
-            : data.reranked
-              ? "reranked · Nemotron Nano"
-              : "local hybrid search"}
+          <span className="num">{Number(data.elapsed_ms || 0).toFixed(1)}</span>{" "}
+          ms
         </span>
+        <span>
+          threshold <span className="num">{threshold.toFixed(2)}</span>
+        </span>
+        <span>{mode}</span>
       </div>
 
       {result ? (
-        <article className="result">
-          <div className="result-top">
-            <TrustBadge result={result} />
-            <span className="result-id">{result.id}</span>
-          </div>
-          <h3 className="result-name">{result.name}</h3>
-          <p className="result-desc">{result.description}</p>
-          <div className="gauge">
-            <div className="gauge-track">
-              <div
-                className="gauge-fill"
-                style={{ width: `${(Number(result.confidence) || 0) * 100}%` }}
+        <Panel className="border-line-2">
+          <PanelHead
+            title="Best match"
+            hint={mode}
+            actions={<TrustBadge result={result} />}
+          />
+          <PanelBody className="space-y-6">
+            <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
+              <div className="min-w-0">
+                <h2
+                  className="display truncate text-2xl text-ink md:text-3xl"
+                  title={result.name}
+                >
+                  {result.name}
+                </h2>
+                <Meta className="mt-2.5">{result.id}</Meta>
+              </div>
+              <Stat
+                label="Confidence"
+                value={Number(result.confidence).toFixed(2)}
+                hint={`threshold ${threshold.toFixed(2)}`}
               />
-              <span className="gauge-tick" style={{ left: `${tick}%` }} />
             </div>
-            <div className="gauge-labels">
-              <span>0</span>
-              <span>confidence {Number(result.confidence).toFixed(2)}</span>
-              <span>1</span>
+
+            <p className="max-w-3xl text-sm leading-relaxed text-ink-2">
+              {result.description}
+            </p>
+
+            <div>
+              <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-line">
+                <div
+                  className="h-full rounded-full bg-accent"
+                  style={{ width: `${(Number(result.confidence) || 0) * 100}%` }}
+                />
+                <span
+                  aria-hidden="true"
+                  className="absolute top-0 h-full w-px bg-ink-2"
+                  style={{ left: `${tick}%` }}
+                />
+              </div>
+              <div className="num mt-2 flex justify-between text-[10px] text-ink-3">
+                <span>0</span>
+                <span>1</span>
+              </div>
             </div>
-          </div>
-          {result.kind === "tool" ? (
-            <div className="tool-hint">
-              Call it with{" "}
-              <code>JIT_CALL("{result.tool_id}", {"{ … }"})</code>
-            </div>
-          ) : null}
-          <details className="body-details">
-            <summary>
-              {result.kind === "tool" ? "Input schema" : "Skill body"}
-            </summary>
-            <pre>{result.content}</pre>
-          </details>
-        </article>
+
+            {result.kind === "tool" ? (
+              <p className="text-xs text-ink-2">
+                Call it with{" "}
+                <code className="num rounded border border-line-2 bg-raised px-1.5 py-0.5 text-[11px] text-ink">
+                  JIT_CALL("{result.tool_id}", {"{ … }"})
+                </code>
+              </p>
+            ) : null}
+
+            <details className="border-t border-line pt-4">
+              <summary className="cursor-pointer text-xs text-ink-3">
+                {result.kind === "tool" ? "Input schema" : "Skill body"}
+              </summary>
+              <pre className="mt-3 max-h-96 overflow-auto rounded-lg border border-line bg-inset p-3 font-mono text-xs text-ink-2">
+                {result.content}
+              </pre>
+            </details>
+          </PanelBody>
+        </Panel>
       ) : (
-        <div className="no-result">
-          <div className="empty-title">Nothing cleared the threshold.</div>
-          <p>
-            JIT returned nothing rather than a guess, so the agent falls back to
-            its own tools.
-            {candidates[0]
-              ? ` The closest entry, ${candidates[0].name}, scored ${Number(
-                  candidates[0].score || 0,
-                ).toFixed(2)}.`
-              : ""}
-          </p>
-          {nearMisses.length ? (
-            <ul className="miss-list">
-              {nearMisses.map((miss) => (
-                <li key={miss.id} className="miss-item">
-                  <span className="tag">{miss.kind}</span>
-                  <span className="miss-name">{miss.name}</span>
-                  <span className="miss-score">{Number(miss.score).toFixed(2)}</span>
-                  <span className="miss-desc">{miss.description}</span>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
+        <Panel>
+          <PanelHead
+            title="Nothing cleared the threshold."
+            hint={`threshold ${threshold.toFixed(2)}`}
+          />
+          <PanelBody className="space-y-4">
+            <p className="max-w-2xl text-sm leading-relaxed text-ink-2">
+              JIT returned nothing rather than a guess, so the agent falls back
+              to its own tools.
+            </p>
+            {closest ? (
+              <p className="text-xs text-ink-3">
+                Closest entry{" "}
+                <span className="text-ink-2">{closest.name}</span> scored{" "}
+                <span className="num text-ink-2">
+                  {Number(closest.score || 0).toFixed(2)}
+                </span>
+                .
+              </p>
+            ) : null}
+            {nearMisses.length ? (
+              <ul className="divide-y divide-line/60 border-t border-line pt-1">
+                {nearMisses.map((miss) => (
+                  <li key={miss.id} className="flex items-baseline gap-3 py-2.5">
+                    <Badge tone="neutral" className="shrink-0">
+                      {miss.kind}
+                    </Badge>
+                    <span
+                      className="min-w-0 truncate text-sm text-ink"
+                      title={miss.name}
+                    >
+                      {miss.name}
+                    </span>
+                    <span className="num shrink-0 text-xs text-ink-3">
+                      {Number(miss.score).toFixed(2)}
+                    </span>
+                    <span
+                      className="hidden min-w-0 flex-1 truncate text-xs text-ink-3 sm:block"
+                      title={miss.description}
+                    >
+                      {miss.description}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </PanelBody>
+        </Panel>
       )}
 
-      <div className="panel">
-        <div className="panel-head">
-          <h2>Ranked candidates</h2>
-          <span className="panel-note">score · cosine · rerank · lexical</span>
-        </div>
-        <div className="table-wrap">
-          <table className="table">
+      <Panel>
+        <PanelHead
+          title="Ranked candidates"
+          hint="score · cosine · rerank · lexical"
+        />
+        <TableWrap>
+          <Table className="table-fixed">
             <thead>
               <tr>
-                <th>Entry</th>
-                <th>Kind</th>
-                <th className="num">Score</th>
-                <th className="num">Cosine</th>
-                <th className="num">Rerank</th>
-                <th className="num">Lexical</th>
-                <th>Threshold</th>
+                <Th>Entry</Th>
+                <Th className="hidden w-20 sm:table-cell">Kind</Th>
+                <Th className="num w-20 text-right">Score</Th>
+                <Th className="num hidden w-20 text-right md:table-cell">
+                  Cosine
+                </Th>
+                <Th className="num hidden w-20 text-right md:table-cell">
+                  Rerank
+                </Th>
+                <Th className="num hidden w-20 text-right lg:table-cell">
+                  Lexical
+                </Th>
+                <Th className="w-24">Threshold</Th>
               </tr>
             </thead>
             <tbody>
               {candidates.map((candidate, index) => (
-                <tr key={candidate.id}>
-                  <td>
-                    <span
-                      className="mono"
-                      style={{ color: "var(--ink-3)", marginRight: "10px" }}
-                    >
-                      {String(index + 1).padStart(2, "0")}
+                <Tr key={candidate.id}>
+                  <Td className="min-w-0">
+                    <div className="flex items-center gap-2.5">
+                      <span className="num shrink-0 text-[11px] text-ink-3">
+                        {String(index + 1).padStart(2, "0")}
+                      </span>
+                      <span className="truncate text-ink" title={candidate.name}>
+                        {candidate.name}
+                      </span>
+                    </div>
+                  </Td>
+                  <Td className="hidden sm:table-cell">
+                    <Badge tone="neutral">{candidate.kind}</Badge>
+                  </Td>
+                  <Td className="num text-right">
+                    <span className="font-medium text-ink">
+                      {Number(candidate.score).toFixed(3)}
                     </span>
-                    {candidate.name}
-                  </td>
-                  <td>
-                    <span className="tag">{candidate.kind}</span>
-                  </td>
-                  <td className="num">
-                    <b>{Number(candidate.score).toFixed(3)}</b>
-                  </td>
-                  <td className="num">{Number(candidate.cosine).toFixed(3)}</td>
-                  <td className="num">
+                  </Td>
+                  <Td className="num hidden text-right text-ink-2 md:table-cell">
+                    {Number(candidate.cosine).toFixed(3)}
+                  </Td>
+                  <Td className="num hidden text-right text-ink-2 md:table-cell">
                     {candidate.rerank == null
                       ? "—"
                       : Number(candidate.rerank).toFixed(2)}
-                  </td>
-                  <td className="num">{Number(candidate.lexical).toFixed(3)}</td>
-                  <td>
-                    <span className="state">
-                      <i
-                        className={`dot ${candidate.passes_threshold ? "ok" : ""}`}
+                  </Td>
+                  <Td className="num hidden text-right text-ink-2 lg:table-cell">
+                    {Number(candidate.lexical).toFixed(3)}
+                  </Td>
+                  <Td>
+                    <span className="inline-flex items-center gap-1.5 text-xs text-ink-2">
+                      <StatusDot
+                        tone={candidate.passes_threshold ? "ok" : "neutral"}
                       />
                       {candidate.passes_threshold ? "pass" : "below"}
                     </span>
-                  </td>
-                </tr>
+                  </Td>
+                </Tr>
               ))}
             </tbody>
-          </table>
-        </div>
-      </div>
+          </Table>
+        </TableWrap>
+      </Panel>
     </div>
   );
 }
@@ -326,59 +419,72 @@ function RetrievalHistory({
 }) {
   const recent = history?.recent || [];
   return (
-    <div className="panel">
-      <div className="panel-head">
-        <h2>Retrieval history</h2>
-        <span className="panel-note">
-          {history && history.total
+    <Panel>
+      <PanelHead
+        title="Retrieval history"
+        hint={
+          history && history.total
             ? `${history.total} logged · ${history.miss_rate}% missed`
-            : "no queries logged yet"}
-          {onClear ? (
-            <button className="btn-mini" onClick={onClear}>
+            : "no queries logged yet"
+        }
+        actions={
+          onClear ? (
+            <Button size="sm" variant="ghost" onClick={onClear}>
               Clear
-            </button>
-          ) : null}
-        </span>
-      </div>
+            </Button>
+          ) : undefined
+        }
+      />
       {recent.length === 0 ? (
         <Empty title="No queries yet.">
           Every JIT_FIND call and dashboard search is logged here so misses are
           visible instead of silent.
         </Empty>
       ) : (
-        <div className="table-wrap">
-          <table className="table">
+        <TableWrap>
+          <Table className="table-fixed">
             <thead>
               <tr>
-                <th>When</th>
-                <th>From</th>
-                <th>Intent</th>
-                <th className="num">Best score</th>
-                <th>Decision</th>
+                <Th className="w-20">When</Th>
+                <Th className="hidden w-24 sm:table-cell">From</Th>
+                <Th>Intent</Th>
+                <Th className="num w-24 text-right">Best score</Th>
+                <Th className="w-28">Decision</Th>
               </tr>
             </thead>
             <tbody>
               {recent.map((entry) => (
-                <tr key={entry.id}>
-                  <td className="mono">{entry.ts.slice(11, 19)}</td>
-                  <td>{entry.source}</td>
-                  <td>{entry.intent}</td>
-                  <td className="num">{Number(entry.score).toFixed(3)}</td>
-                  <td>
-                    <span className="state">
-                      <i
-                        className={`dot ${entry.decision === "hit" ? "ok" : "warn"}`}
+                <Tr key={entry.id}>
+                  <Td className="num text-ink-2">{entry.ts.slice(11, 19)}</Td>
+                  <Td className="hidden truncate sm:table-cell">
+                    {entry.source}
+                  </Td>
+                  <Td className="min-w-0">
+                    <span
+                      className="block truncate text-ink-2"
+                      title={entry.intent}
+                    >
+                      {entry.intent}
+                    </span>
+                  </Td>
+                  <Td className="num text-right text-ink-2">
+                    {Number(entry.score).toFixed(3)}
+                  </Td>
+                  <Td>
+                    <span className="inline-flex items-center gap-1.5 text-xs text-ink-2">
+                      <StatusDot
+                        tone={entry.decision === "hit" ? "ok" : "warn"}
                       />
                       {entry.decision === "hit" ? "hit" : "miss"}
                       {entry.keyword_only ? " · kw" : ""}
                     </span>
-                  </td>
-                </tr>
+                  </Td>
+                </Tr>
               ))}
             </tbody>
-          </table>
-        </div>
+          </Table>
+        </TableWrap>
       )}
-    </div>
+    </Panel>
   );
 }

@@ -1,19 +1,24 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 
 import { api } from "../api";
-import { useJit } from "../context";
 import { fmt } from "../format";
-import type {
-  MarketplaceItem,
-  MarketplaceTopResponse,
-} from "../types";
-import { Empty } from "../components/ui";
+import { useJit } from "../state/store";
+import type { MarketplaceItem, MarketplaceTopResponse } from "../types";
+import { Badge, Meta } from "../ui/Badge";
+import { Button } from "../ui/Button";
+import { Empty } from "../ui/Display";
+import { Input } from "../ui/Field";
+import { PageHead, Panel, PanelBody, PanelHead } from "../ui/Panel";
+import { Segmented } from "../ui/Segmented";
+import { Tab, TabList, TabPanel, Tabs } from "../ui/Tabs";
 
 type Filter = "all" | "skill" | "mcp";
 type TopView = "all-time" | "trending";
+type Section = "catalog" | "discover";
 
 export function Marketplace() {
   const ctx = useJit();
+  const [section, setSection] = useState<Section>("catalog");
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   const [refreshing, setRefreshing] = useState(false);
@@ -22,7 +27,10 @@ export function Marketplace() {
 
   // Browsing the directory: a search, and its own ranking.
   const [needle, setNeedle] = useState("");
-  const [found, setFound] = useState<{ query: string; items: MarketplaceItem[] } | null>(null);
+  const [found, setFound] = useState<{
+    query: string;
+    items: MarketplaceItem[];
+  } | null>(null);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState("");
   const [topView, setTopView] = useState<TopView>("all-time");
@@ -158,189 +166,246 @@ export function Marketplace() {
   };
 
   return (
-    <div>
-      <div className="section-head">
-        <div>
-          <div className="kicker">03 — Marketplace</div>
-          <h2 className="section-title">Install what you need.</h2>
-        </div>
-        <div className="section-actions">
-          <button className="btn" onClick={() => void refresh()} disabled={refreshing}>
+    <div className="space-y-6">
+      <PageHead
+        kicker="03 — Marketplace"
+        title="Install what you need."
+        description={
+          <>
+            Two ways in. Browse the open <code className="num">skills.sh</code>{" "}
+            directory by search or by its own ranking, and install any entry
+            straight from there; or point JIT at a source of your own — a catalog
+            JSON URL, a GitHub repository (<code className="num">owner/repo</code>
+            , or a repo link), or a skills.sh link. Every entry is marked
+            third-party and scanned for risky patterns before it installs, and
+            nothing installs until you choose it.
+          </>
+        }
+        actions={
+          <Button onClick={() => void refresh()} disabled={refreshing}>
             {refreshing ? "Refreshing…" : "Refresh catalog"}
-          </button>
-        </div>
-      </div>
+          </Button>
+        }
+      />
 
-        <p className="section-copy">
-          Two ways in. Browse the open <code>skills.sh</code> directory by search
-          or by its own ranking, and install any entry straight from there; or
-          point JIT at a source of your own — a catalog JSON URL, a GitHub
-          repository (<code>owner/repo</code>, or a repo link), or a skills.sh
-          link. Repository sources are resolved by the open <code>skills</code>{" "}
-          CLI, which JIT runs and imports into its own store. Every entry is
-          marked third-party and scanned for risky patterns before it installs,
-          and nothing installs until you choose it.
-        </p>
+      <Tabs
+        value={section}
+        onValueChange={(value) =>
+          setSection(value === "discover" ? "discover" : "catalog")
+        }
+      >
+        <TabList label="Marketplace sections">
+          <Tab value="catalog">
+            Catalog
+            {items.length ? (
+              <span className="num text-[10px] text-ink-3">
+                {fmt(items.length)}
+              </span>
+            ) : null}
+          </Tab>
+          <Tab value="discover">Discover</Tab>
+        </TabList>
 
-      <form className="add-row" onSubmit={addCatalog}>
-        <input
-          type="text"
-          placeholder="https://example.com/catalog.json, owner/repo, or a skills.sh link"
-          spellCheck={false}
-          autoComplete="off"
-          value={catalogUrl}
-          onChange={(event) => setCatalogUrl(event.target.value)}
-        />
-        <button className="btn btn-solid" type="submit" disabled={adding}>
-          {adding ? "Adding…" : "Add source"}
-        </button>
-      </form>
-
-      <div className="market-toolbar">
-        <div className="market-filters">
-          {(["all", "skill", "mcp"] as const).map((kind) => (
-            <button
-              key={kind}
-              className={`filter${filter === kind ? " is-active" : ""}`}
-              onClick={() => setFilter(kind)}
-            >
-              {kind === "all" ? "All" : kind === "skill" ? "Skills" : "MCP"}{" "}
-              <span>{counts[kind]}</span>
-            </button>
-          ))}
-        </div>
-        <input
-          className="market-search"
-          type="search"
-          placeholder="Filter by name or category"
-          autoComplete="off"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-      </div>
-
-      <p className={`market-note${data.warning ? " is-warn" : ""}`}>
-        {data.source === "remote" ? "Configured sources" : "No sources configured"}
-        {data.warning ? ` · ${data.warning}` : ""}
-      </p>
-
-      {filtered.length === 0 ? (
-        <Empty
-          title={items.length ? "Nothing matches." : "No sources configured yet."}
-        >
-          {items.length
-            ? "Try a different filter, or refresh the catalog."
-            : "Install anything from the skills.sh directory below, or add a catalog URL or repository above."}
-        </Empty>
-      ) : (
-        <div className="market-grid">
-          {filtered.map((item) => (
-            <MarketCard
-              key={item.id}
-              item={item}
-              onInstall={() => ctx.openMarket(item)}
-              onUninstall={() => void uninstall(item)}
+        <TabPanel value="catalog" className="mt-6 space-y-6">
+          <Panel>
+            <PanelHead
+              title="Sources"
+              hint={
+                data.source === "remote"
+                  ? "Configured sources"
+                  : "No sources configured"
+              }
+              actions={data.warning ? <Badge tone="warn">warning</Badge> : null}
             />
-          ))}
-        </div>
-      )}
+            <PanelBody className="space-y-3">
+              <form className="flex flex-col gap-2 sm:flex-row" onSubmit={addCatalog}>
+                <Input
+                  type="text"
+                  className="flex-1"
+                  aria-label="Marketplace source"
+                  placeholder="https://example.com/catalog.json, owner/repo, or a skills.sh link"
+                  spellCheck={false}
+                  autoComplete="off"
+                  value={catalogUrl}
+                  onChange={(event) => setCatalogUrl(event.target.value)}
+                />
+                <Button type="submit" variant="primary" disabled={adding}>
+                  {adding ? "Adding…" : "Add source"}
+                </Button>
+              </form>
+              {data.warning ? (
+                <p className="text-xs leading-relaxed text-warn">{data.warning}</p>
+              ) : null}
+            </PanelBody>
+          </Panel>
 
-      <div className="discover-head">
-        <div className="kicker">Browse the skills.sh directory</div>
-        <span className="market-note">
-          Search and rankings come from{" "}
-          <a href="https://skills.sh" target="_blank" rel="noopener noreferrer">
-            skills.sh
-          </a>
-        </span>
-      </div>
-
-      <form className="add-row" onSubmit={searchDirectory}>
-        <input
-          type="search"
-          placeholder="Search skills.sh — for example: react, playwright, pdf"
-          spellCheck={false}
-          autoComplete="off"
-          value={needle}
-          onChange={(event) => setNeedle(event.target.value)}
-        />
-        <button className="btn btn-solid" type="submit" disabled={searching}>
-          {searching ? "Searching…" : "Search"}
-        </button>
-      </form>
-
-      {searchError ? <p className="market-note is-warn">{searchError}</p> : null}
-
-      {found ? (
-        found.items.length ? (
-          <div className="discover-list">
-            {found.items.map((item) => (
-              <DiscoverRow
-                key={item.id}
-                item={item}
-                onInstall={() => ctx.openMarket(item)}
-                onManage={() => ctx.setView("skills")}
+          <Panel>
+            <PanelHead title="Catalog" hint={`${fmt(items.length)} entries`} />
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-3">
+              <Segmented
+                label="Filter by kind"
+                value={filter}
+                onChange={setFilter}
+                options={[
+                  { value: "all", label: "All", count: counts.all },
+                  { value: "skill", label: "Skills", count: counts.skill },
+                  { value: "mcp", label: "MCP", count: counts.mcp },
+                ]}
               />
-            ))}
-          </div>
-        ) : (
-          <p className="market-note">Nothing matched “{found.query}”.</p>
-        )
-      ) : null}
-
-      <div className="market-toolbar">
-        <div className="market-filters">
-          <button
-            className={`filter${topView === "all-time" ? " is-active" : ""}`}
-            onClick={() => setTopView("all-time")}
-          >
-            Top skills
-          </button>
-          <button
-            className={`filter${topView === "trending" ? " is-active" : ""}`}
-            onClick={() => setTopView("trending")}
-          >
-            Trending
-          </button>
-        </div>
-        <span className="market-note">
-          {topView === "all-time" ? "Most installed" : "Gaining installs now"}
-          {top ? ` · ${fmt(top.total)} listed` : ""}
-        </span>
-      </div>
-
-      {topError ? <p className="market-note is-warn">{topError}</p> : null}
-
-      {top && top.items.length ? (
-        <>
-          <div className="discover-list">
-            {top.items.map((item, index) => (
-              <DiscoverRow
-                key={item.id}
-                item={item}
-                rank={(top.page - 1) * 200 + index + 1}
-                onInstall={() => ctx.openMarket(item)}
-                onManage={() => ctx.setView("skills")}
+              <Input
+                type="search"
+                className="w-full sm:w-64"
+                aria-label="Filter catalog"
+                placeholder="Filter by name or category"
+                autoComplete="off"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
               />
-            ))}
-          </div>
-          {top.has_more ? (
-            <div className="discover-more">
-              <button
-                className="btn"
-                disabled={topLoading}
-                onClick={() => void loadTop(topView, top.page + 1, true)}
-              >
-                {topLoading ? "Loading…" : "Show more"}
-              </button>
             </div>
-          ) : null}
-        </>
-      ) : (
-        <p className="market-note">
-          {topLoading ? "Loading the ranking…" : "The ranking is unavailable."}
-        </p>
-      )}
+
+            {filtered.length === 0 ? (
+              <Empty
+                title={
+                  items.length ? "Nothing matches." : "No sources configured yet."
+                }
+              >
+                {items.length
+                  ? "Try a different filter, or refresh the catalog."
+                  : "Install anything from the skills.sh directory in Discover, or add a catalog URL or repository above."}
+              </Empty>
+            ) : (
+              <PanelBody className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {filtered.map((item) => (
+                  <MarketCard
+                    key={item.id}
+                    item={item}
+                    onInstall={() => ctx.openMarket(item)}
+                    onUninstall={() => void uninstall(item)}
+                  />
+                ))}
+              </PanelBody>
+            )}
+          </Panel>
+        </TabPanel>
+
+        <TabPanel value="discover" className="mt-6">
+          <Panel>
+            <PanelHead
+              title="Browse the skills.sh directory"
+              hint={
+                <>
+                  Search and rankings come from{" "}
+                  <a
+                    className="text-ink-2 underline decoration-line-2 underline-offset-2 hover:text-ink"
+                    href="https://skills.sh"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    skills.sh
+                  </a>
+                </>
+              }
+            />
+
+            <div className="space-y-3 border-b border-line px-5 py-4">
+              <form
+                className="flex flex-col gap-2 sm:flex-row"
+                onSubmit={searchDirectory}
+              >
+                <Input
+                  type="search"
+                  className="flex-1"
+                  aria-label="Search skills.sh"
+                  placeholder="Search skills.sh — for example: react, playwright, pdf"
+                  spellCheck={false}
+                  autoComplete="off"
+                  value={needle}
+                  onChange={(event) => setNeedle(event.target.value)}
+                />
+                <Button type="submit" variant="primary" disabled={searching}>
+                  {searching ? "Searching…" : "Search"}
+                </Button>
+              </form>
+
+              {searchError ? (
+                <p className="text-xs leading-relaxed text-warn">{searchError}</p>
+              ) : null}
+
+              {found ? (
+                found.items.length ? (
+                  <div className="divide-y divide-line/60 overflow-hidden rounded-xl border border-line">
+                    {found.items.map((item) => (
+                      <DiscoverRow
+                        key={item.id}
+                        item={item}
+                        onInstall={() => ctx.openMarket(item)}
+                        onManage={() => ctx.setView("skills")}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="px-1 text-xs text-ink-3">
+                    Nothing matched “{found.query}”.
+                  </p>
+                )
+              ) : null}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-3">
+              <Segmented
+                label="Ranking"
+                value={topView}
+                onChange={setTopView}
+                options={[
+                  { value: "all-time", label: "Top skills" },
+                  { value: "trending", label: "Trending" },
+                ]}
+              />
+              <span className="text-xs text-ink-3">
+                {topView === "all-time" ? "Most installed" : "Gaining installs now"}
+                {top ? ` · ${fmt(top.total)} listed` : ""}
+              </span>
+            </div>
+
+            {topError ? (
+              <p className="border-b border-line px-5 py-3 text-xs text-warn">
+                {topError}
+              </p>
+            ) : null}
+
+            {top && top.items.length ? (
+              <>
+                <div className="divide-y divide-line/60">
+                  {top.items.map((item, index) => (
+                    <DiscoverRow
+                      key={item.id}
+                      item={item}
+                      rank={(top.page - 1) * 200 + index + 1}
+                      onInstall={() => ctx.openMarket(item)}
+                      onManage={() => ctx.setView("skills")}
+                    />
+                  ))}
+                </div>
+                {top.has_more ? (
+                  <div className="border-t border-line px-5 py-3">
+                    <Button
+                      size="sm"
+                      disabled={topLoading}
+                      onClick={() => void loadTop(topView, top.page + 1, true)}
+                    >
+                      {topLoading ? "Loading…" : "Show more"}
+                    </Button>
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <p className="px-5 py-6 text-xs text-ink-3">
+                {topLoading ? "Loading the ranking…" : "The ranking is unavailable."}
+              </p>
+            )}
+          </Panel>
+        </TabPanel>
+      </Tabs>
     </div>
   );
 }
@@ -357,29 +422,34 @@ function DiscoverRow({
   onManage: () => void;
 }) {
   return (
-    <div className="discover-row">
-      {rank != null ? <span className="discover-rank">{rank}</span> : null}
-      <div className="discover-main">
-        <span className="discover-name">{item.name}</span>
-        <span className="discover-source">{item.origin}</span>
+    <div className="flex items-center gap-3 px-5 py-2.5 transition-colors hover:bg-raised/40">
+      {rank != null ? (
+        <span className="num w-7 shrink-0 text-right text-xs text-ink-3">
+          {rank}
+        </span>
+      ) : null}
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm text-ink" title={item.name}>
+          {item.name}
+        </div>
+        <Meta>{item.origin}</Meta>
       </div>
       {item.installs ? (
-        <span className="discover-installs">{fmt(item.installs)} installs</span>
+        <span className="num hidden shrink-0 text-xs text-ink-3 sm:block">
+          {fmt(item.installs)} installs
+        </span>
       ) : null}
       {item.installed ? (
         <>
-          <span className="market-installed">
-            <i className="dot ok" />
-            Installed
-          </span>
-          <button className="btn" onClick={onManage}>
+          <Badge tone="ok">Installed</Badge>
+          <Button size="sm" onClick={onManage}>
             Manage
-          </button>
+          </Button>
         </>
       ) : (
-        <button className="btn btn-solid" onClick={onInstall}>
+        <Button size="sm" variant="primary" onClick={onInstall}>
           Install
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -395,11 +465,10 @@ function MarketCard({
   onUninstall: () => void;
 }) {
   const installed = Boolean(item.installed);
-  const kind = item.kind === "mcp" ? "MCP" : "Skill";
   const sourceLink =
     item.source && /^https?:\/\//.test(item.source) ? (
       <a
-        className="btn-mini"
+        className="text-xs text-ink-3 underline decoration-line-2 underline-offset-2 hover:text-ink-2"
         href={item.source}
         target="_blank"
         rel="noopener noreferrer"
@@ -409,45 +478,62 @@ function MarketCard({
     ) : null;
 
   return (
-    <article className={`market-card${installed ? " is-installed" : ""}`}>
-      <div className="market-top">
-        <span className="tag">{kind}</span>
-        <span className="market-cat">{item.category}</span>
+    <article
+      className={[
+        "flex min-w-0 flex-col gap-3 rounded-xl border p-4 transition-colors",
+        installed
+          ? "border-line-2 bg-raised/40"
+          : "border-line bg-inset/50 hover:border-line-2",
+      ].join(" ")}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <Badge tone={item.kind === "mcp" ? "neutral" : "accent"}>
+            {item.kind === "mcp" ? "MCP" : "Skill"}
+          </Badge>
+          {item.category ? (
+            <span className="truncate text-[11px] text-ink-3" title={item.category}>
+              {item.category}
+            </span>
+          ) : null}
+        </div>
+        {installed ? <Badge tone="ok">Installed</Badge> : null}
       </div>
-      <h3 className="market-name">{item.name}</h3>
-      <p className="market-desc">{item.description}</p>
-      <div className="market-meta">
-        <span>{item.author || "Unknown"}</span>
+
+      <div className="min-w-0">
+        <h3 className="truncate text-sm font-medium text-ink" title={item.name}>
+          {item.name}
+        </h3>
+        <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-ink-2">
+          {item.description}
+        </p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-ink-3">
+        <span className="truncate">{item.author || "Unknown"}</span>
+        <span className="text-ink-3/50">·</span>
         <span>{item.license || "See source"}</span>
+        <span className="text-ink-3/50">·</span>
         <span>Third-party</span>
-        {item.origin ? (
-          <span className="market-origin">{item.origin}</span>
-        ) : null}
         {item.checksum_present === false ? (
-          <span className="market-warn">unpinned</span>
+          <Badge tone="warn">unpinned</Badge>
         ) : null}
         {item.requires ? <span>{item.requires}</span> : null}
       </div>
-      <div className="market-actions">
+
+      {item.origin ? <Meta>{item.origin}</Meta> : null}
+
+      <div className="mt-auto flex items-center gap-3 pt-1">
         {installed ? (
-          <>
-            <span className="market-installed">
-              <i className="dot ok" />
-              Installed
-            </span>
-            {sourceLink}
-            <button className="btn-mini danger" onClick={onUninstall}>
-              {item.kind === "skill" ? "Uninstall" : "Remove"}
-            </button>
-          </>
+          <Button size="sm" variant="danger" onClick={onUninstall}>
+            {item.kind === "skill" ? "Uninstall" : "Remove"}
+          </Button>
         ) : (
-          <>
-            <button className="btn btn-solid" onClick={onInstall}>
-              Install
-            </button>
-            {sourceLink}
-          </>
+          <Button size="sm" variant="primary" onClick={onInstall}>
+            Install
+          </Button>
         )}
+        {sourceLink}
       </div>
     </article>
   );

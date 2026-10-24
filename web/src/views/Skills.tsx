@@ -1,8 +1,13 @@
 import { useState, type FormEvent } from "react";
 
-import { useJit } from "../context";
 import { fmt, summary } from "../format";
-import { Empty } from "../components/ui";
+import { useJit } from "../state/store";
+import { Badge, StatusDot } from "../ui/Badge";
+import { Button } from "../ui/Button";
+import { Empty } from "../ui/Display";
+import { Input } from "../ui/Field";
+import { PageHead, Panel, PanelBody, PanelHead } from "../ui/Panel";
+import { Table, TableWrap, Td, Th, Tr } from "../ui/Table";
 
 export function Skills() {
   const ctx = useJit();
@@ -82,150 +87,174 @@ export function Skills() {
     }
   };
 
+  const total = ctx.skills.length;
+  const enabled = ctx.skills.reduce((count, skill) => count + (skill.enabled ? 1 : 0), 0);
+
   return (
-    <div>
-      <div className="section-head">
-        <div>
-          <div className="kicker">02 — Skills</div>
-          <h2 className="section-title">
-            The catalog.<span className="count">{ctx.skills.length}</span>
-          </h2>
-        </div>
-        <div className="section-actions">
-          <button
-            className="btn btn-solid"
-            onClick={() => ctx.setView("marketplace")}
-          >
-            Browse marketplace
-          </button>
-          <button className="btn" onClick={() => ctx.openTransfer("in")}>
-            Transfer
-          </button>
-        </div>
-      </div>
+    <div className="space-y-6">
+      <PageHead
+        kicker="02 — Skills"
+        title={
+          <span className="flex items-baseline gap-2">
+            The catalog.
+            <span className="num text-sm text-ink-3">{total}</span>
+          </span>
+        }
+        description="Only what you import is indexed. JIT never scans your skill folders on startup. Transfer copies files in or out; indexing a path leaves the file where it lives."
+        actions={
+          <>
+            <Button
+              variant="primary"
+              onClick={() => ctx.setView("marketplace")}
+            >
+              Browse marketplace
+            </Button>
+            <Button onClick={() => ctx.openTransfer("in")}>Transfer</Button>
+          </>
+        }
+      />
 
-      <p className="section-copy">
-        Only what you import is indexed. JIT never scans your skill folders on
-        startup. Transfer copies files in or out; indexing a path leaves the
-        file where it lives.
-      </p>
-
-      <form className="add-row" onSubmit={addPath}>
-        <input
-          type="text"
-          placeholder="/path/to/skills or a SKILL.md file"
-          spellCheck={false}
-          autoComplete="off"
-          value={path}
-          onChange={(event) => setPath(event.target.value)}
+      <Panel>
+        <PanelHead
+          title="Index by path"
+          hint="Indexes in place. Use Transfer to copy files into JIT."
         />
-        <button className="btn btn-solid" type="submit" disabled={busy}>
-          {busy ? "Indexing…" : "Index path"}
-        </button>
-      </form>
-      <p
-        className="field-help"
-        style={{ marginTop: "-14px", marginBottom: "24px" }}
-      >
-        Indexes in place. Use Transfer to copy files into JIT.
-      </p>
+        <PanelBody>
+          <form className="flex flex-col gap-2 sm:flex-row" onSubmit={addPath}>
+            <Input
+              type="text"
+              aria-label="Skill path"
+              placeholder="/path/to/skills or a SKILL.md file"
+              spellCheck={false}
+              autoComplete="off"
+              value={path}
+              onChange={(event) => setPath(event.target.value)}
+              className="flex-1"
+            />
+            <Button type="submit" variant="primary" disabled={busy}>
+              {busy ? "Indexing…" : "Index path"}
+            </Button>
+          </form>
+        </PanelBody>
+      </Panel>
 
-      {ctx.skills.length === 0 ? (
-        <Empty
-          title="Nothing indexed yet."
-          actions={
-            <>
-              <button
-                className="btn btn-solid"
-                onClick={() => ctx.setView("marketplace")}
-              >
-                Browse marketplace
-              </button>
-              <button className="btn" onClick={() => ctx.openTransfer("in")}>
-                Transfer skills
-              </button>
-            </>
-          }
-        >
-          Install from the marketplace, or paste a path above.
-        </Empty>
+      {total === 0 ? (
+        <Panel className="border-dashed bg-panel/60">
+          <Empty
+            title="Nothing indexed yet."
+            actions={
+              <>
+                <Button
+                  variant="primary"
+                  onClick={() => ctx.setView("marketplace")}
+                >
+                  Browse marketplace
+                </Button>
+                <Button onClick={() => ctx.openTransfer("in")}>
+                  Transfer skills
+                </Button>
+              </>
+            }
+          >
+            Install from the marketplace, or paste a path above.
+          </Empty>
+        </Panel>
       ) : (
-        <div className="table-wrap" id="skills-table">
-          <table className="table">
-            <thead>
-              <tr>
-                <th scope="col">Name</th>
-                <th scope="col">Category</th>
-                <th scope="col" className="num">
-                  Tokens
-                </th>
-                <th scope="col">State</th>
-                <th scope="col" className="actions">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {ctx.skills.map((skill) => {
-                const category = skill.categories?.[0] || "—";
-                const managed = Boolean(skill.managed);
-                const action = managed ? "Uninstall" : "Unindex";
-                const actionTitle = managed
-                  ? "Delete the JIT-owned copy and remove it from the index"
-                  : "Remove from the index only; the source file stays";
-                return (
-                  <tr key={skill.id}>
-                    <td>
-                      <span className="row-title">
-                        <button
-                          className="row-name"
-                          onClick={() => void ctx.openSkill(skill.id)}
+        <Panel id="skills-table">
+          <PanelHead
+            title="Skills"
+            hint={`${fmt(enabled)} of ${fmt(total)} enabled`}
+          />
+          <TableWrap>
+            <Table className="w-full min-w-[560px] table-fixed">
+              <thead>
+                <tr>
+                  <Th>Name</Th>
+                  <Th className="hidden w-[130px] md:table-cell">Category</Th>
+                  <Th className="num hidden w-[80px] text-right sm:table-cell">
+                    Tokens
+                  </Th>
+                  <Th className="w-[110px]">State</Th>
+                  <Th className="w-[190px] text-right">Actions</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {ctx.skills.map((skill) => {
+                  const category = skill.categories?.[0] || "—";
+                  const managed = Boolean(skill.managed);
+                  const action = managed ? "Uninstall" : "Unindex";
+                  const actionTitle = managed
+                    ? "Delete the JIT-owned copy and remove it from the index"
+                    : "Remove from the index only; the source file stays";
+                  const description = skill.description || "No description";
+                  return (
+                    <Tr key={skill.id}>
+                      <Td>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <button
+                            type="button"
+                            className="min-w-0 truncate text-left text-sm font-medium text-ink hover:text-accent"
+                            title={skill.name}
+                            onClick={() => void ctx.openSkill(skill.id)}
+                          >
+                            {skill.name}
+                          </button>
+                          <Badge tone="neutral" className="shrink-0">
+                            {managed ? "JIT copy" : "Local file"}
+                          </Badge>
+                        </div>
+                        <p
+                          className="mt-1 min-w-0 truncate text-xs text-ink-3"
+                          title={description}
                         >
-                          {skill.name}
-                        </button>
-                        <span
-                          className={`tag source${managed ? " jit" : ""}`}
-                        >
-                          {managed ? "JIT copy" : "Local file"}
+                          {description}
+                        </p>
+                      </Td>
+                      <Td className="hidden md:table-cell">
+                        <span className="block min-w-0 truncate" title={category}>
+                          <Badge tone="neutral">{category}</Badge>
                         </span>
-                      </span>
-                      <div className="row-sub" title={skill.description}>
-                        {skill.description || "No description"}
-                      </div>
-                    </td>
-                    <td>
-                      <span className="tag">{category}</span>
-                    </td>
-                    <td className="num">{fmt(skill.tokens)}</td>
-                    <td>
-                      <span className="state">
-                        <i className={`dot ${skill.enabled ? "ok" : ""}`} />
-                        {skill.enabled ? "enabled" : "disabled"}
-                      </span>
-                    </td>
-                    <td className="actions">
-                      <button
-                        className="btn-mini"
-                        disabled={busyId === skill.id}
-                        onClick={() => void toggle(skill.id, !skill.enabled)}
+                      </Td>
+                      <Td
+                        className="num hidden text-right text-ink-2 sm:table-cell"
+                        title="Body tokens"
                       >
-                        {skill.enabled ? "Disable" : "Enable"}
-                      </button>
-                      <button
-                        className="btn-mini danger"
-                        disabled={busyId === skill.id}
-                        title={actionTitle}
-                        onClick={() => void remove(skill.id, managed)}
-                      >
-                        {busyId === skill.id ? "…" : action}
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                        {fmt(skill.tokens)}
+                      </Td>
+                      <Td>
+                        <span className="inline-flex items-center gap-1.5 text-xs text-ink-2">
+                          <StatusDot tone={skill.enabled ? "ok" : "neutral"} />
+                          {skill.enabled ? "enabled" : "disabled"}
+                        </span>
+                      </Td>
+                      <Td className="text-right">
+                        <div className="flex justify-end gap-1.5">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={busyId === skill.id}
+                            onClick={() => void toggle(skill.id, !skill.enabled)}
+                          >
+                            {skill.enabled ? "Disable" : "Enable"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            disabled={busyId === skill.id}
+                            title={actionTitle}
+                            onClick={() => void remove(skill.id, managed)}
+                          >
+                            {busyId === skill.id ? "…" : action}
+                          </Button>
+                        </div>
+                      </Td>
+                    </Tr>
+                  );
+                })}
+              </tbody>
+            </Table>
+          </TableWrap>
+        </Panel>
       )}
     </div>
   );
