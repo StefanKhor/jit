@@ -34,8 +34,6 @@ CREATE TABLE IF NOT EXISTS skills (
     required      TEXT,
     schema        TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_skills_kind ON skills(kind);
-CREATE INDEX IF NOT EXISTS idx_skills_server ON skills(server);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 `;
 
@@ -77,6 +75,8 @@ export function initDb(): DatabaseSync {
       }
     }
   }
+  db.exec("CREATE INDEX IF NOT EXISTS idx_skills_kind ON skills(kind)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_skills_server ON skills(server)");
   return db;
 }
 
