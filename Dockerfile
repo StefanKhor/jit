@@ -1,6 +1,5 @@
 FROM node:24-bookworm-slim AS build
 
-# model warmup can reach their registries:
 ENV npm_config_update_notifier=false
 
 WORKDIR /app
@@ -35,12 +34,14 @@ FROM node:24-bookworm-slim AS runtime
 
 ENV NODE_ENV=production \
     JIT_HOME=/data \
-    JIT_MODEL_CACHE=/app/models \
+    JIT_MODEL_CACHE=/app/models
 
 WORKDIR /app
 
+# git is required by the skills CLI that resolves repository sources.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
+      git \
       libgomp1 \
       libstdc++6 \
     && rm -rf /var/lib/apt/lists/* \

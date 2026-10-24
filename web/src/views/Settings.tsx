@@ -435,8 +435,9 @@ export function Settings() {
             <p className="panel-copy">
               JIT has no built-in catalog. Add one or more remote catalog URLs
               (JSON with an items array) to populate the marketplace; a later
-              source overrides an earlier entry with the same id. A GitHub
-              repository works too: enter<code> owner/repo</code> or a repo link.
+              source overrides an earlier entry with the same id. A repository
+              works too: enter<code> owner/repo</code> or a repo link, and JIT
+              resolves it with the <code>skills</code> CLI.
             </p>
             <form className="add-row" onSubmit={addMarketplace}>
               <input

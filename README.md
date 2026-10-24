@@ -249,8 +249,10 @@ the file and are never written back.
 | `JIT_DISABLE_EMBEDDINGS` | Run keyword-only, no model download | unset |
 | `JIT_EMBEDDING_MODEL` | Transformers.js model | `Xenova/bge-small-en-v1.5` |
 | `JIT_EMBEDDING_DIM` | Expected vector size | `384` |
-| `JIT_MARKETPLACE_URL` | Catalog URL(s) or GitHub repo(s), comma-separated | unset |
-| `JIT_GITHUB_TOKEN` | Token for private GitHub repos / rate limits | unset |
+| `JIT_MARKETPLACE_URL` | Catalog URL(s) or repository/CLI source(s), comma-separated | unset |
+| `JIT_GITHUB_TOKEN` | Token for private repositories, passed to the skills CLI | unset |
+| `JIT_SKILLS_CLI` | Command that resolves repository sources | `npx --yes skills@1.7.4` |
+| `JIT_SKILLS_CLI_VERSION` | Version of the skills CLI to run | `1.7.4` |
 | `JIT_MAX_REQUEST_BYTES` | Dashboard API body limit | `16777216` |
 | `JIT_MAX_SKILL_BYTES` | Skill file limit | `2097152` |
 | `JIT_LOG_LEVEL` | `DEBUG`, `INFO`, `WARN`, `ERROR` | `INFO` |
@@ -262,13 +264,13 @@ or pass them to Docker; the dashboard writes persistent settings to
 ### Offline and air-gapped
 
 On first use JIT downloads the embedding model once into `JIT_MODEL_CACHE`
-(about 130 MB); after that, retrieval is fully local and needs no network:
-
-- **Air-gapped.** Either copy a populated `JIT_MODEL_CACHE` to the machine, or
-  set `JIT_DISABLE_EMBEDDINGS=1` and run on the lexical fallback. Neither,
-  notably, sends any indexed content off the machine — the only outbound calls
-  JIT ever makes are the model download and, if you configure it, the Nebius
-  reranker.
+(about 130 MB); after that, retrieval is fully local and needs no network. To
+run without it, either copy a populated `JIT_MODEL_CACHE` to the machine, or
+set `JIT_DISABLE_EMBEDDINGS=1` and run on the lexical fallback. Neither,
+notably, sends any indexed content off the machine — the only outbound calls
+JIT ever makes are the model download and, if you configure it, the Nebius
+reranker. Network access, if any, is your own: JIT reads no network
+configuration of its own and leaves that to the environment you run it in.
 
 Auth is opt-in. When `JIT_API_KEY` is set (or a key is saved in Settings),
 `/api/*` requires `Authorization: Bearer <key>` or `X-API-Key: <key>`. The
@@ -325,16 +327,12 @@ one. There are two kinds of source:
 1. **A catalog URL** — JSON with an `items` array, served over HTTPS.
 2. **A GitHub repository** — `owner/repo`, `owner/repo@ref`, `owner/repo@ref#dir`,
    or a repo link such as `https://github.com/owner/repo/tree/main/skills`.
-   JIT resolves the ref to a **commit**, lists the tree, and then either:
-   - reads the `marketplace.json` at the root of the repo (or of `#dir`), resolving
-     relative skill paths against that commit, or
-   - crawls for `**/SKILL.md` (up to 60) and MCP definitions
-     (`.mcp.json`, `mcp.json`, `mcp.servers.json`, up to 20 servers).
-
-   Every body is fetched from `raw.githubusercontent.com` at the pinned commit and
-   hashed, so nothing can change under you between review and install. Private
-   repos and GitHub rate limits are handled with a token in `JIT_GITHUB_TOKEN`
-   (or `GITHUB_TOKEN`).
+   JIT resolves these with the open [`skills`](https://github.com/vercel-labs/skills)
+   CLI rather than parsing repositories itself: it runs `npx skills add <source>
+   --skill '*' --copy -y` in a cache directory and imports the result. Skills are
+   therefore always whatever that CLI installs, and its own source formats and
+   private-repo handling (including `JIT_GITHUB_TOKEN` or `GITHUB_TOKEN`) apply.
+   Repository sources need `git` and a registry reachable by `npx`.
 
 Sources are added on the Marketplace page or in Settings, stored in
 `marketplace_urls`, and can also come from the environment as a comma-separated
@@ -346,8 +344,8 @@ Supply-chain guardrails:
 
 - **Checksums are required.** A skill whose body is fetched from a URL must
   carry a `sha256` in the catalog, because an unpinned body can change between
-  review and install. Relative paths in a GitHub-hosted catalog get their
-  checksum computed for you at discovery time.
+  review and install. Repository skills carry the content hash the `skills` CLI
+  reports, which is compared again at install to flag a change under you.
 - **Every entry is scanned before install.** The scanner looks for prompt
   injection ("ignore previous instructions"), credential-store access
   (`~/.ssh`, `.aws/credentials`), exfiltration (`curl … | sh`), and for MCP
@@ -363,7 +361,8 @@ Supply-chain guardrails:
 
 What an install does:
 
-- Skills are written to `~/.jit/skills/<id>/SKILL.md` and indexed.
+- Skills are written to `~/.jit/skills/<id>/` — the whole directory the source
+  installs, not just `SKILL.md` — and indexed.
 - MCP servers are written to `~/.jit/mcp.json`, connected, and their tools are
   indexed. The dashboard requires an explicit “I understand this starts a local
   process” confirmation.

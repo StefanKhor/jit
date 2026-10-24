@@ -109,12 +109,11 @@ export function Marketplace() {
 
         <p className="section-copy">
           JIT ships no catalog of its own: the marketplace is exactly the
-          sources you add. A source is a catalog JSON URL or a GitHub repository
-          (<code>owner/repo</code>, or a repo link) — JIT pins the repo to a
-          commit and reads its <code>marketplace.json</code>, <code>SKILL.md</code>
-          files, and MCP configs. Everything is marked third-party, scanned for
-          risky patterns, and fetched with a pinned checksum. Nothing installs
-          until you choose it.
+          sources you add. A catalog JSON URL is read directly. A GitHub
+          repository (<code>owner/repo</code>, or a repo link) is resolved by the
+          open <code>skills</code> CLI, which JIT runs and then imports into its
+          own store. Every entry is marked third-party and scanned for risky
+          patterns before it installs, and nothing installs until you choose it.
         </p>
 
         <form className="add-row" onSubmit={addCatalog}>

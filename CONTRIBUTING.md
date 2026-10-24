@@ -82,17 +82,18 @@ Useful smoke checks:
 - Import and export leave the external side untouched.
 - A query with no match returns `near_misses`, not a silent empty result.
 - `GET /api/marketplace` reports `source: "none"` until you add a source.
-- A GitHub source (`owner/repo`) resolves to a pinned commit with checksummed
-  bodies; `POST /api/marketplace/inspect` shows the findings before you install.
+- A GitHub source (`owner/repo`) lists the skills the `skills` CLI installs;
+  `POST /api/marketplace/inspect` shows the findings before you install.
 
 ## Marketplace sources
 
 JIT ships no catalog of its own, so the marketplace is whatever the user points
-it at: an HTTPS catalog URL, or a GitHub repository (`owner/repo[@ref][#dir]`)
-that JIT pins to a commit. `src/github.ts` resolves a repo, and
-`src/marketplace.ts` normalizes every entry. Remote skill bodies must carry a
-`sha256`; relative paths inside a GitHub-hosted catalog get one computed at
-discovery time. Never relax the checksum requirement, and keep every entry
+it at: an HTTPS catalog URL, or a repository source (`owner/repo[@ref][#dir]`)
+that JIT hands to the open `skills` CLI. `src/github.ts` only validates the
+reference; `src/skillsCli.ts` runs the CLI and `src/marketplace.ts` normalizes
+every entry. Do not reimplement repository resolution here — that is the CLI's
+job. Remote skill bodies must carry a `sha256`; repository skills carry the
+hash the CLI reports. Never relax the checksum requirement, and keep every entry
 scanned before install.
 
 ## Pull requests
