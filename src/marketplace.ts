@@ -13,6 +13,7 @@ import {
   atomicWriteFile,
   JIT_SKILLS_DIR,
   MAX_SKILL_BYTES,
+  PACKAGE_DIR,
 } from "./config.js";
 import {
   deleteItem,
@@ -23,15 +24,20 @@ import {
 import { logger } from "./logger.js";
 import { loadConfig } from "./config.js";
 import { defaultManager } from "./mcp/client.js";
+import { scanMcpConfig, scanText } from "./skillScan.js";
 import { getItem, initDb, listItems } from "./storage/db.js";
 import type {
+  InspectResult,
   MarketplaceInput,
   MarketplaceItem,
   MarketplaceResponse,
+  ScanReport,
 } from "./types.js";
 
 const REMOTE_TTL_MS = 300_000;
 const SAFE_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+const BUNDLED_ORIGIN = "bundled";
+const BUNDLED_CATALOG = path.join(PACKAGE_DIR, "marketplace.json");
 const remoteCache: {
   url: string;
   at: number;
@@ -39,7 +45,10 @@ const remoteCache: {
   error: string;
 } = { url: "", at: 0, items: [], error: "" };
 
-function normalizeItem(raw: unknown): MarketplaceItem | null {
+function normalizeItem(
+  raw: unknown,
+  origin: string,
+): MarketplaceItem | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const source = raw as Record<string, unknown>;
   const id = String(source.id || "").trim().toLowerCase();
@@ -61,6 +70,11 @@ function normalizeItem(raw: unknown): MarketplaceItem | null {
     }
   }
 
+  const installRecord = install as Record<string, unknown>;
+  const hasUrlBody =
+    kind === "skill" &&
+    typeof installRecord.url === "string" &&
+    installRecord.url.trim() !== "";
   return {
     ...(source as unknown as MarketplaceItem),
     id,
@@ -69,8 +83,37 @@ function normalizeItem(raw: unknown): MarketplaceItem | null {
     description: String(source.description || "").trim(),
     category: String(source.category || "Other").trim(),
     inputs,
-    install: install as Record<string, unknown>,
+    install: installRecord,
+    origin,
+    bundled: origin === BUNDLED_ORIGIN,
+    checksum_present: hasUrlBody
+      ? Boolean(String(installRecord.sha256 || "").trim())
+      : true,
   };
+}
+
+// A small, offline, vetted catalog so a first run is not a dead end. Every body
+// is inline, so nothing is fetched and no checksum is required. Catalogs the
+// user adds are merged over this one.
+function loadBundledCatalog(): MarketplaceItem[] {
+  if (!existsSync(BUNDLED_CATALOG)) return [];
+  try {
+    const parsed = JSON.parse(readFileSync(BUNDLED_CATALOG, "utf8")) as unknown;
+    const items =
+      parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as { items?: unknown }).items
+        : parsed;
+    if (!Array.isArray(items)) return [];
+    return items
+      .map((raw) => normalizeItem(raw, BUNDLED_ORIGIN))
+      .filter((item): item is MarketplaceItem => item !== null);
+  } catch (error) {
+    logger.warn(
+      "bundled catalog could not be read: %s",
+      error instanceof Error ? error.message : String(error),
+    );
+    return [];
+  }
 }
 
 async function fetchRemote(url: string): Promise<MarketplaceItem[]> {
@@ -126,7 +169,7 @@ async function fetchRemote(url: string): Promise<MarketplaceItem[]> {
     throw new Error("catalog must contain an items array");
   }
   return items
-    .map(normalizeItem)
+    .map((raw) => normalizeItem(raw, url))
     .filter((item): item is MarketplaceItem => item !== null);
 }
 
@@ -135,9 +178,14 @@ export async function catalog(): Promise<{
   source: string;
   warning: string;
 }> {
+  const bundled = loadBundledCatalog();
   const urls = [...new Set((loadConfig().marketplace_urls || []).map((value) => String(value).trim()).filter(Boolean))];
   if (urls.length === 0) {
-    return { items: [], source: "none", warning: "No marketplace catalogs configured." };
+    return {
+      items: bundled,
+      source: bundled.length ? "bundled" : "none",
+      warning: "No marketplace catalogs configured.",
+    };
   }
 
   const now = Date.now();
@@ -169,9 +217,19 @@ export async function catalog(): Promise<{
     remoteCache.error = warning;
   }
 
+  // Bundled entries load first so a user catalog can override one by id.
+  const merged = new Map<string, MarketplaceItem>();
+  for (const item of bundled) merged.set(item.id, item);
+  for (const item of remoteItems) merged.set(item.id, item);
   return {
-    items: remoteItems,
-    source: urls.length ? "remote" : "none",
+    items: [...merged.values()],
+    source: remoteItems.length
+      ? bundled.length
+        ? "bundled+remote"
+        : "remote"
+      : bundled.length
+        ? "bundled"
+        : "none",
     warning,
   };
 }
@@ -183,13 +241,8 @@ async function installedState(): Promise<{
   const manager = defaultManager();
   await manager.loadConfigs();
   const mcp = new Set(Object.keys(manager.getStatus()));
-  const db = initDb();
-  try {
-    const skills = new Set(listItems(db).map((item) => item.id));
-    return { mcp, skills };
-  } finally {
-    db.close();
-  }
+  const skills = new Set(listItems(initDb()).map((item) => item.id));
+  return { mcp, skills };
 }
 
 export async function annotatedCatalog(): Promise<MarketplaceResponse> {
@@ -307,21 +360,29 @@ async function fetchSkill(url: string, expectedSha = ""): Promise<string> {
 }
 
 function existingSkill(itemId: string) {
-  const db = initDb();
-  try {
-    return getItem(db, itemId);
-  } finally {
-    db.close();
-  }
+  return getItem(initDb(), itemId);
+}
+
+function ackMessage(report: ScanReport): string {
+  const first = report.findings.find((finding) => finding.level !== "low");
+  return (
+    "this entry needs explicit acknowledgement before install" +
+    (first ? `: ${first.detail}` : "")
+  );
 }
 
 async function installMcp(
   item: MarketplaceItem,
   values: Record<string, string>,
+  acknowledge: boolean,
 ): Promise<Record<string, unknown>> {
   const config = substitute(item.install, values);
   if (!config || typeof config !== "object" || Array.isArray(config)) {
     throw new Error("invalid MCP definition");
+  }
+  const report = scanMcpConfig(config as Record<string, unknown>);
+  if (report.requires_ack && !acknowledge) {
+    throw new Error(ackMessage(report));
   }
   const manager = defaultManager();
   if (!manager.addServer(item.id, config)) {
@@ -334,6 +395,7 @@ async function installMcp(
     kind: "mcp",
     installed: true,
     connected,
+    warnings: report.findings,
   };
   if (!connected) {
     result.error =
@@ -353,17 +415,32 @@ async function installMcp(
 async function installSkill(
   item: MarketplaceItem,
   _values: Record<string, string>,
+  acknowledge: boolean,
 ): Promise<Record<string, unknown>> {
   const spec = item.install;
   let body = spec.body;
   if (body === undefined || body === null) {
     const url = String(spec.url || "").trim();
     if (!url) throw new Error("skill definition needs a body or a URL");
-    body = await fetchSkill(url, String(spec.sha256 || ""));
+    const expectedSha = String(spec.sha256 || "").trim();
+    // A catalog URL is a single point of compromise, and an unpinned body can
+    // change between review and install. Bundled bodies ship with JIT and are
+    // already reviewed, so they are exempt.
+    if (!item.bundled && !expectedSha) {
+      throw new Error(
+        "catalog entry is missing a sha256 checksum for its skill body",
+      );
+    }
+    body = await fetchSkill(url, expectedSha);
   }
   if (typeof body !== "string") throw new Error("skill body must be text");
   if (Buffer.byteLength(body, "utf8") > MAX_SKILL_BYTES) {
     throw new Error("skill is larger than the size limit");
+  }
+
+  const report = scanText(body);
+  if (report.requires_ack && !acknowledge) {
+    throw new Error(ackMessage(report));
   }
 
   const destination = path.join(JIT_SKILLS_DIR, item.id, "SKILL.md");
@@ -387,6 +464,7 @@ async function installSkill(
   if (parsed.categories.length === 0 && item.category) {
     parsed.categories = [item.category];
   }
+  parsed.source = item.origin || "catalog";
   mkdirSync(path.dirname(destination), { recursive: true });
   atomicWriteFile(destination, body, 0o644);
   const indexed = await indexItems([parsed], "skill");
@@ -396,19 +474,81 @@ async function installSkill(
     kind: "skill",
     installed: true,
     connected: true,
+    warnings: report.findings,
     ...indexed,
   };
+}
+
+export interface InstallOptions {
+  acknowledge?: boolean;
 }
 
 export async function install(
   itemId: string,
   inputs: Record<string, unknown> = {},
+  options: InstallOptions = {},
 ): Promise<Record<string, unknown>> {
   const item = await find(itemId);
   if (!item) throw new Error("not found in the marketplace");
   const values = inputValues(item, inputs);
-  if (item.kind === "mcp") return installMcp(item, values);
-  return installSkill(item, values);
+  const acknowledge = Boolean(options.acknowledge);
+  if (item.kind === "mcp") return installMcp(item, values, acknowledge);
+  return installSkill(item, values, acknowledge);
+}
+
+// Fetch and scan an entry without installing it, so the dashboard can warn
+// before the user commits. Nothing is written here.
+export async function inspect(itemId: string): Promise<InspectResult> {
+  const item = await find(itemId);
+  if (!item) throw new Error("not found in the marketplace");
+  if (item.kind === "mcp") {
+    return {
+      id: item.id,
+      kind: "mcp",
+      checksum_required: false,
+      checksum_present: true,
+      report: scanMcpConfig(item.install as Record<string, unknown>),
+    };
+  }
+  const spec = item.install;
+  const url = String(spec.url || "").trim();
+  const checksumRequired = !item.bundled && Boolean(url);
+  const checksumPresent = Boolean(String(spec.sha256 || "").trim());
+  let body: string | undefined;
+  if (typeof spec.body === "string") {
+    body = spec.body;
+  } else if (url) {
+    try {
+      body = await fetchSkill(url, String(spec.sha256 || ""));
+    } catch (error) {
+      return {
+        id: item.id,
+        kind: "skill",
+        checksum_required: checksumRequired,
+        checksum_present: checksumPresent,
+        report: {
+          ok: false,
+          requires_ack: true,
+          findings: [
+            {
+              level: "medium",
+              rule: "fetch-failed",
+              detail: error instanceof Error ? error.message : String(error),
+            },
+          ],
+        },
+      };
+    }
+  }
+  return {
+    id: item.id,
+    kind: "skill",
+    checksum_required: checksumRequired,
+    checksum_present: checksumPresent,
+    report: body !== undefined
+      ? scanText(body)
+      : { ok: true, requires_ack: false, findings: [] },
+  };
 }
 
 export async function uninstall(
