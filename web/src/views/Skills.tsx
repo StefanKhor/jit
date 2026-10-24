@@ -2,11 +2,14 @@ import { useState, type FormEvent } from "react";
 
 import { fmt, summary } from "../format";
 import { useJit } from "../state/store";
+import type { BulkResult } from "../types";
 import { Badge, StatusDot } from "../ui/Badge";
 import { Button } from "../ui/Button";
+import { cx } from "../ui/cx";
 import { Empty } from "../ui/Display";
-import { Input } from "../ui/Field";
+import { Checkbox, Input } from "../ui/Field";
 import { PageHead, Panel, PanelBody, PanelHead } from "../ui/Panel";
+import { SelectAll, SelectionBar, useSelection } from "../ui/Selection";
 import { Table, TableWrap, Td, Th, Tr } from "../ui/Table";
 
 export function Skills() {
@@ -14,6 +17,8 @@ export function Skills() {
   const [path, setPath] = useState("");
   const [busy, setBusy] = useState(false);
   const [busyId, setBusyId] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const sel = useSelection(ctx.skills.map((skill) => skill.id));
 
   const addPath = async (event: FormEvent) => {
     event.preventDefault();
@@ -84,6 +89,52 @@ export function Skills() {
       ctx.toast(error instanceof Error ? error.message : String(error), "error");
     } finally {
       setBusyId("");
+    }
+  };
+
+  const bulk = async (action: "enable" | "disable" | "remove") => {
+    const ids = [...sel.selected];
+    if (ids.length === 0 || bulkBusy) return;
+    if (action === "remove") {
+      const managed = ids.filter(
+        (id) => ctx.skills.find((skill) => skill.id === id)?.managed,
+      ).length;
+      const ok = await ctx.confirmAction(
+        `Remove ${ids.length} skill${ids.length === 1 ? "" : "s"}?`,
+        managed
+          ? `${managed} of these are JIT-owned copies and will be deleted from disk. The rest are removed from the index only; their files stay put.`
+          : "They are removed from the JIT index only. Their files are never touched.",
+        "Remove",
+      );
+      if (!ok) return;
+    }
+    setBulkBusy(true);
+    try {
+      const result = await ctx.api<BulkResult>("/api/skills/bulk", {
+        method: "POST",
+        body: JSON.stringify({ ids, action }),
+      });
+      const verb =
+        action === "remove"
+          ? "Removed"
+          : action === "enable"
+            ? "Enabled"
+            : "Disabled";
+      const parts = [`${verb} ${result.ok.length}`];
+      if (result.files_removed) {
+        parts.push(
+          `${result.files_removed} file${result.files_removed === 1 ? "" : "s"} deleted`,
+        );
+      }
+      if (result.failed.length) parts.push(`${result.failed.length} failed`);
+      ctx.toast(parts.join(" · "), result.failed.length ? "error" : "ok");
+      sel.clear();
+      await ctx.refreshAll();
+      if (action === "remove" && ctx.marketLoaded) await ctx.loadMarketplace(true);
+    } catch (error) {
+      ctx.toast(error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      setBulkBusy(false);
     }
   };
 
@@ -162,13 +213,46 @@ export function Skills() {
       ) : (
         <Panel id="skills-table">
           <PanelHead
-            title="Skills"
-            hint={`${fmt(enabled)} of ${fmt(total)} enabled`}
+            title={sel.count ? `${fmt(sel.count)} selected` : "Skills"}
+            hint={sel.count ? undefined : `${fmt(enabled)} of ${fmt(total)} enabled`}
+            actions={
+              sel.count ? (
+                <SelectionBar count={sel.count} onClear={sel.clear}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={bulkBusy}
+                    onClick={() => void bulk("enable")}
+                  >
+                    Enable
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={bulkBusy}
+                    onClick={() => void bulk("disable")}
+                  >
+                    Disable
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    disabled={bulkBusy}
+                    onClick={() => void bulk("remove")}
+                  >
+                    {bulkBusy ? "Working…" : "Remove"}
+                  </Button>
+                </SelectionBar>
+              ) : null
+            }
           />
           <TableWrap>
-            <Table className="w-full min-w-[560px] table-fixed">
+            <Table className="w-full min-w-[600px] table-fixed">
               <thead>
                 <tr>
+                  <Th className="w-[44px]">
+                    <SelectAll selection={sel} label="Select all skills" />
+                  </Th>
                   <Th>Name</Th>
                   <Th className="hidden w-[130px] md:table-cell">Category</Th>
                   <Th className="num hidden w-[80px] text-right sm:table-cell">
@@ -187,8 +271,21 @@ export function Skills() {
                     ? "Delete the JIT-owned copy and remove it from the index"
                     : "Remove from the index only; the source file stays";
                   const description = skill.description || "No description";
+                  const picked = sel.has(skill.id);
                   return (
-                    <Tr key={skill.id}>
+                    <Tr
+                      key={skill.id}
+                      className={cx(picked && "bg-accent/[0.04]")}
+                    >
+                      <Td className="w-[44px]">
+                        <Checkbox
+                          checked={picked}
+                          aria-label={`Select ${skill.name}`}
+                          onChange={(event) =>
+                            sel.toggle(skill.id, event.target.checked)
+                          }
+                        />
+                      </Td>
                       <Td>
                         <div className="flex min-w-0 items-center gap-2">
                           <button

@@ -298,6 +298,15 @@ export interface InstallResult {
   removed?: boolean;
 }
 
+/** The per-item account a batch endpoint returns: what changed and what did not. */
+export interface BulkResult {
+  action: string;
+  ok: string[];
+  failed: Array<{ id?: string; server?: string; error: string }>;
+  files_removed?: number;
+  tools?: Record<string, number>;
+}
+
 export interface IndexExport {
   version: number;
   exported_at: number;

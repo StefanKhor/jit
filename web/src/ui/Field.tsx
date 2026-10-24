@@ -1,8 +1,10 @@
-import type {
-  ChangeEvent,
-  InputHTMLAttributes,
-  ReactNode,
-  TextareaHTMLAttributes,
+import {
+  useEffect,
+  useRef,
+  type ChangeEvent,
+  type InputHTMLAttributes,
+  type ReactNode,
+  type TextareaHTMLAttributes,
 } from "react";
 
 import { cx } from "./cx";
@@ -33,12 +35,25 @@ export function Textarea({
   );
 }
 
+export interface CheckboxProps extends InputHTMLAttributes<HTMLInputElement> {
+  /** Shows the native "some rows selected" dash instead of a tick. */
+  indeterminate?: boolean;
+}
+
 export function Checkbox({
   className,
+  indeterminate,
   ...props
-}: InputHTMLAttributes<HTMLInputElement>) {
+}: CheckboxProps) {
+  const ref = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = Boolean(indeterminate);
+  }, [indeterminate]);
+
   return (
     <input
+      ref={ref}
       type="checkbox"
       className={cx(
         "size-4 shrink-0 cursor-pointer rounded border-line-2 bg-inset accent-[var(--color-accent)]",

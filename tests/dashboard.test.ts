@@ -1,6 +1,6 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -211,6 +211,80 @@ test("skills can be indexed, listed, read, toggled, and deleted", async () => {
   const removed = await app.request("/api/skills/api-skill", { method: "DELETE" });
   assert.equal(removed.status, 200);
   assert.equal((await app.request("/api/skills/api-skill")).status, 404);
+});
+
+test("skills can be toggled and removed in bulk", async () => {
+  const second = path.join(skillRoot, "second");
+  mkdirSync(second, { recursive: true });
+  writeFileSync(
+    path.join(second, "SKILL.md"),
+    [
+      "---",
+      "name: bulk-skill",
+      "description: a second skill for the batch endpoints",
+      "---",
+      "Do the second thing.",
+    ].join("\n"),
+  );
+  await call("/api/skills/add", { path: path.join(skillRoot, "SKILL.md") });
+  await call("/api/skills/add", { path: path.join(second, "SKILL.md") });
+
+  assert.equal(
+    (await call("/api/skills/bulk", { ids: [], action: "enable" })).status,
+    400,
+  );
+  assert.equal(
+    (await call("/api/skills/bulk", { ids: ["api-skill"], action: "explode" }))
+      .status,
+    400,
+  );
+
+  const disabled = await call("/api/skills/bulk", {
+    ids: ["api-skill", "bulk-skill", "missing-skill"],
+    action: "disable",
+  });
+  assert.equal(disabled.status, 200);
+  const disabledBody = (await disabled.json()) as {
+    ok: string[];
+    failed: Array<{ id: string; error: string }>;
+  };
+  assert.deepEqual(disabledBody.ok.sort(), ["api-skill", "bulk-skill"]);
+  assert.equal(disabledBody.failed.length, 1);
+  assert.equal(disabledBody.failed[0]?.id, "missing-skill");
+
+  const listed = await app.request("/api/skills");
+  const listBody = (await listed.json()) as {
+    skills: Array<{ id: string; enabled: boolean }>;
+  };
+  assert.equal(
+    listBody.skills.find((item) => item.id === "api-skill")?.enabled,
+    false,
+  );
+
+  const removed = await call("/api/skills/bulk", {
+    ids: ["api-skill", "bulk-skill"],
+    action: "remove",
+  });
+  assert.equal(removed.status, 200);
+  const removedBody = (await removed.json()) as {
+    ok: string[];
+    files_removed: number;
+  };
+  assert.deepEqual(removedBody.ok.sort(), ["api-skill", "bulk-skill"]);
+  // Both live outside the JIT skills dir, so no files are deleted.
+  assert.equal(removedBody.files_removed, 0);
+  assert.equal((await app.request("/api/skills/api-skill")).status, 404);
+});
+
+test("mcp bulk rejects an empty or unknown request", async () => {
+  assert.equal(
+    (await call("/api/mcp/bulk", { servers: [], action: "connect" })).status,
+    400,
+  );
+  assert.equal(
+    (await call("/api/mcp/bulk", { servers: ["x"], action: "sing" })).status,
+    400,
+  );
 });
 
 test("search reports the threshold and never silently invents a match", async () => {

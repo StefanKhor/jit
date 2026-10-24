@@ -450,6 +450,43 @@ export function createApp(): Hono {
     }
   });
 
+  // One request for a whole selection. Every id is attempted; a single bad row
+  // never aborts the batch, so the client gets an exact per-item account.
+  app.post("/api/skills/bulk", async (c) => {
+    const body = await readJson(c);
+    const ids = Array.isArray(body.ids)
+      ? body.ids.map((value: unknown) => String(value).trim()).filter(Boolean)
+      : [];
+    if (ids.length === 0) throw new HttpError(400, "ids must be a non-empty list");
+    if (ids.length > 500) throw new HttpError(413, "too many ids; split the request");
+    const action = String(body.action || "").trim();
+    if (!["enable", "disable", "remove"].includes(action)) {
+      throw new HttpError(400, "action must be enable, disable, or remove");
+    }
+
+    const ok: string[] = [];
+    const failed: Array<{ id: string; error: string }> = [];
+    let filesRemoved = 0;
+    for (const id of ids) {
+      try {
+        if (action === "remove") {
+          if (!getItem(initDb(), id)) throw new Error("not found");
+          // Unindexes always; only deletes the file when JIT owns the copy.
+          if (await removeSkillCopy(id)) filesRemoved += 1;
+        } else if (!setEnabled(id, action === "enable")) {
+          throw new Error("not found");
+        }
+        ok.push(id);
+      } catch (error) {
+        failed.push({
+          id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return c.json({ action, ok, failed, files_removed: filesRemoved });
+  });
+
   app.get("/api/marketplace", async (c) => {
     return c.json(await annotatedCatalog());
   });
@@ -662,6 +699,56 @@ export function createApp(): Hono {
     }
     deleteToolsForServer(server);
     return c.json(await indexItems(manifests, "tool"));
+  });
+
+  // Batch the MCP verbs the same way as skills: best-effort per server, with a
+  // full account of what changed and what did not.
+  app.post("/api/mcp/bulk", async (c) => {
+    const body = await readJson(c);
+    const servers = Array.isArray(body.servers)
+      ? body.servers.map((value: unknown) => String(value).trim()).filter(Boolean)
+      : [];
+    if (servers.length === 0) throw new HttpError(400, "servers must be a non-empty list");
+    if (servers.length > 100) throw new HttpError(413, "too many servers");
+    const action = String(body.action || "").trim();
+    if (!["connect", "disconnect", "index", "remove"].includes(action)) {
+      throw new HttpError(400, "action must be connect, disconnect, index, or remove");
+    }
+
+    const ok: string[] = [];
+    const failed: Array<{ server: string; error: string }> = [];
+    const tools: Record<string, number> = {};
+    if (action === "connect" || action === "index") await manager.loadConfigs();
+
+    for (const server of servers) {
+      try {
+        if (action === "remove") {
+          manager.removeServer(server);
+          tools[server] = deleteToolsForServer(server);
+        } else if (action === "disconnect") {
+          await manager.disconnect(server);
+        } else {
+          if (!(await manager.connect(server))) {
+            throw new Error(manager.getStatus()[server]?.error || "connection failed");
+          }
+          if (action === "index") {
+            const manifests = manager.indexTools(server);
+            deleteToolsForServer(server);
+            if (manifests.length === 0) throw new Error("server exposes no tools");
+            tools[server] = (await indexItems(manifests, "tool")).added;
+          } else {
+            tools[server] = manager.getTools(server).length;
+          }
+        }
+        ok.push(server);
+      } catch (error) {
+        failed.push({
+          server,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return c.json({ action, ok, failed, tools });
   });
 
   app.get("/api/search", async (c) => {
