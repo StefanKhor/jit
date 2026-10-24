@@ -19,7 +19,8 @@ const ROOT = path.resolve(HERE, "..");
 
 function arg(name: string, fallback = ""): string {
   const index = process.argv.indexOf(name);
-  return index !== -1 && process.argv[index + 1] ? process.argv[index + 1] : fallback;
+  const value = index !== -1 ? process.argv[index + 1] : undefined;
+  return value ? value : fallback;
 }
 
 function readJsonl(file: string): Array<Record<string, unknown>> {
@@ -175,4 +176,5 @@ if (missed.length) {
     console.log(`  "${row.query}" -> expected ${row.expected.join(", ")}, got ${row.ranked.slice(0, 3).join(", ") || "nothing"}`);
   }
 }
+
 process.exit(0);
