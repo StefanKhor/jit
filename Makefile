@@ -19,8 +19,7 @@ typecheck:
 	npm run typecheck
 
 check:
-	npm run typecheck
-	npm run build
+	npm run check
 
 clean:
 	npm run clean

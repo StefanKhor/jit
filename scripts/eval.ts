@@ -177,4 +177,22 @@ if (missed.length) {
   }
 }
 
+// Optional bars so CI can fail on a retrieval regression instead of only
+// printing numbers. Both default to 0, so a bare `npm run eval` still passes.
+const minRecall1 = Number(arg("--min-recall1", "0"));
+const minMrr = Number(arg("--min-mrr", "0"));
+const failures: string[] = [];
+if (Number.isFinite(minRecall1) && recall1 < minRecall1) {
+  failures.push(
+    `recall@1 ${(recall1 * 100).toFixed(1)}% is below the ${(minRecall1 * 100).toFixed(1)}% bar`,
+  );
+}
+if (Number.isFinite(minMrr) && mrr < minMrr) {
+  failures.push(`MRR ${mrr.toFixed(3)} is below the ${minMrr.toFixed(3)} bar`);
+}
+if (failures.length) {
+  console.error("");
+  for (const failure of failures) console.error(`FAIL: ${failure}`);
+  process.exit(1);
+}
 process.exit(0);
