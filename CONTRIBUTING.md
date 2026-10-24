@@ -34,12 +34,13 @@ npm run build
 
 There is a small suite in `tests/` covering storage/versioning, BM25, retrieval
 gating (including the keyword-only fallback), the HTTP API surface, the MCP stdio
-handshake, the GitHub resolver, the shared fetch policy, the marketplace end to
-end (catalog merging, checksum enforcement, scanner acknowledgement, catalog URL
-validation), `JIT_CALL` argument validation, and the embedding path (dimension,
-normalization, determinism, semantic ordering, and paraphrase retrieval through
-the vector route). It uses Node's built-in test runner through `tsx`, so there is
-no extra dependency.
+handshake, the source resolvers and the skills.sh directory client, the shared
+fetch policy, the marketplace end to end (catalog merging, checksum enforcement,
+scanner acknowledgement, catalog URL validation, installing an entry discovered
+on the directory), `JIT_CALL` argument validation, and the embedding path
+(dimension, normalization, determinism, semantic ordering, and paraphrase
+retrieval through the vector route). It uses Node's built-in test runner through
+`tsx`, so there is no extra dependency.
 
 `tests/embedding.test.ts` loads the real model from `JIT_MODEL_CACHE`. With a
 warm cache it runs in about two seconds; offline with no cache it reports and
@@ -84,17 +85,24 @@ Useful smoke checks:
 - `GET /api/marketplace` reports `source: "none"` until you add a source.
 - A GitHub source (`owner/repo`) lists the skills the `skills` CLI installs;
   `POST /api/marketplace/inspect` shows the findings before you install.
+- The directory browser (`/api/marketplace/search`, `/api/marketplace/top`)
+  returns entries, and installing one needs no configured source.
 
 ## Marketplace sources
 
 JIT ships no catalog of its own, so the marketplace is whatever the user points
-it at: an HTTPS catalog URL, or a repository source (`owner/repo[@ref][#dir]`)
-that JIT hands to the open `skills` CLI. `src/github.ts` only validates the
-reference; `src/skillsCli.ts` runs the CLI and `src/marketplace.ts` normalizes
-every entry. Do not reimplement repository resolution here — that is the CLI's
-job. Remote skill bodies must carry a `sha256`; repository skills carry the
-hash the CLI reports. Never relax the checksum requirement, and keep every entry
-scanned before install.
+it at: an HTTPS catalog URL, or a repository source (`owner/repo[@ref][#dir]`,
+or a `skills.sh/<owner>/<repo>[/<skill>]` link) that JIT hands to the open
+`skills` CLI. `src/github.ts` and `src/skillsSh.ts` only validate references;
+`src/skillsCli.ts` runs the CLI and `src/marketplace.ts` normalizes every entry.
+Do not reimplement repository resolution here — that is the CLI's job.
+
+`src/skillsSh.ts` also reads the directory's own public JSON API for search and
+its ranking. That is a read-only listing, not an install: every install still
+goes through the CLI, and an entry found there carries the source it came from so
+the review and install calls can resolve it. Remote skill bodies must carry a
+`sha256`; repository skills carry the hash the CLI reports. Never relax the
+checksum requirement, and keep every entry scanned before install.
 
 ## Pull requests
 

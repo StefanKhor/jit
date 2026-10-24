@@ -151,8 +151,9 @@ A single-file React SPA served by the Node process.
   the break-even index size, index composition, heaviest entries, categories,
   and the measured retrieval miss rate.
 - **Skills** — list, read, enable/disable, index a path, transfer, and remove.
-- **Marketplace** — the catalogs and GitHub repositories you add; every install
-  is reviewed before it happens.
+- **Marketplace** — browse the skills.sh directory by search or ranking, and add
+  catalogs and repositories of your own; every install is reviewed before it
+  happens.
 - **MCP** — connect, disconnect, index tools, import a client config, export
   JIT-managed servers, add a server manually.
 - **Search** — live retrieval with the effective score, cosine, rerank, lexical
@@ -249,10 +250,11 @@ the file and are never written back.
 | `JIT_DISABLE_EMBEDDINGS` | Run keyword-only, no model download | unset |
 | `JIT_EMBEDDING_MODEL` | Transformers.js model | `Xenova/bge-small-en-v1.5` |
 | `JIT_EMBEDDING_DIM` | Expected vector size | `384` |
-| `JIT_MARKETPLACE_URL` | Catalog URL(s) or repository/CLI source(s), comma-separated | unset |
+| `JIT_MARKETPLACE_URL` | Catalog URLs, repositories, or skills.sh links, comma-separated | unset |
 | `JIT_GITHUB_TOKEN` | Token for private repositories, passed to the skills CLI | unset |
 | `JIT_SKILLS_CLI` | Command that resolves repository sources | `npx --yes skills@1.7.4` |
 | `JIT_SKILLS_CLI_VERSION` | Version of the skills CLI to run | `1.7.4` |
+| `JIT_SKILLS_SH_URL` | Base URL of the skills.sh directory API | `https://www.skills.sh` |
 | `JIT_MAX_REQUEST_BYTES` | Dashboard API body limit | `16777216` |
 | `JIT_MAX_SKILL_BYTES` | Skill file limit | `2097152` |
 | `JIT_LOG_LEVEL` | `DEBUG`, `INFO`, `WARN`, `ERROR` | `INFO` |
@@ -320,19 +322,30 @@ Installing a skill injects its text into an agent's context, and installing an
 MCP server runs a process — both are trust decisions, so they are treated as
 such.
 
-JIT ships **no catalog of its own**. The marketplace is exactly the sources you
-point it at, so a fresh install shows an empty Marketplace with a prompt to add
-one. There are two kinds of source:
+JIT ships **no catalog of its own**, but it does read the public
+[skills.sh](https://skills.sh) directory, so a fresh install opens on a browser
+rather than an empty page: search it, or pick from its own ranking (lifetime
+installs or trending), and install from there. The directory's API is public —
+JIT asks the same two endpoints the website asks and does not maintain a list of
+its own. Nothing is downloaded until you choose an entry.
+
+Beyond that, the marketplace is exactly the sources you point it at. There are
+three kinds:
 
 1. **A catalog URL** — JSON with an `items` array, served over HTTPS.
 2. **A GitHub repository** — `owner/repo`, `owner/repo@ref`, `owner/repo@ref#dir`,
    or a repo link such as `https://github.com/owner/repo/tree/main/skills`.
-   JIT resolves these with the open [`skills`](https://github.com/vercel-labs/skills)
-   CLI rather than parsing repositories itself: it runs `npx skills add <source>
-   --skill '*' --copy -y` in a cache directory and imports the result. Skills are
-   therefore always whatever that CLI installs, and its own source formats and
-   private-repo handling (including `JIT_GITHUB_TOKEN` or `GITHUB_TOKEN`) apply.
-   Repository sources need `git` and a registry reachable by `npx`.
+3. **A skills.sh link** — `https://skills.sh/<owner>/<repo>` for a whole
+   repository, or `https://skills.sh/<owner>/<repo>/<skill>` to pin one skill
+   from it.
+
+Both repository shapes are resolved with the open
+[`skills`](https://github.com/vercel-labs/skills) CLI rather than parsing
+repositories itself: JIT runs `npx skills add <source> --skill <name|*>
+--copy -y` in a cache directory and imports the result. Skills are therefore
+always whatever that CLI installs, and its own source formats and private-repo
+handling (including `JIT_GITHUB_TOKEN` or `GITHUB_TOKEN`) apply. Repository
+sources need `git` and a registry reachable by `npx`.
 
 Sources are added on the Marketplace page or in Settings, stored in
 `marketplace_urls`, and can also come from the environment as a comma-separated
