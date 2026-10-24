@@ -97,18 +97,38 @@ function migrate(db: DatabaseSync): void {
   db.exec("CREATE INDEX IF NOT EXISTS idx_skills_server ON skills(server)");
 }
 
-// Each call opens its own handle for now. A follow-up commit moves this to one
-// process-wide connection; `node:sqlite` is synchronous, so a shared handle is
-// safe for the dashboard's concurrent async requests.
+// One connection per process. Migrations are idempotent but run once instead of
+// on every call. `node:sqlite` is synchronous, so a shared handle is safe while
+// the dashboard serves concurrent async requests: no statement ever interleaves
+// with another, and transactions contain no await points.
+let shared: DatabaseSync | null = null;
+
 export function initDb(): DatabaseSync {
+  if (shared) return shared;
   const db = openDb();
-  migrate(db);
-  return db;
+  try {
+    migrate(db);
+  } catch (error) {
+    try {
+      db.close();
+    } catch {
+      // Best effort.
+    }
+    throw error;
+  }
+  shared = db;
+  return shared;
 }
 
-// Nothing process-wide to close yet; reserved for the shared-handle change
-// above so callers can already stop managing connection lifetimes themselves.
-export function closeDb(): void {}
+export function closeDb(): void {
+  if (!shared) return;
+  try {
+    shared.close();
+  } catch {
+    // Best effort.
+  }
+  shared = null;
+}
 
 export function getMeta(db: DatabaseSync, key: string): string | null {
   const row = db.prepare("SELECT value FROM meta WHERE key = ?").get(key) as
