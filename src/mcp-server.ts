@@ -3,13 +3,15 @@ import path from "node:path";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { z } from "zod";
 
 import {
-  CONFIDENCE_THRESHOLD,
   EMBEDDING_MODEL,
   MAX_SKILL_BYTES,
   VERSION,
+  loadConfig,
 } from "./config.js";
 import {
   countItems,
@@ -22,18 +24,21 @@ import {
   totalIndexed,
 } from "./indexer.js";
 import { logger } from "./logger.js";
-import { initDb } from "./storage/db.js";
+import { closeDb, getItem, initDb } from "./storage/db.js";
 import { defaultManager } from "./mcp/client.js";
-import { retrieve } from "./retrieval/retriever.js";
+import { validateToolArguments } from "./mcp/validate.js";
+import { evaluate, recordRetrieval } from "./retrieval/retriever.js";
 import type { IndexItem } from "./types.js";
 
 const INSTRUCTIONS =
   "JIT is a just-in-time index of skills and MCP tools. Call JIT_FIND " +
   "before a multi-step task that might have a specialized workflow, with " +
   "a concrete intent. Skip it for trivial tasks. If it returns " +
-  '{"found": false}, continue with your built-in tools. If it returns a ' +
-  "skill, follow the returned content. If it returns a tool, execute it " +
-  "with JIT_CALL.";
+  '{"found": true, ...}, follow the skill content or call the tool with ' +
+  "JIT_CALL. If it returns \"found\": false with a near_misses list, none " +
+  "cleared the confidence threshold but those are the closest entries — " +
+  "retry with a more specific intent if one fits, otherwise continue with " +
+  "your built-in tools.";
 
 function textResult(payload: unknown, isError = false) {
   return {
@@ -104,9 +109,10 @@ function createServer(): McpServer {
         "specific intent: the action, the object, and the outcome (for " +
         'example "create a Linear issue for the login bug"). Skip it for ' +
         "trivial or self-contained tasks. Returns the full skill body or a " +
-        "tool descriptor with its tool_id and JSON schema. Returns " +
-        '{"found": false} when nothing clears the confidence threshold; in ' +
-        "that case proceed with your own tools.",
+        "tool descriptor with its tool_id and JSON schema. When nothing " +
+        "clears the threshold it returns {\"found\": false} plus a " +
+        "near_misses list of the closest entries; retry with a sharper " +
+        "intent if one fits, otherwise proceed with your own tools.",
       inputSchema: {
         intent: z
           .string()
@@ -114,8 +120,28 @@ function createServer(): McpServer {
       },
     },
     async ({ intent }) => {
-      const result = await retrieve(intent);
-      return textResult(result ? { found: true, ...result } : { found: false });
+      const started = performance.now();
+      const evaluation = await evaluate(intent, 3);
+      recordRetrieval(evaluation, intent, "mcp", performance.now() - started);
+      if (evaluation.result) {
+        return textResult({ found: true, ...evaluation.result });
+      }
+      if (evaluation.nearMisses.length > 0) {
+        return textResult({
+          found: false,
+          near_misses: evaluation.nearMisses.map((miss) => ({
+            id: miss.id,
+            name: miss.name,
+            description: miss.description,
+            kind: miss.kind,
+          })),
+          note:
+            "Nothing cleared the confidence threshold. These are the " +
+            "closest entries; retry with a more specific intent if one " +
+            "applies, otherwise use your own tools.",
+        });
+      }
+      return textResult({ found: false });
     },
   );
 
@@ -207,7 +233,7 @@ function createServer(): McpServer {
       } else if (format === "url") {
         try {
           const text = await fetchSkill(source);
-          if (!text.slice(0, 400).includes("---")) {
+          if (!/^\s*---\s*\r?\n/.test(text)) {
             errors.push("URL did not return a skill file with frontmatter");
           } else {
             const item = parseSkillText(text, "", "remote-skill");
@@ -295,6 +321,18 @@ function createServer(): McpServer {
           true,
         );
       }
+      const stored = getItem(initDb(), tool_id);
+      const argErrors = validateToolArguments(stored?.schema, args || {});
+      if (argErrors.length > 0) {
+        return textResult(
+          {
+            error: "arguments do not match the tool schema",
+            details: argErrors,
+            is_error: true,
+          },
+          true,
+        );
+      }
       const manager = defaultManager();
       await manager.loadConfigs();
       const payload = await manager.callTool(serverName, toolName, args || {});
@@ -310,20 +348,14 @@ function createServer(): McpServer {
         "Report index size, connected MCP servers, and retrieval settings.",
     },
     async () => {
-      const db = initDb();
-      let counts;
-      try {
-        counts = countItems(db);
-      } finally {
-        db.close();
-      }
+      const counts = countItems(initDb());
       const manager = defaultManager();
       await manager.loadConfigs();
       return textResult({
         indexed: counts,
         servers: manager.getStatus(),
         settings: {
-          confidence_threshold: CONFIDENCE_THRESHOLD,
+          confidence_threshold: loadConfig().confidence_threshold,
           embedding_model: EMBEDDING_MODEL,
         },
       });
@@ -331,6 +363,55 @@ function createServer(): McpServer {
   );
 
   return server;
+}
+
+// The dashboard reports the fixed context cost of JIT's own MCP tool schemas.
+// Measure the real tools/list payload once over an in-memory transport so the
+// number tracks the code instead of being hand-maintained. The fallback is the
+// last measured value.
+const FALLBACK_SCHEMA_TOKENS = 617;
+
+let schemaTokensPromise: Promise<number> | null = null;
+
+export function jitSchemaTokens(): Promise<number> {
+  if (!schemaTokensPromise) {
+    schemaTokensPromise = measureSchemaTokens().catch((error: unknown) => {
+      logger.warn(
+        "could not measure MCP schema tokens: %s",
+        error instanceof Error ? error.message : String(error),
+      );
+      schemaTokensPromise = null;
+      return FALLBACK_SCHEMA_TOKENS;
+    });
+  }
+  return schemaTokensPromise;
+}
+
+async function measureSchemaTokens(): Promise<number> {
+  const server = createServer();
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const client = new Client(
+    { name: "jit-schema-probe", version: VERSION },
+    { capabilities: {} },
+  );
+  try {
+    await client.connect(clientTransport);
+    const { tools } = await client.listTools();
+    return Math.max(1, Math.ceil(JSON.stringify(tools).length / 4));
+  } finally {
+    try {
+      await client.close();
+    } catch {
+      // Best effort.
+    }
+    try {
+      await server.close();
+    } catch {
+      // Best effort.
+    }
+  }
 }
 
 export async function serveMcp(): Promise<void> {
@@ -352,9 +433,10 @@ export async function serveMcp(): Promise<void> {
     const timeout = new Promise<void>((resolve) => {
       setTimeout(resolve, 5_000).unref();
     });
-    void Promise.race([manager.disconnectAll(), timeout]).finally(() =>
-      process.exit(0),
-    );
+    void Promise.race([manager.disconnectAll(), timeout]).finally(() => {
+      closeDb();
+      process.exit(0);
+    });
   };
   process.once("SIGINT", () => stop("SIGINT"));
   process.once("SIGTERM", () => stop("SIGTERM"));
