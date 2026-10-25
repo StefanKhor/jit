@@ -28,26 +28,10 @@ npm start
 
 ```bash
 npm run typecheck
-npm test
 npm run build
 ```
 
-There is a small suite in `tests/` covering storage/versioning, BM25, retrieval
-gating (including strict embedding-only retrieval), the HTTP API surface, the MCP stdio
-handshake, the source resolvers and the skills.sh directory client, the shared
-fetch policy, the marketplace end to end (catalog merging, checksum enforcement,
-scanner acknowledgement, catalog URL validation, installing an entry discovered
-on the directory), `JIT_CALL` argument validation, and the embedding path
-(dimension, normalization, determinism, semantic ordering, and paraphrase
-retrieval through the vector route). It uses Node's built-in test runner through
-`tsx`, so there is no extra dependency.
-
-`tests/embedding.test.ts` loads the real model from `JIT_MODEL_CACHE`. With a
-warm cache it runs in about two seconds; offline with no cache it reports and
-skips instead of failing, so the suite is green in an air-gapped runner. Set
-`JIT_SKIP_EMBEDDING_TESTS=1` to skip it without even attempting the model load.
-
-Retrieval changes should also move the numbers, not just pass the tests:
+Retrieval changes should also move the numbers:
 
 ```bash
 npm run eval   # recall@1 / @3, MRR, precision, threshold sweep

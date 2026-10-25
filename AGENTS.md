@@ -17,7 +17,7 @@ JIT is a local Node.js/TypeScript app with an MCP server and a React dashboard. 
 - `src/config.ts`, `src/types.ts` — server config and shared domain types.
 - `src/server/dashboard.ts` — HTTP API and dashboard hosting.
 - `web/src/views/` — dashboard pages; `web/src/state/store.tsx` — shared frontend state.
-- `tests/` — Node test-runner tests; `eval/` and `scripts/eval.ts` — retrieval evaluation fixtures and harness.
+- `eval/` and `scripts/eval.ts` — retrieval evaluation fixtures and harness.
 
 ## Important behavior and constraints
 
@@ -34,17 +34,14 @@ JIT is a local Node.js/TypeScript app with an MCP server and a React dashboard. 
 
 Requires Node.js 24+ and npm 11. Install with `npm ci`; run `npm run dev` for the API and Vite dashboard.
 
-- `npm run typecheck` — server, web, and test TypeScript checks.
-- `npm test` — unit/integration suite; embedding tests use the real model cache when available and skip when unavailable.
+- `npm run typecheck` — server and web TypeScript checks.
 - `npm run build` — server and single-file dashboard production builds.
-- `npm run check` — typecheck, tests, and build; preferred final verification.
+- `npm run check` — typecheck and build; preferred final verification.
 - `npm run eval` — retrieval quality metrics; run for retrieval/ranking changes and update labeled cases in `eval/queries.jsonl` when behavior warrants it.
-
-Tests should isolate persistent state with a temporary `JIT_HOME`. Tests that must not load/download the embedding model can set `JIT_DISABLE_EMBEDDINGS=1`; assert that retrieval fails closed rather than returning lexical-only results. `JIT_SKIP_EMBEDDING_TESTS=1` skips the real-model test explicitly.
 
 ## Working style
 
 - Follow nearby code patterns and keep changes scoped to the request.
-- Add or update tests for behavior/API changes; update docs when user-facing behavior or configuration changes.
-- Before finishing, run relevant tests and preferably `npm run check`; report anything not run and why.
+- Update docs when user-facing behavior or configuration changes.
+- Before finishing, run `npm run check`; report anything not run and why.
 - Do not commit unless asked. Do not discard or overwrite unrelated work in the working tree.
