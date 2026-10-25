@@ -17,7 +17,6 @@ export function Settings() {
   const [rerankKey, setRerankKey] = useState("");
   const [rerankBase, setRerankBase] = useState("");
   const [rerankModel, setRerankModel] = useState("");
-  const [rerank, setRerank] = useState(false);
   const [embeddingProvider, setEmbeddingProvider] = useState<"local" | "openai-compatible">("local");
   const [localEmbeddingModel, setLocalEmbeddingModel] = useState("");
   const [localEmbeddingDim, setLocalEmbeddingDim] = useState("384");
@@ -37,7 +36,6 @@ export function Settings() {
     if (!config) return;
     setRerankBase(config.rerank_api_base || "");
     setRerankModel(config.rerank_model || "");
-    setRerank(Boolean(config.rerank_enabled));
     setEmbeddingProvider(config.embedding_provider || "local");
     setLocalEmbeddingModel(config.embedding_local_model || "");
     setLocalEmbeddingDim(String(config.embedding_local_dim || 384));
@@ -56,7 +54,6 @@ export function Settings() {
       const updates: Record<string, unknown> = {
         rerank_api_base: rerankBase.trim(),
         rerank_model: rerankModel.trim(),
-        rerank_enabled: rerank,
       };
       if (rerankKey.trim()) updates.rerank_api_key = rerankKey.trim();
       await ctx.saveConfig(updates);
@@ -327,11 +324,7 @@ export function Settings() {
   const rerankConfigured = Boolean(
     rerankBase.trim() && rerankModel.trim() && (hasKey || localRerankEndpoint),
   );
-  const rerankState = !rerank
-    ? "off"
-    : rerankConfigured
-      ? "active"
-      : "configuration needed";
+  const rerankState = rerankConfigured ? "active" : "not configured";
   const localEmbeddingEndpoint = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::|\/|$)/i.test(
     embeddingBase.trim(),
   );
@@ -500,28 +493,21 @@ export function Settings() {
 
           <Panel>
             <PanelHead
-              title="Optional reranker"
+              title="Reranker (the decision layer)"
               hint="OpenAI-compatible Chat Completions"
               actions={
-                <Badge
-                  tone={
-                    rerankState === "active"
-                      ? "accent"
-                      : rerankState === "configuration needed"
-                        ? "warn"
-                        : "neutral"
-                  }
-                >
+                <Badge tone={rerankState === "active" ? "accent" : "warn"}>
                   {rerankState}
                 </Badge>
               }
             />
             <PanelBody className="space-y-5">
               <p className="text-xs leading-relaxed text-ink-3">
-                Optionally re-score vector-retrieved candidates with any
-                OpenAI-compatible chat-completions endpoint. Reranking stays off
-                until you provide an endpoint and model. For local endpoints such
-                as Ollama, the API key can be blank.
+                Re-scores the top vector candidates with any OpenAI-compatible
+                chat-completions endpoint — the model decides which skill wins.
+                When an endpoint and model are configured, every lookup is
+                reranked; until then JIT falls back to cosine and says so. For
+                local endpoints such as Ollama, the API key can be blank.
               </p>
               <form className="space-y-5" onSubmit={saveRerank}>
                 <Field label="Reranker API key" hint={keyHelp}>
@@ -567,18 +553,11 @@ export function Settings() {
                   onClick={() => {
                     setRerankBase("https://api.tokenfactory.nebius.com/v1/");
                     setRerankModel("nvidia/Nemotron-3_5-Lightning");
-                    setRerank(true);
                     ctx.toast("Nebius + NVIDIA Nemotron preset selected. Add your API key and save.");
                   }}
                 >
                   Use Nebius Token Factory + NVIDIA Nemotron 3.5 Lightning
                 </Button>
-                <ToggleRow
-                  label="Enable reranking"
-                  hint="Re-score vector candidates with the configured OpenAI-compatible model."
-                  checked={rerank}
-                  onCheckedChange={setRerank}
-                />
                 <div className="flex flex-wrap items-center gap-2">
                   <Button
                     type="submit"

@@ -206,7 +206,9 @@ function SearchOutput({ data }: { data: SearchResponse }) {
   const closest = candidates[0] ?? null;
   const mode = data.reranked
     ? "reranked · OpenAI-compatible model"
-    : "vector + keyword hybrid search";
+    : data.ranking_warning
+      ? "cosine only · rerank unavailable"
+      : "vector + keyword hybrid search";
 
   return (
     <div id="search-output" role="status" aria-live="polite" className="space-y-8">

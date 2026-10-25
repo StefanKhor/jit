@@ -12,22 +12,31 @@ function isLocalEndpoint(value: string): boolean {
   }
 }
 
+export interface RerankOutcome {
+  scores: Map<string, number>;
+  // Why reranking did not run, when it did not. Reranking is the decision
+  // layer: whenever an endpoint is configured it always runs, and any skip
+  // is reported to the caller instead of silently falling back to cosine.
+  error: string | null;
+}
+
 export async function rerankCandidates(
   intent: string,
   candidates: StoredItem[],
   settings: Config,
-): Promise<Map<string, number>> {
+): Promise<RerankOutcome> {
   const scores = new Map<string, number>();
   const hasCredentials =
     Boolean(settings.rerank_api_key) || isLocalEndpoint(settings.rerank_api_base);
-  if (
-    !settings.rerank_enabled ||
-    !settings.rerank_api_base ||
-    !settings.rerank_model ||
-    !hasCredentials ||
-    candidates.length === 0
-  ) {
-    return scores;
+  if (!settings.rerank_api_base || !settings.rerank_model || !hasCredentials) {
+    return {
+      scores,
+      error:
+        "rerank not configured — ranking by cosine only; set rerank_api_base and rerank_model",
+    };
+  }
+  if (candidates.length === 0) {
+    return { scores, error: null };
   }
 
   try {
@@ -63,10 +72,17 @@ export async function rerankCandidates(
     const text = (response.choices[0]?.message?.content || "").trim();
     const start = text.indexOf("[");
     const end = text.lastIndexOf("]");
-    if (start === -1 || end <= start) return scores;
+    if (start === -1 || end <= start) {
+      return { scores, error: "rerank response unparseable" };
+    }
     const parsed = JSON.parse(text.slice(start, end + 1)) as unknown;
     if (!Array.isArray(parsed) || parsed.length !== candidates.length) {
-      return scores;
+      return {
+        scores,
+        error: `rerank returned ${
+          Array.isArray(parsed) ? parsed.length : "no"
+        } scores for ${candidates.length} candidates`,
+      };
     }
     candidates.forEach((candidate, index) => {
       const value = Math.min(Math.max(Number(parsed[index]) || 0, 0), 3);
@@ -78,11 +94,13 @@ export async function rerankCandidates(
       settings.rerank_model,
       settings.rerank_api_base,
     );
+    return { scores, error: null };
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     logger.warn(
       "OpenAI-compatible rerank failed, falling back to cosine: %s",
-      error instanceof Error ? error.message : String(error),
+      message,
     );
+    return { scores, error: message };
   }
-  return scores;
 }

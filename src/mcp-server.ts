@@ -28,6 +28,7 @@ import { fetchText } from "./remote.js";
 import { closeDb, getItem, initDb } from "./storage/db.js";
 import { defaultManager } from "./mcp/client.js";
 import { validateToolArguments } from "./mcp/validate.js";
+import { warmupEmbeddingModel } from "./embedding.js";
 import { evaluate, recordRetrieval } from "./retrieval/retriever.js";
 import { enforceGate } from "./skillScan.js";
 import { scanSkillPayload } from "./skillspector.js";
@@ -35,9 +36,9 @@ import type { IndexItem, ScanReport } from "./types.js";
 
 const INSTRUCTIONS = `JIT is a just-in-time skill index: it loads the one skill you need, when you need it, instead of keeping every skill in context.
 
-Before starting any multi-step or unfamiliar task, call JIT_FIND first. Phrase the intent as action + object + outcome, e.g. "draft and schedule a product launch thread". Skip it for quick actions you can do directly — a single edit, a lookup, a short answer.
+At the start of every new task — not just the first of the session — call JIT_FIND before working. A hit hands you a tested procedure for that exact kind of work; improvising a multi-step workflow is slower and more error-prone. Skip it only for quick actions you can do directly — a single edit, a lookup, a short answer — or when a skill for this exact kind of work is already in context. The index is broader than any summary of it: a domain you do not see named may still have a skill. Checking is the default; skipping is the exception. A lookup costs seconds, while improvising a procedure that already exists is the expensive mistake — if you are unsure whether a skill exists, that uncertainty is a reason to check, not a reason to skip.
 
-If it returns {"found": false} with near_misses, retry once with a sharper intent. If it still misses, proceed without JIT — a miss is a normal outcome, not an error.
+Phrase the intent like a search query, not a task brief: one sentence, concrete action, platform or domain named — e.g. "automate posting a twitter thread", "deploy a node app to azure". Leave out file paths, quotes, and task details; they dilute the match. On {"found": false} with near_misses, retry once with different phrasing — sharper if the intent was vague, broader if it was over-specified — then proceed without a skill. A miss is a normal outcome, not an error. A multi-part task spans skills: a hit lists related candidates, so call again to load the next domain.
 
 JIT_ADD installs a new skill into the index. It is scanned by NVIDIA SkillSpector first: a skill that fails the scan is dangerous and refused.`;
 
@@ -72,22 +73,34 @@ const SHIPPED_TOOLS: Array<(server: McpServer) => void> = [
   registerAdd,
 ];
 
+export function findDescription(): string {
+  return (
+    "Load the one skill that fits the task you are starting, so you " +
+    "carry only that body instead of improvising. Call it at the start " +
+    "of every new task — not just the first of the session. Phrase the " +
+    "intent like a search query: concrete action plus platform or " +
+    'domain, e.g. "automate posting a twitter thread". Returns the skill ' +
+    'body, or {"found": false} plus near_misses; retry once with a ' +
+    "different phrasing, then proceed without a skill. A hit may list " +
+    "related skills — for a multi-part task, call again to load the " +
+    "next domain. When unsure " +
+    "whether a skill exists, check anyway: a miss costs seconds, while " +
+    "a missed skill is the expensive mistake."
+  );
+}
+
 export function registerFind(server: McpServer): void {
   server.registerTool(
     "JIT_FIND",
     {
       title: "Find a skill",
-      description:
-        "Load the one skill that fits a concrete multi-step task, so you " +
-        "carry only that body instead of every skill. Give a specific intent: " +
-        "action, object, outcome. Skip it for trivial tasks. Returns the skill " +
-        'body, or {"found": false} plus near_misses ' +
-        "when nothing clears the threshold; retry once with a sharper intent " +
-        "if one fits.",
+      description: findDescription(),
       inputSchema: {
         intent: z
           .string()
-          .describe("A concrete task intent: action, object, and outcome."),
+          .describe(
+            "One-sentence search query: concrete action plus platform or domain.",
+          ),
       },
     },
     async ({ intent }) => {
@@ -102,21 +115,24 @@ export function registerFind(server: McpServer): void {
         });
       }
       if (evaluation.result) {
-        return textResult({ found: true, ...evaluation.result });
+        // Minimal agent-facing payload: the skill itself, plus related names
+        // for multi-part tasks. Telemetry and ranking notes stay on the
+        // dashboard response, where a human reads them.
+        const result = evaluation.result;
+        return textResult({
+          found: true,
+          name: result.name,
+          content: result.content,
+          ...(result.kind === "tool"
+            ? { kind: result.kind, server: result.server, tool_id: result.tool_id }
+            : {}),
+          ...(result.related ? { related: result.related } : {}),
+        });
       }
       if (evaluation.nearMisses.length > 0) {
         return textResult({
           found: false,
-          near_misses: evaluation.nearMisses.map((miss) => ({
-            id: miss.id,
-            name: miss.name,
-            description: miss.description,
-            kind: miss.kind,
-          })),
-          note:
-            "Nothing cleared the confidence threshold. These are the " +
-            "closest entries; retry with a more specific intent if one " +
-            "applies, otherwise use your own tools.",
+          near_misses: evaluation.nearMisses.map((miss) => miss.name),
         });
       }
       return textResult({ found: false });
@@ -445,6 +461,10 @@ export async function serveMcp(): Promise<void> {
   }
   const server = createServer();
   const transport = new StdioServerTransport();
+  // Warm the embedding model in the background so the first JIT_FIND does not
+  // pay the model-load cost mid-conversation. A failed warm-up is already
+  // logged by the loader; retrieval still fails closed on the query path.
+  void warmupEmbeddingModel().catch(() => {});
   await server.connect(transport);
 
   const stop = (signal: string): void => {

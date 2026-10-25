@@ -1,7 +1,7 @@
 {
   "name": "jit-mcp",
   "version": "1.0.0",
-  "description": "Just-in-time skill and MCP tool loader for AI agents.",
+  "description": "A search engine for skills: one query returns one tested procedure — local, just-in-time, scanned by NVIDIA SkillSpector.",
   "type": "module",
   "license": "MIT",
   "repository": {

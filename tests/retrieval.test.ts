@@ -10,7 +10,7 @@ process.env.JIT_HOME = mkdtempSync(path.join(tmpdir(), "jit-retrieval-"));
 process.env.JIT_DISABLE_EMBEDDINGS = "1";
 
 const db = await import("../src/storage/db.js");
-const { evaluate, lexicalConfidence } = await import(
+const { evaluate, lexicalConfidence, relatedSkills } = await import(
   "../src/retrieval/retriever.js"
 );
 
@@ -103,6 +103,16 @@ test("a disabled item is never returned", async () => {
   const evaluation = await evaluate("postgres query explain analyze slow", 5);
   assert.notEqual(evaluation.result?.id, "postgres-explain");
   db.setEnabled(conn, "postgres-explain", true);
+});
+
+test("relatedSkills lists runner-up names without the winner, dropping zero scores", () => {
+  const candidates = [
+    { id: "a", name: "A", description: "a", kind: "skill" as const, cosine: 0.9, rrf: 1, rerank: null, lexical: 0, score: 0.9, passes_threshold: true },
+    { id: "b", name: "B", description: "b", kind: "skill" as const, cosine: 0.7, rrf: 0.8, rerank: null, lexical: 0, score: 0.7, passes_threshold: false },
+    { id: "c", name: "C", description: "c", kind: "skill" as const, cosine: 0, rrf: 0, rerank: null, lexical: 0, score: 0, passes_threshold: false },
+  ];
+  const related = relatedSkills(candidates, "a", 2);
+  assert.deepEqual(related, ["B"]);
 });
 
 test("retrieval telemetry records and summarizes decisions", () => {

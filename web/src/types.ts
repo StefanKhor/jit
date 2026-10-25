@@ -34,7 +34,6 @@ export interface PublicConfig {
   rerank_api_base: string;
   rerank_model: string;
   api_key: string;
-  rerank_enabled: boolean;
   confidence_threshold: number;
   first_run: boolean;
   marketplace_urls: string[];
@@ -270,6 +269,7 @@ export interface SearchResult {
   confidence: number;
   reranked: boolean;
   keyword_only?: boolean;
+  related?: string[];
   source?: string;
   trust?: "first-party" | "third-party";
   server?: string;
@@ -283,6 +283,7 @@ export interface SearchResponse {
   reranked: boolean;
   keyword_only: boolean;
   warning?: string;
+  ranking_warning?: string;
   threshold: number;
   elapsed_ms: number;
 }

@@ -1,8 +1,9 @@
-# JIT — a secure, just-in-time skills hub
+# JIT — a search engine for skills
 
-**JIT is a local skills hub: NVIDIA SkillSpector scans every skill you add for
-potential vulnerabilities before indexing it, then JIT gives an agent one skill
-at a time instead of every skill in context.**
+**JIT works like a search engine for an agent's skills: the agent describes the
+task, JIT returns the one tested procedure for it — not ten links to read and
+assemble. The index is local, and NVIDIA SkillSpector scans every skill before
+it can be found.**
 
 Two things make it worth running.
 
@@ -18,8 +19,12 @@ get.
 `JIT_FIND("create a Linear issue for the login bug")` and gets the single best
 skill, or — when nothing clears the confidence threshold — `{"found": false}`
 plus a short `near_misses` list instead of a silent empty result. You carry one
-body, not a catalog. The whole shipped MCP surface is two tools, measured at
-about 400 tokens of standing context.
+body, not a catalog. A multi-part task spans skills: a confident hit also lists
+up to two related skill names, and a second call loads the next body — one body
+per call, never a catalog. The MCP response carries only the skill name and its
+body — scores, ranking notes, and telemetry stay on the dashboard, where a
+human reads them. The whole shipped MCP surface is two
+tools, measured at about 400 tokens of standing context.
 
 JIT stays quiet until it is called. MCP is pull-based, so JIT is built to be
 *invoked*, not to push: a small tool surface, sharp descriptions, and no
@@ -163,11 +168,15 @@ and skip it for trivial ones. A short client instruction removes the
 remaining ambiguity. Add this to your system prompt or `AGENTS.md`:
 
 ```text
-Before starting any multi-step or unfamiliar task, call JIT_FIND first.
-Phrase the intent as action + object + outcome, e.g. "draft and schedule a
-product launch thread". Skip it for quick actions you can do directly — a
-single edit, a lookup, a short answer. On {"found": false} with near_misses,
-retry once with a sharper intent, then proceed normally.
+At the start of every new task — not just the first of the session — call
+JIT_FIND before working. Phrase the intent like a search query: one sentence,
+concrete action, platform or domain named, e.g. "automate posting a twitter
+thread". Leave out file paths and task details. Skip it for quick actions you
+can do directly, or when a skill for this exact kind of work is already in
+context. On {"found": false} with near_misses, retry once with different
+phrasing, then proceed normally. The index is broader than any summary of it —
+checking is the default, skipping is the exception: a lookup is cheap, a
+missed skill is expensive.
 ```
 
 Do not call JIT on every message. A needless retrieval adds latency and can
@@ -223,7 +232,7 @@ A single-file React SPA served by the Node process.
   JIT-managed servers, add a server manually.
 - **Search** — live retrieval with the effective score, cosine, rerank, lexical
   and the threshold, plus a confidence slider and the retrieval log.
-- **Settings** — local/cloud embeddings, optional reranker, confidence threshold, dashboard auth,
+- **Settings** — local/cloud embeddings, the reranker, confidence threshold, dashboard auth,
   import/export, clear.
 
 The first-run panel is skippable. The dashboard listens on `127.0.0.1` by
@@ -259,15 +268,17 @@ Imports are explicit, read-only on the source side, and shown before they run.
 2. **Vector search** — cosine similarity over embeddings stored in SQLite.
 3. **Keyword search** — BM25 over names, descriptions, aliases, and bodies.
 4. **Fusion** — Reciprocal Rank Fusion merges both rankings.
-5. **Rerank (optional)** — any OpenAI-compatible chat-completions endpoint can
-   re-score the top vector candidates.
+5. **Rerank (the decision layer)** — any OpenAI-compatible chat-completions
+   endpoint re-scores the top vector candidates. When an endpoint is configured,
+   every lookup is reranked — the model decides which skill wins; an
+   unconfigured install falls back to cosine and says so in the response.
 6. **Two-stage threshold** — the decision uses one scale, never a mix. A reranked
     candidate is judged on its rerank score; otherwise on cosine similarity. The
     default threshold is `0.60`.
 7. **Two-tier result** — a candidate above the threshold returns one body or
    tool descriptor. Below it, `JIT_FIND` returns `{"found": false}` with up to
-   three `near_misses` (name and description), so the agent can retry once with
-   a sharper intent instead of silently giving up.
+   three `near_misses` (names), so the agent can retry once with a sharper
+   intent instead of silently giving up.
 
 The pipeline is deliberately single-pass. A miss costs one search and the agent
 continues; it never stalls on retrieval. There is no chunking.
@@ -512,7 +523,7 @@ web/ (React + Vite, single-file build)
 src/server/dashboard.ts ──► src/retrieval/retriever.ts
         │                         │
         │                         ▼
-        │                  embeddings + BM25 + optional OpenAI-compatible reranker
+        │                  embeddings + BM25 + OpenAI-compatible reranker
         ▼
 src/indexer.ts ──► src/storage/db.ts ──► ~/.jit
         ▲
@@ -550,7 +561,7 @@ systems this is a no-op.
 
 Built for the Nebius x NVIDIA Global AI Hackathon.
 
-- **Nebius runtime integration** — in Settings, select **Use Nebius Token Factory + NVIDIA Nemotron 3.5 Lightning**, enter a Nebius Token Factory API key, and save with reranking enabled. When vector candidates are found, JIT calls Nebius Token Factory's OpenAI-compatible chat-completions API using NVIDIA's open-weight `nvidia/Nemotron-3_5-Lightning` model to rerank them. Successful calls are recorded in the server log. The key can also be provided as `JIT_RERANK_API_KEY`.
+- **Nebius runtime integration** — in Settings, select **Use Nebius Token Factory + NVIDIA Nemotron 3.5 Lightning**, enter a Nebius Token Factory API key, and save. Every lookup is then reranked through Nebius Token Factory's OpenAI-compatible chat-completions API using NVIDIA's open-weight `nvidia/Nemotron-3_5-Lightning` model. Successful calls are recorded in the server log. The key can also be provided as `JIT_RERANK_API_KEY`.
 - **Flexible embeddings and reranking** — built-in local embeddings remain the default; embeddings and reranking can also use configured OpenAI-compatible endpoints.
 - **Public source** — [github.com/StefanKhor/jit](https://github.com/StefanKhor/jit) is public and includes the top-level MIT `LICENSE`.
 - **Dashboard** — real measurements from the local index, not marketing copy.

@@ -204,6 +204,7 @@ export interface Evaluation {
   keywordOnly: boolean;
   threshold: number;
   warning?: string;
+  rankingWarning?: string;
 }
 
 const EMPTY: Evaluation = {
@@ -230,14 +231,15 @@ export async function evaluate(
     return { ...empty, warning: ranked.warning };
   }
 
-  let rerankScores = new Map<string, number>();
-  if (settings.rerank_enabled) {
-    rerankScores = await rerankCandidates(intent, candidates, settings);
-    if (rerankScores.size > 0) {
-      candidates.sort(
-        (a, b) => (rerankScores.get(b.id) || 0) - (rerankScores.get(a.id) || 0),
-      );
-    }
+  // Reranking is the decision layer: whenever an endpoint is configured it
+  // runs on every lookup, and any skip is reported, never silent.
+  const rerankOutcome = await rerankCandidates(intent, candidates, settings);
+  const rerankScores = rerankOutcome.scores;
+  const rankingWarning = rerankOutcome.error || undefined;
+  if (rerankScores.size > 0) {
+    candidates.sort(
+      (a, b) => (rerankScores.get(b.id) || 0) - (rerankScores.get(a.id) || 0),
+    );
   }
 
   const reranked = rerankScores.size > 0;
@@ -281,7 +283,9 @@ export async function evaluate(
     }));
 
   const best = candidates[0];
-  if (!best) return { ...empty, candidates: debug, nearMisses };
+  if (!best) {
+    return { ...empty, candidates: debug, nearMisses, rankingWarning };
+  }
   const confidence = scoreOf(best.id);
   if (confidence < threshold) {
     logger.debug(
@@ -297,6 +301,7 @@ export async function evaluate(
       reranked,
       keywordOnly,
       threshold,
+      rankingWarning,
     };
   }
 
@@ -320,6 +325,10 @@ export async function evaluate(
     result.server = best.server || best.id.split("__", 1)[0];
     result.tool_id = best.id;
   }
+  // Multi-skill tasks are real: hand back the runners-up as one-liners so
+  // the agent can load a second domain with another JIT_FIND call.
+  const related = relatedSkills(debug, best.id);
+  if (related.length > 0) result.related = related;
   return {
     result,
     candidates: debug,
@@ -327,7 +336,25 @@ export async function evaluate(
     reranked,
     keywordOnly,
     threshold,
+    rankingWarning,
   };
+}
+
+/**
+ * Runner-up names for a confident hit. Multi-skill tasks are real: a deploy
+ * may also need CI and monitoring. Names only — the agent loads a related
+ * skill with another JIT_FIND call, which still applies the confidence
+ * threshold.
+ */
+export function relatedSkills(
+  candidates: SearchCandidate[],
+  winnerId: string,
+  limit = 2,
+): string[] {
+  return candidates
+    .filter((candidate) => candidate.id !== winnerId && candidate.score > 0)
+    .slice(0, limit)
+    .map((candidate) => candidate.name);
 }
 
 export async function retrieve(intent: string): Promise<SearchResult | null> {

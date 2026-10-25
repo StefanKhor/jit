@@ -93,6 +93,7 @@ test("the stdio server advertises only the skill-first tools", async () => {
   assert.deepEqual(names.sort(), ["JIT_ADD", "JIT_FIND"]);
   const find = tools.find((tool) => tool.name === "JIT_FIND");
   assert.match(String(find?.description), /near_misses/);
+  assert.match(String(find?.description), /check anyway/);
   const add = tools.find((tool) => tool.name === "JIT_ADD");
   assert.match(String(add?.description), /SkillSpector/);
 });

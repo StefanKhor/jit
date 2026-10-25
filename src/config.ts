@@ -119,7 +119,6 @@ export const DEFAULT_CONFIG: Config = {
   rerank_api_base: "",
   rerank_model: "",
   api_key: "",
-  rerank_enabled: false,
   confidence_threshold: CONFIDENCE_THRESHOLD,
   first_run: true,
   marketplace_urls: [],
@@ -138,7 +137,6 @@ const FILE_KEYS = new Set<keyof Config>([
   "rerank_api_base",
   "rerank_model",
   "api_key",
-  "rerank_enabled",
   "confidence_threshold",
   "first_run",
   "marketplace_urls",
@@ -216,11 +214,7 @@ function readStoredConfig(): Partial<Config> {
       }
       continue;
     }
-    if (
-      key === "rerank_enabled" ||
-      key === "first_run" ||
-      key === "skillspector_llm_enabled"
-    ) {
+    if (key === "first_run" || key === "skillspector_llm_enabled") {
       if (typeof value === "boolean") {
         (stored as Record<string, unknown>)[key] = value;
       }
@@ -285,7 +279,6 @@ export function loadConfig(): Config {
     }
   }
   config.first_run = Boolean(config.first_run);
-  config.rerank_enabled = Boolean(config.rerank_enabled);
   const scannerLlmEnv = process.env.JIT_SKILLSPECTOR_LLM;
   if (scannerLlmEnv !== undefined && scannerLlmEnv.trim() !== "") {
     config.skillspector_llm_enabled = ["1", "true", "yes", "on"].includes(
@@ -431,7 +424,6 @@ export function publicConfig(): PublicConfig {
     rerank_base_env: Boolean(process.env.JIT_RERANK_API_BASE),
     rerank_model_env: Boolean(process.env.JIT_RERANK_MODEL),
   };
-  redacted.rerank_enabled = Boolean(config.rerank_enabled);
   return redacted;
 }
 

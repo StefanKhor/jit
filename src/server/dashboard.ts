@@ -387,9 +387,6 @@ export function createApp(): Hono {
     if ("rerank_api_base" in updates) {
       updates.rerank_api_base = rerankBase.replace(/\/+$/, "");
     }
-    if ("rerank_enabled" in body) {
-      updates.rerank_enabled = boolValue(body.rerank_enabled, false);
-    }
     if ("skillspector_llm_enabled" in body) {
       updates.skillspector_llm_enabled = boolValue(
         body.skillspector_llm_enabled,
@@ -1041,6 +1038,9 @@ async function search(intent: string): Promise<Record<string, unknown>> {
     reranked: evaluation.reranked,
     keyword_only: evaluation.keywordOnly,
     ...(evaluation.warning ? { warning: evaluation.warning } : {}),
+    ...(evaluation.rankingWarning
+      ? { ranking_warning: evaluation.rankingWarning }
+      : {}),
     threshold: evaluation.threshold,
     elapsed_ms: Number((performance.now() - started).toFixed(1)),
   };
