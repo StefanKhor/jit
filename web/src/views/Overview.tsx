@@ -17,8 +17,9 @@ function Hero() {
         <span className="text-ink-3">not one hundred.</span>
       </h1>
       <p className="mt-6 max-w-lg text-sm leading-relaxed text-ink-2">
-        JIT keeps skills and MCP tools in a local index. Your agent asks for what
-        it needs; everything else stays out of the context window.
+        Every agent keeps a list of what it could do — names and descriptions,
+        sitting in the context window. JIT keeps a single fixed tool schema
+        instead, and fetches a skill's body only when a task needs it.
       </p>
     </header>
   );
@@ -27,11 +28,10 @@ function Hero() {
 /** The four headline figures, separated by true hairlines. */
 function Figures({ stats }: { stats: Stats }) {
   const tokens = stats.tokens;
+  const jit = Number(tokens?.jit || 0);
+  const catalog = Number(tokens?.catalog || 0);
   const reduction = Number(tokens?.reduction_pct || 0);
-  const overhead = Math.max(
-    0,
-    Number(tokens?.jit || 0) - Number(tokens?.baseline || 0),
-  );
+  const overhead = Math.max(0, jit - catalog);
   const retrieval = stats.retrieval;
   const measured = Number(retrieval?.total || 0) > 0;
   const missRate = Number(retrieval?.miss_rate || 0);
@@ -48,15 +48,15 @@ function Figures({ stats }: { stats: Stats }) {
       hint: `${fmt(stats.skills || 0)} skills · ${fmt(stats.tools || 0)} tools`,
     },
     {
-      key: "context",
-      label: "Context per task",
-      value: <AnimatedNumber value={tokens?.jit || 0} />,
+      key: "rest",
+      label: "Context at rest",
+      value: <AnimatedNumber value={jit} />,
       unit: "tok",
-      hint: `${fmt(tokens?.baseline || 0)} with a skill catalog`,
+      hint: `${fmt(catalog)} for a plain catalog`,
     },
     {
       key: "reduction",
-      label: reduction < 0 ? "Overhead" : "Reduction",
+      label: reduction < 0 ? "Overhead" : "Context saved",
       value: (
         <AnimatedNumber
           value={reduction < 0 ? Math.abs(reduction) : reduction}
@@ -65,7 +65,7 @@ function Figures({ stats }: { stats: Stats }) {
       ),
       unit: "%",
       hint: `${fmt(reduction < 0 ? overhead : tokens?.saved || 0)} tokens ${
-        reduction < 0 ? "of overhead" : "kept out of context"
+        reduction < 0 ? "over a catalog" : "kept out of context"
       }`,
     },
     {
@@ -104,16 +104,320 @@ function Figures({ stats }: { stats: Stats }) {
           <span>
             Below the <span className="num text-ink-2">{fmt(breakEven)}</span>-entry
             break-even. JIT's{" "}
-            <span className="num text-ink-2">{fmt(tokens?.startup || 0)}</span>-token
-            tool schema is a fixed cost, so at {fmt(total)}{" "}
-            {total === 1 ? "entry" : "entries"} a catalog of names and descriptions
-            plus the one skill you load (
-            <span className="num text-ink-2">{fmt(tokens?.baseline || 0)}</span> tok) is
-            cheaper per task. JIT wins at {fmt(breakEven)} entries or more.
+            <span className="num text-ink-2">{fmt(jit)}</span>-token tool schema is
+            smaller than a catalog only once there are more entries than that — at{" "}
+            {fmt(total)} {total === 1 ? "entry" : "entries"} a plain catalog (
+            <span className="num text-ink-2">{fmt(catalog)}</span> tok) is the lighter
+            resting context. JIT wins at {fmt(breakEven)} entries or more.
           </span>
         </p>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The comparison that carries the whole product: what each approach keeps in
+ * the context window before any task runs. The body a task loads is identical
+ * on both sides, so it is shown as shared rather than counted.
+ */
+function StandingContext({ stats }: { stats: Stats }) {
+  const tokens = stats.tokens;
+  const jit = Number(tokens?.jit || 0);
+  const catalog = Number(tokens?.catalog || 0);
+  const body = Number(tokens?.average_item || 0);
+  const scale = Math.max(jit, catalog, 1);
+  const delta = jit - catalog;
+  const rows = [
+    {
+      key: "catalog",
+      label: "Plain skills",
+      note: "every name + description",
+      value: catalog,
+      bar: "bg-info",
+    },
+    {
+      key: "jit",
+      label: "JIT",
+      note: "one fixed tool schema",
+      value: jit,
+      bar: "bg-accent",
+    },
+  ];
+
+  return (
+    <Panel>
+      <PanelHead title="Context at rest" hint="before an agent asks for anything" />
+      <PanelBody className="space-y-6">
+        <div className="space-y-4">
+          {rows.map((row) => (
+            <div key={row.key}>
+              <div className="flex items-baseline justify-between gap-4">
+                <span className="flex min-w-0 items-baseline gap-2">
+                  <span className="text-sm text-ink">{row.label}</span>
+                  <span className="hidden truncate text-xs text-ink-3 sm:inline">
+                    {row.note}
+                  </span>
+                </span>
+                <span className="num shrink-0 text-sm text-ink">
+                  {fmt(row.value)}
+                  <span className="ml-1 text-[11px] text-ink-3">tok</span>
+                </span>
+              </div>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-line">
+                <div
+                  className={`h-full rounded-full ${row.bar}`}
+                  style={{ width: `${pct(row.value, scale)}%` }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="rounded-xl border border-line bg-inset/60 p-4">
+          <div className="flex items-baseline justify-between gap-4">
+            <span className="text-xs text-ink-2">The skill body</span>
+            <span className="num text-xs text-ink-3">
+              ~{fmt(body)} tok · on demand
+            </span>
+          </div>
+          <div
+            aria-hidden="true"
+            className="mt-2.5 h-2 rounded-full border border-dashed border-line-2"
+          />
+          <p className="mt-2.5 text-xs leading-relaxed text-ink-3">
+            Fetched only when a task needs it — by both approaches. It is identical
+            on each side, so it is not part of the comparison.
+          </p>
+        </div>
+
+        <p className="border-t border-line pt-5 text-sm leading-relaxed">
+          {delta > 0 ? (
+            <>
+              At rest, JIT carries <span className="num text-warn">{fmt(delta)}</span>{" "}
+              more tokens than a plain catalog — a net cost until the catalog grows
+              past it.
+            </>
+          ) : (
+            <>
+              At rest, JIT carries{" "}
+              <span className="num text-accent">{fmt(-delta)}</span> fewer tokens than
+              a plain catalog.
+            </>
+          )}
+        </p>
+      </PanelBody>
+    </Panel>
+  );
+}
+
+/**
+ * Cost per task against index size. A catalog grows without bound; JIT's tool
+ * schema is flat. Where the two lines cross is the break-even — and the shaded
+ * bands say which side of it the index is on.
+ */
+function BreakEven({ stats }: { stats: Stats }) {
+  const tokens = stats.tokens;
+  const schema = Number(tokens?.jit || 0);
+  const total = stats.total || 0;
+  const breakEven = Number(tokens?.break_even || 0);
+  const perEntry = total ? Math.floor((stats.catalog_tokens || 0) / total) : 0;
+
+  if (!schema || !perEntry) {
+    return (
+      <Panel>
+        <PanelHead title="Break-even" hint="the index size where JIT starts to win" />
+        <PanelBody>
+          <p className="text-sm leading-relaxed text-ink-3">
+            Add a few entries and this plots where a plain catalog outgrows JIT's
+            fixed tool schema. Below that point, listing your skills is the lighter
+            resting context.
+          </p>
+        </PanelBody>
+      </Panel>
+    );
+  }
+
+  const maxN = Math.max(breakEven + 4, total + 4, 12);
+  const catalogAtMax = maxN * perEntry;
+  const maxY = Math.max(catalogAtMax, schema) * 1.12;
+  const W = 560;
+  const H = 236;
+  const padL = 50;
+  const padR = 16;
+  const padT = 20;
+  const padB = 30;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const x = (n: number) => padL + (n / maxN) * plotW;
+  const y = (v: number) => H - padB - (v / maxY) * plotH;
+  // The lines truly meet at schema / perEntry; the integer count is the rounded
+  // headline figure.
+  const cross = schema / perEntry;
+
+  return (
+    <Panel>
+      <PanelHead
+        title="Break-even"
+        hint="cost per task as the index grows · the body is shared, so it is not counted"
+      />
+      <PanelBody className="space-y-4">
+        <svg
+          viewBox={`0 0 ${W} ${H}`}
+          className="w-full"
+          role="img"
+          aria-label={`Cost per task by index size. A plain catalog grows past JIT's ${fmt(schema)}-token schema at about ${fmt(breakEven)} entries.`}
+        >
+          <rect
+            x={x(0)}
+            y={y(maxY)}
+            width={Math.max(0, x(cross) - x(0))}
+            height={y(0) - y(maxY)}
+            fill="var(--color-bad)"
+            fillOpacity={0.045}
+          />
+          <rect
+            x={x(cross)}
+            y={y(maxY)}
+            width={Math.max(0, x(maxN) - x(cross))}
+            height={y(0) - y(maxY)}
+            fill="var(--color-accent)"
+            fillOpacity={0.05}
+          />
+
+          {[0, 0.25, 0.5, 0.75, 1].map((t) => {
+            const v = maxY * t;
+            return (
+              <g key={t}>
+                <line
+                  x1={x(0)}
+                  x2={x(maxN)}
+                  y1={y(v)}
+                  y2={y(v)}
+                  stroke="var(--color-line)"
+                  strokeDasharray="2 5"
+                />
+                <text
+                  x={padL - 8}
+                  y={y(v) + 3}
+                  textAnchor="end"
+                  fontSize={9}
+                  fill="var(--color-ink-3)"
+                  className="num"
+                >
+                  {fmt(v)}
+                </text>
+              </g>
+            );
+          })}
+
+          <line x1={x(0)} x2={x(maxN)} y1={y(0)} y2={y(0)} stroke="var(--color-line-2)" />
+
+          <line
+            x1={x(total)}
+            x2={x(total)}
+            y1={y(0)}
+            y2={y(maxY)}
+            stroke="var(--color-line-2)"
+            strokeDasharray="3 3"
+          />
+          <line
+            x1={x(cross)}
+            x2={x(cross)}
+            y1={y(0)}
+            y2={y(maxY)}
+            stroke="var(--color-ink-3)"
+            strokeDasharray="3 3"
+          />
+
+          <line
+            x1={x(0)}
+            y1={y(0)}
+            x2={x(maxN)}
+            y2={y(catalogAtMax)}
+            stroke="var(--color-info)"
+            strokeWidth={2}
+          />
+          <line
+            x1={x(0)}
+            y1={y(schema)}
+            x2={x(maxN)}
+            y2={y(schema)}
+            stroke="var(--color-accent)"
+            strokeWidth={2}
+          />
+
+          <circle cx={x(cross)} cy={y(schema)} r={4} fill="var(--color-accent)" />
+          <circle
+            cx={x(total)}
+            cy={y(total * perEntry)}
+            r={4}
+            fill="var(--color-info)"
+            stroke="var(--color-panel)"
+            strokeWidth={1.5}
+          />
+
+          <text x={x(0)} y={H - 9} textAnchor="start" fontSize={9} fill="var(--color-ink-3)">
+            0
+          </text>
+          <text
+            x={x(total)}
+            y={H - 9}
+            textAnchor="middle"
+            fontSize={9}
+            fill="var(--color-ink-2)"
+            className="num"
+          >
+            you · {fmt(total)}
+          </text>
+          <text x={x(maxN)} y={H - 9} textAnchor="end" fontSize={9} fill="var(--color-ink-3)">
+            {fmt(maxN)} entries
+          </text>
+          <text
+            x={x(cross)}
+            y={y(maxY) - 6}
+            textAnchor="middle"
+            fontSize={9}
+            fill="var(--color-accent)"
+            className="num"
+          >
+            break-even · {fmt(breakEven)}
+          </text>
+        </svg>
+
+        <div className="flex flex-wrap gap-x-6 gap-y-2 border-t border-line pt-4 text-xs">
+          <span className="flex items-center gap-2">
+            <span aria-hidden="true" className="h-0.5 w-4 rounded-full bg-info" />
+            <span className="text-ink-3">Catalog in context</span>
+          </span>
+          <span className="flex items-center gap-2">
+            <span aria-hidden="true" className="h-0.5 w-4 rounded-full bg-accent" />
+            <span className="text-ink-3">JIT tool schema</span>
+          </span>
+          <span className="flex items-center gap-2">
+            <span aria-hidden="true" className="size-2 rounded-full bg-info" />
+            <span className="text-ink-3">this index</span>
+          </span>
+        </div>
+
+        <p className="text-xs leading-relaxed text-ink-2">
+          {total >= breakEven ? (
+            <>
+              At {fmt(total)} entries the catalog already outweighs JIT's{" "}
+              <span className="num text-ink">{fmt(schema)}</span>-token schema — JIT is
+              the smaller resting context, and the gap widens with every entry added.
+            </>
+          ) : (
+            <>
+              A catalog grows with every skill you add; JIT's{" "}
+              <span className="num text-ink">{fmt(schema)}</span>-token schema does not.
+              The two cross at {fmt(breakEven)} entries, and past that JIT wins by more
+              with each one.
+            </>
+          )}
+        </p>
+      </PanelBody>
+    </Panel>
   );
 }
 
@@ -184,7 +488,7 @@ function Heaviest({ stats }: { stats: Stats }) {
 
   return (
     <Panel>
-      <PanelHead title="Heaviest entries" hint="body tokens" />
+      <PanelHead title="Heaviest entries" hint="full SKILL.md body · fetched on demand" />
       {items.length === 0 ? (
         <Empty title="Nothing indexed.">
           Install or import entries to see their weight.
@@ -293,6 +597,12 @@ function Quality({ stats }: { stats: Stats }) {
               unit="%"
               hint={`${fmt(misses)} of ${fmt(total)} returned nothing`}
             />
+            <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-line">
+              <div
+                className="h-full rounded-full bg-bad"
+                style={{ width: `${Math.min(100, Math.max(0, missRate))}%` }}
+              />
+            </div>
           </div>
           <div className="bg-panel p-5">
             <Stat
@@ -301,82 +611,15 @@ function Quality({ stats }: { stats: Stats }) {
               unit="%"
               hint={`threshold ${threshold.toFixed(2)}`}
             />
+            <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-line">
+              <div
+                className="h-full rounded-full bg-ok"
+                style={{ width: `${Math.min(100, Math.max(0, 100 - missRate))}%` }}
+              />
+            </div>
           </div>
         </div>
       )}
-    </Panel>
-  );
-}
-
-function Budget({ stats }: { stats: Stats }) {
-  const tokens = stats.tokens;
-  const rawRatio = tokens?.baseline ? (tokens.jit / tokens.baseline) * 100 : 0;
-  const fillRatio = Math.min(100, rawRatio);
-  const breakEven = Number(tokens?.break_even || 0);
-  const total = stats.total || 0;
-  const belowBreakEven = breakEven > 0 && total > 0 && total < breakEven;
-
-  return (
-    <Panel>
-      <PanelHead title="Context budget" hint="estimate · 4 characters per token" />
-      <PanelBody className="space-y-5">
-        <div>
-          <div className="flex items-baseline justify-between gap-4 text-xs">
-            <span className="text-ink-2">One JIT call against a skill catalog</span>
-            <span className="num text-ink">{rawRatio.toFixed(1)}% of a catalog</span>
-          </div>
-          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-line">
-            <div
-              className="h-full rounded-full bg-accent"
-              style={{ width: `${fillRatio}%` }}
-            />
-          </div>
-          <div className="num mt-2 flex justify-between text-[10px] text-ink-3">
-            <span>0</span>
-            <span>25</span>
-            <span>50</span>
-            <span>75</span>
-            <span>100%</span>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap gap-x-7 gap-y-2 border-t border-line pt-5 text-xs">
-          <span className="flex items-center gap-2">
-            <span aria-hidden="true" className="size-2 rounded-full bg-accent" />
-            <span className="text-ink-3">JIT per task</span>
-            <span className="num font-medium text-ink">
-              {fmt(tokens?.jit || 0)} tok
-            </span>
-          </span>
-          <span className="flex items-center gap-2">
-            <span aria-hidden="true" className="size-2 rounded-full bg-line-2" />
-            <span className="text-ink-3">Catalog + one skill</span>
-            <span className="num font-medium text-ink">
-              {fmt(tokens?.baseline || 0)} tok
-            </span>
-          </span>
-        </div>
-
-        <p className="border-t border-line pt-5 text-xs leading-relaxed text-ink-3">
-          {breakEven > 0 ? (
-            <>
-              Break-even at <span className="num text-ink-2">{fmt(breakEven)}</span>{" "}
-              entries: below that, keeping a catalog of every skill's name and
-              description in context costs less per task than JIT's{" "}
-              <span className="num text-ink-2">{fmt(tokens?.startup || 0)}</span>
-              -token tool schema.{" "}
-              {belowBreakEven ? (
-                <span className="text-warn">
-                  This index has {fmt(total)} entries, so JIT is a net cost at this
-                  size.
-                </span>
-              ) : null}
-            </>
-          ) : (
-            "Add entries to estimate the break-even point."
-          )}
-        </p>
-      </PanelBody>
     </Panel>
   );
 }
@@ -428,16 +671,20 @@ export function Overview() {
       ) : null}
 
       <div className="grid gap-6 lg:grid-cols-5">
-        <Budget stats={stats} />
+        <div className="lg:col-span-3">
+          <BreakEven stats={stats} />
+        </div>
         <div className="lg:col-span-2">
-          <Quality stats={stats} />
+          <StandingContext stats={stats} />
         </div>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Composition stats={stats} />
         <Heaviest stats={stats} />
+        <Composition stats={stats} />
       </div>
+
+      <Quality stats={stats} />
 
       <Categories stats={stats} />
 

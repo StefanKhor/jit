@@ -101,6 +101,37 @@ test("break-even is the first size where JIT beats a skill catalog", () => {
   }
 });
 
+// The route must wire the same model: at rest, JIT's schema against the
+// catalog, with the shared on-demand body left out of both.
+test("stats compare JIT against a catalog at rest", async () => {
+  await call("/api/skills/add", { path: path.join(skillRoot, "SKILL.md") });
+  try {
+    const res = await app.request("/api/stats");
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as {
+      catalog_tokens: number;
+      tokens: {
+        jit: number;
+        catalog: number;
+        saved: number;
+        reduction_pct: number;
+      };
+    };
+    assert.ok(body.tokens.catalog > 0, "the seeded skill should have a catalog");
+    assert.equal(body.tokens.catalog, body.catalog_tokens);
+    assert.equal(
+      body.tokens.reduction_pct,
+      Number(((1 - body.tokens.jit / body.tokens.catalog) * 100).toFixed(1)),
+    );
+    assert.equal(
+      body.tokens.saved,
+      Math.max(0, body.tokens.catalog - body.tokens.jit),
+    );
+  } finally {
+    await app.request("/api/skills/api-skill", { method: "DELETE" });
+  }
+});
+
 test("every response carries the hardening headers", async () => {
   const response = await app.request("/api/health");
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");

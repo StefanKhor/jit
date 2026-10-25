@@ -45,9 +45,7 @@ export interface Stats {
   categories: Array<{ name: string; count: number }>;
   tokens: {
     jit: number;
-    baseline: number;
     catalog: number;
-    startup: number;
     average_item: number;
     largest_item: number;
     saved: number;

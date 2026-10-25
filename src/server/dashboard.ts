@@ -239,17 +239,14 @@ export function createApp(): Hono {
   app.get("/api/stats", async (c) => {
     const stats = getStats(initDb());
     const schemaTokens = await jitSchemaTokens();
-    // A JIT call pays the fixed tool schema plus the one body it returns. The
-    // alternative — keeping every entry's name and description in context —
-    // pays the whole catalog plus that same body, so the body cancels and the
-    // comparison is the schema against the catalog.
-    const jitTokens = stats.total
-      ? schemaTokens + stats.average_body
-      : schemaTokens;
-    const baselineTokens = stats.catalog_tokens + stats.average_body;
-    const saved = Math.max(0, baselineTokens - jitTokens);
-    const reduction = baselineTokens
-      ? Number(((1 - jitTokens / baselineTokens) * 100).toFixed(1))
+    // At rest a plain skill setup keeps every name and description in context;
+    // JIT keeps its fixed tool schema. A task's body is fetched on demand by
+    // both, so it is identical on each side and is not part of the comparison.
+    const jitTokens = schemaTokens;
+    const catalogTokens = stats.catalog_tokens;
+    const saved = Math.max(0, catalogTokens - jitTokens);
+    const reduction = catalogTokens
+      ? Number(((1 - jitTokens / catalogTokens) * 100).toFixed(1))
       : 0;
     const averageCatalog = stats.total
       ? Math.floor(stats.catalog_tokens / stats.total)
@@ -260,9 +257,7 @@ export function createApp(): Hono {
       ...stats,
       tokens: {
         jit: jitTokens,
-        baseline: baselineTokens,
-        catalog: stats.catalog_tokens,
-        startup: schemaTokens,
+        catalog: catalogTokens,
         average_item: stats.average_body,
         largest_item: stats.largest,
         saved,
