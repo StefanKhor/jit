@@ -4,11 +4,15 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { FAKE_SKILLSPECTOR } from "./helpers.js";
+
 // Isolate the index: materialized sources and installed skills both live under
 // JIT_HOME, and installs index their entries.
 const HOME = mkdtempSync(path.join(tmpdir(), "jit-github-"));
 process.env.JIT_HOME = HOME;
 process.env.JIT_DISABLE_EMBEDDINGS = "1";
+// Installs are gated by NVIDIA SkillSpector; the fixture speaks its contract.
+process.env.JIT_SKILLSPECTOR = FAKE_SKILLSPECTOR;
 
 // A stand-in for the `skills` CLI. It writes what the real one writes
 // (`<cwd>/.agents/skills/<name>/SKILL.md`) and prints the same JSON shape on

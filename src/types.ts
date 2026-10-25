@@ -303,15 +303,46 @@ export interface RetrievalStats {
 }
 
 export interface ScanFinding {
-  level: "high" | "medium" | "low";
+  level: "critical" | "high" | "medium" | "low";
   rule: string;
   detail: string;
+  /** Which scanner produced the finding. */
+  scanner?: "builtin" | "skillspector";
+}
+
+/** Raw verdict from the SkillSpector CLI (github.com/NVIDIA/skillspector). */
+export interface SkillspectorReport {
+  /** True when the scanner actually ran; false when it is unavailable. */
+  available: boolean;
+  source: "env" | "path" | "uvx" | "off" | "none";
+  risk_score: number | null;
+  severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL" | null;
+  recommendation: "SAFE" | "CAUTION" | "DO_NOT_INSTALL" | null;
+  llm_requested: boolean | null;
+  llm_available: boolean | null;
+  scanner_version: string | null;
+  findings: ScanFinding[];
+  error: string | null;
 }
 
 export interface ScanReport {
   ok: boolean;
   requires_ack: boolean;
   findings: ScanFinding[];
+  /** The phase the install gate acts on. */
+  gate?: "allow" | "ack" | "block";
+  // The fields below are present when SkillSpector produced the verdict; they
+  // are absent for the MCP-command heuristic in src/skillScan.ts.
+  risk_score?: number;
+  severity?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  recommendation?: "SAFE" | "CAUTION" | "DO_NOT_INSTALL";
+  safe_to_install?: boolean;
+  llm_used?: boolean;
+  scanner_available?: boolean;
+  scanner_source?: SkillspectorReport["source"];
+  scanners?: string[];
+  /** Human note: how to install the scanner, or why a pass was skipped. */
+  note?: string;
 }
 
 export interface InspectResult {

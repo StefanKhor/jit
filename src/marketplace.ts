@@ -32,7 +32,8 @@ import {
 import { logger } from "./logger.js";
 import { loadConfig } from "./config.js";
 import { defaultManager } from "./mcp/client.js";
-import { scanMcpConfig, scanText } from "./skillScan.js";
+import { scanMcpConfig, enforceGate, type SecurityGate } from "./skillScan.js";
+import { scanSkillPayload } from "./skillspector.js";
 import { getItem, initDb, listItems } from "./storage/db.js";
 import type {
   InspectResult,
@@ -41,7 +42,6 @@ import type {
   MarketplaceItem,
   MarketplaceResponse,
   MarketplaceTopResponse,
-  ScanReport,
 } from "./types.js";
 
 const REMOTE_TTL_MS = 300_000;
@@ -426,27 +426,20 @@ function existingSkill(itemId: string) {
   return getItem(initDb(), itemId);
 }
 
-function ackMessage(report: ScanReport): string {
-  const first = report.findings.find((finding) => finding.level !== "low");
-  return (
-    "this entry needs explicit acknowledgement before install" +
-    (first ? `: ${first.detail}` : "")
-  );
-}
+/** The acknowledgement / override a caller can present to the install gate. */
+type Gate = SecurityGate;
 
 async function installMcp(
   item: MarketplaceItem,
   values: Record<string, string>,
-  acknowledge: boolean,
+  gate: Gate,
 ): Promise<Record<string, unknown>> {
   const config = substitute(item.install, values);
   if (!config || typeof config !== "object" || Array.isArray(config)) {
     throw new Error("invalid MCP definition");
   }
   const report = scanMcpConfig(config as Record<string, unknown>);
-  if (report.requires_ack && !acknowledge) {
-    throw new Error(ackMessage(report));
-  }
+  enforceGate(report, gate);
   const manager = defaultManager();
   if (!manager.addServer(item.id, config)) {
     throw new Error("the MCP definition is invalid");
@@ -480,7 +473,7 @@ async function installMcp(
 async function installCliSkill(
   item: MarketplaceItem,
   source: string,
-  acknowledge: boolean,
+  gate: Gate,
 ): Promise<Record<string, unknown>> {
   const found = await materializeSource(source);
   const skill = pickCliSkill(found.skills, item);
@@ -490,10 +483,10 @@ async function installCliSkill(
   if (Buffer.byteLength(body, "utf8") > MAX_SKILL_BYTES) {
     throw new Error("skill is larger than the size limit");
   }
-  const report = scanText(body);
-  if (report.requires_ack && !acknowledge) {
-    throw new Error(ackMessage(report));
-  }
+  // Scan the whole materialized directory, so scripts beside SKILL.md are seen.
+  const report = await scanSkillPayload({ path: skill.path });
+  enforceGate(report, gate);
+  const scanWarnings = report.findings;
 
   const destination = path.join(JIT_SKILLS_DIR, item.id, "SKILL.md");
   const existing = existingSkill(item.id);
@@ -523,7 +516,7 @@ async function installCliSkill(
   mkdirSync(path.dirname(directory), { recursive: true });
   cpSync(skill.path, directory, { recursive: true });
 
-  const warnings = [...report.findings];
+  const warnings = [...scanWarnings];
   // The CLI's hash covers the whole skill. Comparing it with the hash recorded
   // when the source was listed detects a change between review and install.
   const expected = String(item.install.skills_hash || "").trim();
@@ -549,11 +542,11 @@ async function installCliSkill(
 async function installSkill(
   item: MarketplaceItem,
   _values: Record<string, string>,
-  acknowledge: boolean,
+  gate: Gate,
 ): Promise<Record<string, unknown>> {
   const spec = item.install;
   const cliSource = String(spec.skills_source || "").trim();
-  if (cliSource) return installCliSkill(item, cliSource, acknowledge);
+  if (cliSource) return installCliSkill(item, cliSource, gate);
 
   let body = spec.body;
   if (body === undefined || body === null) {
@@ -574,10 +567,8 @@ async function installSkill(
     throw new Error("skill is larger than the size limit");
   }
 
-  const report = scanText(body);
-  if (report.requires_ack && !acknowledge) {
-    throw new Error(ackMessage(report));
-  }
+  const report = await scanSkillPayload({ body });
+  enforceGate(report, gate);
 
   const destination = path.join(JIT_SKILLS_DIR, item.id, "SKILL.md");
   const existing = existingSkill(item.id);
@@ -617,6 +608,8 @@ async function installSkill(
 
 export interface InstallOptions extends SourceHint {
   acknowledge?: boolean;
+  /** Override a hard block from the security scan. */
+  force?: boolean;
 }
 
 export async function install(
@@ -627,9 +620,12 @@ export async function install(
   const item = await resolveItem(itemId, options);
   if (!item) throw new Error("not found in the marketplace");
   const values = inputValues(item, inputs);
-  const acknowledge = Boolean(options.acknowledge);
-  if (item.kind === "mcp") return installMcp(item, values, acknowledge);
-  return installSkill(item, values, acknowledge);
+  const gate: Gate = {
+    acknowledge: Boolean(options.acknowledge),
+    force: Boolean(options.force),
+  };
+  if (item.kind === "mcp") return installMcp(item, values, gate);
+  return installSkill(item, values, gate);
 }
 
 // Fetch and scan an entry without installing it, so the dashboard can warn
@@ -664,10 +660,12 @@ export async function inspect(
     report: {
       ok: false,
       requires_ack: true,
+      gate: "ack",
       findings: [{ level: "medium", rule: "fetch-failed", detail }],
     },
   });
   let body: string | undefined;
+  let target: string | undefined;
   if (typeof spec.body === "string") {
     body = spec.body;
   } else if (cliSource) {
@@ -676,6 +674,7 @@ export async function inspect(
       const skill = pickCliSkill(found.skills, item);
       if (!skill) throw new Error(`${cliSource} no longer provides '${item.id}'`);
       body = readFileSync(path.join(skill.path, "SKILL.md"), "utf8");
+      target = skill.path;
     } catch (error) {
       return failed(error instanceof Error ? error.message : String(error));
     }
@@ -691,9 +690,10 @@ export async function inspect(
     kind: "skill",
     checksum_required: checksumRequired,
     checksum_present: checksumPresent,
-    report: body !== undefined
-      ? scanText(body)
-      : { ok: true, requires_ack: false, findings: [] },
+    report:
+      body !== undefined
+        ? await scanSkillPayload({ body, path: target })
+        : { ok: true, requires_ack: false, findings: [] },
   };
 }
 

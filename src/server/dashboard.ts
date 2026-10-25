@@ -64,6 +64,7 @@ import {
   transferSkills,
 } from "../transfer.js";
 import type { IndexItem, ItemKind } from "../types.js";
+import { scanSkillPayload } from "../skillspector.js";
 
 const START_TIME = Date.now();
 
@@ -110,6 +111,28 @@ function boolValue(value: unknown, fallback: boolean): boolean {
     if (["0", "false", "no", "off", ""].includes(normalized)) return false;
   }
   return fallback;
+}
+
+/** The acknowledgement / override a caller presents to the security gate. */
+function gateFrom(body: Record<string, unknown>) {
+  return {
+    acknowledge: boolValue(body.acknowledge, false),
+    force: boolValue(body.force, false),
+  };
+}
+
+/**
+ * Read a JSON body when the caller sent one. Dashboard actions that take no
+ * input post no body at all, so an absent or empty body reads as `{}` rather
+ * than an error.
+ */
+async function readJsonOptional(c: Context): Promise<Record<string, unknown>> {
+  try {
+    return await readJson(c);
+  } catch (error) {
+    if (error instanceof HttpError && error.status === 400) return {};
+    throw error;
+  }
 }
 
 async function readJson(c: Context): Promise<Record<string, unknown>> {
@@ -422,7 +445,7 @@ export function createApp(): Hono {
     const rawPath = String(body.path || "").trim();
     if (!rawPath) throw new HttpError(400, "path required");
     try {
-      return c.json(await indexSkillsInPlace(rawPath));
+      return c.json(await indexSkillsInPlace(rawPath, gateFrom(body)));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new HttpError(message.includes("path not found") ? 404 : 400, message);
@@ -430,7 +453,8 @@ export function createApp(): Hono {
   });
 
   app.post("/api/skills/scan", async (c) => {
-    return c.json(await indexSkillsInPlace());
+    const body = await readJsonOptional(c);
+    return c.json(await indexSkillsInPlace(undefined, gateFrom(body)));
   });
 
   app.post("/api/skills/transfer", async (c) => {
@@ -439,10 +463,24 @@ export function createApp(): Hono {
     const copy = boolValue(body.copy, true);
     const overwrite = boolValue(body.overwrite, false);
     try {
-      return c.json(await transferSkills(rawPath, copy, overwrite));
+      return c.json(
+        await transferSkills(rawPath, copy, overwrite, gateFrom(body)),
+      );
     } catch (error) {
       throw new HttpError(400, error instanceof Error ? error.message : String(error));
     }
+  });
+
+  // SkillSpector, on demand, for a skill already on disk. The install gate runs
+  // it automatically; this is how the dashboard re-checks something and shows
+  // the full verdict without touching the index.
+  app.post("/api/skills/:id/security", async (c) => {
+    const id = c.req.param("id");
+    const item = getItem(initDb(), id);
+    if (!item) throw new HttpError(404, "not found");
+    const target = item.path ? String(item.path) : "";
+    if (!target) throw new HttpError(400, "this entry has no file to scan");
+    return c.json({ id, report: await scanSkillPayload({ path: target }) });
   });
 
   app.post("/api/skills/export", async (c) => {
@@ -557,10 +595,12 @@ export function createApp(): Hono {
         ? (body.inputs as Record<string, unknown>)
         : {};
     const acknowledge = boolValue(body.acknowledge, false);
+    const force = boolValue(body.force, false);
     try {
       return c.json(
         await installMarketplace(id, inputs, {
           acknowledge,
+          force,
           ...sourceHint(body),
         }),
       );

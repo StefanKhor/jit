@@ -25,6 +25,8 @@ import {
 } from "./indexer.js";
 import { logger } from "./logger.js";
 import { defaultManager } from "./mcp/client.js";
+import { enforceGate, type SecurityGate } from "./skillScan.js";
+import { scanSkillPayload } from "./skillspector.js";
 import { initDb } from "./storage/db.js";
 import type {
   ExportMcpResult,
@@ -79,6 +81,7 @@ async function indexParsed(
 export async function copySkillsToJit(
   rawPath?: string,
   overwrite = false,
+  gate: SecurityGate = {},
 ): Promise<TransferResult> {
   const files = discover(rawPath);
   const copied: string[] = [];
@@ -105,6 +108,8 @@ export async function copySkillsToJit(
       }
 
       const text = readFileSync(file, "utf8");
+      // SkillSpector decides whether this leaves the source machine at all.
+      enforceGate(await scanSkillPayload({ path: file }), gate);
       // Validate against the destination path before replacing an existing
       // copy. This keeps the previous JIT-owned skill intact on bad input.
       const parsed = parseSkillText(text, destination);
@@ -135,12 +140,15 @@ export async function copySkillsToJit(
 
 export async function indexSkillsInPlace(
   rawPath?: string,
+  gate: SecurityGate = {},
 ): Promise<TransferResult> {
   const files = discover(rawPath);
   const items: IndexItem[] = [];
   const errors: string[] = [];
   for (const file of files) {
     try {
+      // Every skill that lands on JIT is scanned by SkillSpector first.
+      enforceGate(await scanSkillPayload({ path: file }), gate);
       items.push(parseSkillFile(file));
     } catch (error) {
       errors.push(
@@ -166,10 +174,11 @@ export async function transferSkills(
   rawPath?: string,
   copy = true,
   overwrite = false,
+  gate: SecurityGate = {},
 ): Promise<TransferResult> {
   return copy
-    ? copySkillsToJit(rawPath, overwrite)
-    : indexSkillsInPlace(rawPath);
+    ? copySkillsToJit(rawPath, overwrite, gate)
+    : indexSkillsInPlace(rawPath, gate);
 }
 
 export async function exportSkills(

@@ -6,10 +6,15 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { FAKE_SKILLSPECTOR } from "./helpers.js";
+
 // Isolate the index and force the offline path: marketplace installs index their
-// entries, and we do not want a model download or any real network here.
+// entries, and we do not want a model download or any real network here. The
+// scanner is NVIDIA SkillSpector, stood in for by a script that speaks the same
+// JSON contract.
 process.env.JIT_HOME = mkdtempSync(path.join(tmpdir(), "jit-market-"));
 process.env.JIT_DISABLE_EMBEDDINGS = "1";
+process.env.JIT_SKILLSPECTOR = FAKE_SKILLSPECTOR;
 
 const { catalog, inspect, install } = await import("../src/marketplace.js");
 const { saveConfig } = await import("../src/config.js");
@@ -177,23 +182,27 @@ test("a checksum-pinned remote body installs", async () => {
   assert.equal(result.installed, true);
 });
 
-test("the scanner flags prompt injection and gates the install", async () => {
+test("a hostile skill is refused by SkillSpector and installs only under force", async () => {
   const result = await inspect("evil-inline");
-  assert.equal(result.report.requires_ack, true);
+  assert.equal(result.report.gate, "block");
+  assert.equal(result.report.recommendation, "DO_NOT_INSTALL");
   assert.ok(
-    result.report.findings.some((finding) =>
-      /override|system-prompt|inject/i.test(finding.rule),
-    ),
-    `expected an injection finding, got ${JSON.stringify(
+    result.report.findings.some((finding) => finding.rule === "E2"),
+    `expected a SkillSpector finding, got ${JSON.stringify(
       result.report.findings.map((finding) => finding.rule),
     )}`,
   );
 
-  await assert.rejects(install("evil-inline"), /acknowledgement/i);
+  // An acknowledgement is not enough for a hard block.
+  await assert.rejects(install("evil-inline"), /blocked by the security scan/i);
+  await assert.rejects(
+    install("evil-inline", {}, { acknowledge: true }),
+    /blocked by the security scan/i,
+  );
 
-  const acked = await install("evil-inline", {}, { acknowledge: true });
-  assert.equal(acked.ok, true);
-  assert.ok((acked.warnings as unknown[]).length >= 1);
+  const forced = await install("evil-inline", {}, { force: true });
+  assert.equal(forced.ok, true);
+  assert.ok((forced.warnings as unknown[]).length >= 1);
 });
 
 test("the config API validates catalog URLs against the fetch policy", async () => {
