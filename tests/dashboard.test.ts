@@ -13,7 +13,9 @@ delete process.env.NEBIUS_API_KEY;
 delete process.env.JIT_MARKETPLACE_URL;
 delete process.env.JIT_CONFIDENCE_THRESHOLD;
 
-const { createApp } = await import("../src/server/dashboard.js");
+const { createApp, breakEvenSize } = await import(
+  "../src/server/dashboard.js"
+);
 const { saveConfig } = await import("../src/config.js");
 
 const app = createApp();
@@ -68,6 +70,36 @@ test("health and status report from the live index", async () => {
   const statusBody = (await status.json()) as Record<string, number>;
   for (const key of ["indexed", "skills", "tools", "enabled"]) {
     assert.equal(typeof statusBody[key], "number", key);
+  }
+});
+
+// The reference 6-entry index: schema 636, average body 3,267, catalog 79.
+// Sanity: at one entry static is 3,346 and JIT is 3,903, so JIT cannot win
+// until the index is two entries deep.
+test("break-even is the first size where JIT beats loading everything", () => {
+  assert.equal(breakEvenSize(636, 3267, 79), 2);
+  // A flat index of small skills where the catalog dominates: JIT needs volume.
+  assert.equal(breakEvenSize(636, 27, 43), 10);
+  // An empty index has no crossing point.
+  assert.equal(breakEvenSize(636, 0, 0), 0);
+
+  // The invariant, whatever the inputs: at the break-even size a JIT call is
+  // strictly cheaper than static, and one entry below it is not.
+  const cases: Array<[number, number, number]> = [
+    [636, 3267, 79],
+    [636, 27, 43],
+    [617, 120, 30],
+    [900, 5000, 120],
+  ];
+  for (const [schema, body, catalog] of cases) {
+    const size = breakEvenSize(schema, body, catalog);
+    const jit = schema + body;
+    const perEntry = body + catalog;
+    assert.ok(size * perEntry > jit, `JIT should win at size ${size}`);
+    assert.ok(
+      (size - 1) * perEntry <= jit,
+      `static should not lose below size ${size}`,
+    );
   }
 });
 

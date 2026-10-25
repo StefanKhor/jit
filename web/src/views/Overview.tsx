@@ -108,7 +108,7 @@ function Figures({ stats }: { stats: Stats }) {
             tool schema is a fixed cost, so at {fmt(total)}{" "}
             {total === 1 ? "entry" : "entries"} loading everything statically (
             <span className="num text-ink-2">{fmt(tokens?.static || 0)}</span> tok) is
-            cheaper per task. JIT wins past {fmt(breakEven)} entries.
+            cheaper per task. JIT wins at {fmt(breakEven)} entries or more.
           </span>
         </p>
       ) : null}

@@ -149,6 +149,23 @@ async function readJson(c: Context): Promise<Record<string, unknown>> {
   return body as Record<string, unknown>;
 }
 
+// The smallest index size at which one JIT call costs less than loading the
+// whole index statically. A JIT call pays its fixed tool schema plus the one
+// entry body it returns; loading everything pays every body and every catalog
+// entry. The two meet where
+//   schema + body == size * (body + catalog)
+// so the first size that wins is one past that crossing. Sizes below the
+// result favour loading everything, sizes at or above it favour JIT.
+export function breakEvenSize(
+  schemaTokens: number,
+  averageBody: number,
+  averageCatalog: number,
+): number {
+  const perEntry = averageBody + averageCatalog;
+  if (perEntry <= 0) return 0;
+  return Math.floor((schemaTokens + averageBody) / perEntry) + 1;
+}
+
 let dashboardCache: string | null = null;
 
 function dashboardHtml(): string {
@@ -234,10 +251,15 @@ export function createApp(): Hono {
       ? Number(((1 - taskTokens / staticTokens) * 100).toFixed(1))
       : 0;
     // Per-task cost is roughly startup + one average entry; static cost grows
-    // with the index. Break-even is where they cross.
-    const breakEven = stats.average_body
-      ? Math.ceil(schemaTokens / stats.average_body)
+    // with the index. Break-even is the size where those two cross.
+    const averageCatalog = stats.total
+      ? Math.floor(stats.catalog_tokens / stats.total)
       : 0;
+    const breakEven = breakEvenSize(
+      schemaTokens,
+      stats.average_body,
+      averageCatalog,
+    );
     const retrieval = retrievalStats(initDb(), 1);
     return c.json({
       ...stats,
