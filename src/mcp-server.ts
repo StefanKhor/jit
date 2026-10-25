@@ -33,12 +33,13 @@ import { enforceGate } from "./skillScan.js";
 import { scanSkillPayload } from "./skillspector.js";
 import type { IndexItem, ScanReport } from "./types.js";
 
-const INSTRUCTIONS =
-  "JIT is a just-in-time index of agent skills. Call JIT_FIND before a " +
-  "multi-step task that may have a specialized workflow, with a concrete " +
-  "intent; skip it for trivial tasks. It returns one skill body at a time, so " +
-  "you carry only what the task needs. JIT_ADD installs a skill and scans it " +
-  "with NVIDIA SkillSpector first: a skill that fails the scan is refused.";
+const INSTRUCTIONS = `JIT is a just-in-time skill index: it loads the one skill you need, when you need it, instead of keeping every skill in context.
+
+Before starting any multi-step or unfamiliar task, call JIT_FIND first. Phrase the intent as action + object + outcome, e.g. "draft and schedule a product launch thread". Skip it for quick actions you can do directly — a single edit, a lookup, a short answer.
+
+If it returns {"found": false} with near_misses, retry once with a sharper intent. If it still misses, proceed without JIT — a miss is a normal outcome, not an error.
+
+JIT_ADD installs a new skill into the index. It is scanned by NVIDIA SkillSpector first: a skill that fails the scan is dangerous and refused.`;
 
 function textResult(payload: unknown, isError = false) {
   return {
@@ -80,7 +81,7 @@ export function registerFind(server: McpServer): void {
         "Load the one skill that fits a concrete multi-step task, so you " +
         "carry only that body instead of every skill. Give a specific intent: " +
         "action, object, outcome. Skip it for trivial tasks. Returns the skill " +
-        'body (or a tool descriptor), or {"found": false} plus near_misses ' +
+        'body, or {"found": false} plus near_misses ' +
         "when nothing clears the threshold; retry once with a sharper intent " +
         "if one fits.",
       inputSchema: {

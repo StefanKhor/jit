@@ -159,15 +159,15 @@ documented.
 MCP is pull-based: the server cannot push a skill into the model's context.
 JIT stays connected for the session, and the agent decides when to call it.
 The tool descriptions tell the agent to call `JIT_FIND` for multi-step tasks
-and skip it for trivial ones. A one-line client instruction removes the
+and skip it for trivial ones. A short client instruction removes the
 remaining ambiguity. Add this to your system prompt or `AGENTS.md`:
 
 ```text
-Before a multi-step task that may have a specialized workflow, call
-JIT_FIND with a concrete intent: the action, the object, and the outcome.
-Skip it for trivial tasks. If it returns {"found": false} with a near_misses
-list, none cleared the threshold; retry once with a sharper intent if one
-fits, otherwise proceed normally.
+Before starting any multi-step or unfamiliar task, call JIT_FIND first.
+Phrase the intent as action + object + outcome, e.g. "draft and schedule a
+product launch thread". Skip it for quick actions you can do directly — a
+single edit, a lookup, a short answer. On {"found": false} with near_misses,
+retry once with a sharper intent, then proceed normally.
 ```
 
 Do not call JIT on every message. A needless retrieval adds latency and can
