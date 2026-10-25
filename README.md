@@ -37,14 +37,14 @@ context cost of JIT's own MCP tool schemas — is measured from the live
 
 ## Quick start
 
-Requires **Node.js 24** and npm 11.
+Requires **Node.js 24** (runtime) and **Bun** (package manager).
 
 ```bash
 git clone https://github.com/StefanKhor/jit.git
 cd jit
-npm ci
-npm run build
-npm start
+bun install
+bun run build
+bun run start
 ```
 
 Open <http://localhost:3000>. The first-run panel lets you import skills you
@@ -53,7 +53,7 @@ already use. Nothing is read from your client configs automatically.
 For development:
 
 ```bash
-npm run dev
+bun run dev
 # dashboard: http://127.0.0.1:5173
 # API:       http://127.0.0.1:3000
 ```
@@ -91,7 +91,7 @@ For OpenCode:
 }
 ```
 
-If you ran `npm link` in the repo, `"command": "jit"` and
+If you ran `bun link` in the repo, `"command": "jit"` and
 `"args": ["serve"]` also work.
 
 Restart the client. The agent now sees two tools:

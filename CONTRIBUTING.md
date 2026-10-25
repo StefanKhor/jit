@@ -4,39 +4,39 @@ Thanks for helping improve JIT.
 
 ## Development setup
 
-Requires Node.js 24 and npm 11.
+Requires Node.js 24 (runtime) and Bun (package manager).
 
 ```bash
 git clone https://github.com/StefanKhor/jit.git
 cd jit
-npm ci
-npm run dev
+bun install
+bun run dev
 ```
 
-`npm run dev` starts the API on `127.0.0.1:3000` and Vite on
+`bun run dev` starts the API on `127.0.0.1:3000` and Vite on
 `127.0.0.1:5173`. The Vite server proxies `/api` to the API. Use
-`JIT_DEV_SERVER=http://127.0.0.1:3001 npm run dev` if you move the API port.
+`JIT_DEV_SERVER=http://127.0.0.1:3001 bun run dev` if you move the API port.
 
 For a production build:
 
 ```bash
-npm run check
-npm start
+bun run check
+bun run start
 ```
 
 ## Checks
 
 ```bash
-npm run typecheck
-npm run build
+bun run typecheck
+bun run build
 ```
 
 Verify behavior changes manually against the dashboard and the MCP server:
 
 ```bash
-npm run dev
+bun run dev
 # in another terminal
-npm run build:server && node dist/cli.js serve
+bun run build:server && node dist/cli.js serve
 ```
 
 Useful smoke checks:
@@ -58,5 +58,5 @@ Useful smoke checks:
 
 ## Reporting issues
 
-Use GitHub Issues. Include your Node version, OS, the exact command, and the
-expected vs. actual behavior. Redact API keys and index contents.
+Use GitHub Issues. Include your Node and Bun versions, OS, the exact command,
+and the expected vs. actual behavior. Redact API keys and index contents.

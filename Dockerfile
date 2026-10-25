@@ -1,18 +1,19 @@
 FROM node:24-bookworm-slim AS build
 
-ENV npm_config_update_notifier=false
+# Bun is the package manager; Node remains the runtime.
+RUN npm install -g bun@1.3.14
 
 WORKDIR /app
 
-COPY package.json package-lock.json ./
-RUN npm ci
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
 
 COPY tsconfig.json ./
 COPY src ./src
 COPY web ./web
 COPY README.md LICENSE ./
 
-RUN npm run build
+RUN bun run build
 
 # Download the local embedding model into the image so the first dashboard
 # request does not depend on the network. The model cache is separate from the
@@ -28,7 +29,8 @@ RUN mkdir -p /app/models \
            -e "import('./dist/embedding.js').then((m) => m.warmupEmbeddingModel())"; \
        fi
 
-RUN npm prune --omit=dev
+# Keep only production dependencies in the shipped image.
+RUN rm -rf node_modules && bun install --production --frozen-lockfile
 
 FROM node:24-bookworm-slim AS runtime
 
@@ -49,7 +51,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && mkdir -p /data \
     && chown jit:jit /data
 
-COPY --from=build --chown=jit:jit /app/package.json /app/package-lock.json ./
+COPY --from=build --chown=jit:jit /app/package.json /app/bun.lock ./
 COPY --from=build --chown=jit:jit /app/node_modules ./node_modules
 COPY --from=build --chown=jit:jit /app/dist ./dist
 COPY --from=build --chown=jit:jit /app/static ./static
