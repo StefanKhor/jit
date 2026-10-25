@@ -25,8 +25,9 @@ JIT stays quiet until it is called. MCP is pull-based, so JIT is built to be
 *invoked*, not to push: a small tool surface, sharp descriptions, and no
 background work in the agent's loop.
 
-During retrieval, nothing leaves the machine unless you enable an optional
-remote OpenAI-compatible reranker.
+Local embeddings are the default. If you explicitly choose a cloud embedding
+provider or remote reranker, the corresponding text is sent to that configured
+endpoint and may incur provider costs.
 
 Recall is the part of a retriever that is easiest to claim and hardest to prove,
 so JIT ships a harness for it: `npm run eval` measures recall@1, recall@3, MRR,
@@ -222,7 +223,7 @@ A single-file React SPA served by the Node process.
   JIT-managed servers, add a server manually.
 - **Search** — live retrieval with the effective score, cosine, rerank, lexical
   and the threshold, plus a confidence slider and the retrieval log.
-- **Settings** — optional OpenAI-compatible reranker, confidence threshold, dashboard auth,
+- **Settings** — local/cloud embeddings, optional reranker, confidence threshold, dashboard auth,
   import/export, clear.
 
 The first-run panel is skippable. The dashboard listens on `127.0.0.1` by
@@ -253,8 +254,8 @@ Imports are explicit, read-only on the source side, and shown before they run.
 
 ## How retrieval works
 
-1. **Embeddings** — `Xenova/bge-small-en-v1.5` runs locally through
-   Transformers.js (384 dimensions).
+1. **Embeddings** — local `Xenova/bge-small-en-v1.5` through Transformers.js
+   (384 dimensions) by default, or a configured OpenAI-compatible embeddings API.
 2. **Vector search** — cosine similarity over embeddings stored in SQLite.
 3. **Keyword search** — BM25 over names, descriptions, aliases, and bodies.
 4. **Fusion** — Reciprocal Rank Fusion merges both rankings.
@@ -272,14 +273,15 @@ The pipeline is deliberately single-pass. A miss costs one search and the agent
 continues; it never stalls on retrieval. There is no chunking.
 
 Embeddings are mandatory for retrieval. Keyword scores contribute to fusion,
-but JIT never returns a keyword-only match. If the model or stored vectors are
-unavailable, Search and `JIT_FIND` return no match and explain why. A failed
-model load is remembered for five minutes instead of being retried on every query.
+but JIT never returns a keyword-only match. If the model/provider or stored
+vectors are unavailable, Search and `JIT_FIND` return no match and explain why.
+Changing provider, model, endpoint, or dimensions invalidates the existing
+vectors; rebuild them from Settings before retrieving again.
 
 ### Measuring retrieval
 
 ```bash
-npm run eval                                     # fixtures in eval/, no network needed
+npm run eval                                     # fixtures in eval/; local model may download on first run
 npm run eval -- --home ~/.jit --queries mine.jsonl  # your index + your labels
 ```
 
@@ -306,9 +308,14 @@ the file and are never written back.
 | `JIT_PORT` | Dashboard port | `3000` |
 | `JIT_CONFIDENCE_THRESHOLD` | Minimum confidence to return a match (0–1) | `0.60` |
 | `JIT_TOP_K` | Candidates retrieved before fusion | `20` |
-| `JIT_DISABLE_EMBEDDINGS` | Disable model loading; retrieval returns an unavailable warning | unset |
-| `JIT_EMBEDDING_MODEL` | Transformers.js model | `Xenova/bge-small-en-v1.5` |
-| `JIT_EMBEDDING_DIM` | Expected vector size | `384` |
+| `JIT_DISABLE_EMBEDDINGS` | Disable embedding requests; retrieval returns an unavailable warning | unset |
+| `JIT_EMBEDDING_PROVIDER` | `local` or `openai-compatible` | `local` |
+| `JIT_EMBEDDING_MODEL` | Local Transformers.js model | `Xenova/bge-small-en-v1.5` |
+| `JIT_EMBEDDING_DIM` | Local model vector size | `384` |
+| `JIT_EMBEDDING_API_KEY` | API key for remote embeddings (not needed for localhost) | unset |
+| `JIT_EMBEDDING_API_BASE` | OpenAI-compatible embeddings API base URL | unset |
+| `JIT_EMBEDDING_API_MODEL` | Cloud/local API model identifier | unset |
+| `JIT_EMBEDDING_API_DIM` | API model output dimensions | `1536` |
 | `JIT_MARKETPLACE_URL` | Catalog URLs, repositories, or skills.sh links, comma-separated | unset |
 | `JIT_GITHUB_TOKEN` | Token for private repositories, passed to the skills CLI | unset |
 | `JIT_SKILLS_CLI` | Command that resolves repository sources | `npx --yes skills@1.7.4` |
@@ -331,12 +338,14 @@ or pass them to Docker; the dashboard writes persistent settings to
 
 ### Offline and air-gapped
 
-On first use JIT downloads the embedding model once into `JIT_MODEL_CACHE`
-(about 130 MB); after that, retrieval is fully local and needs no network. To
-run without network access, copy a populated `JIT_MODEL_CACHE` to the machine.
-If embeddings are unavailable, JIT returns no match rather than changing
-retrieval semantics. The only outbound calls JIT makes are the model download
-and, if configured, the OpenAI-compatible reranker. Network access, if any, is your own: JIT reads no network
+With local embeddings, JIT downloads the model once into `JIT_MODEL_CACHE`
+(about 130 MB); after that, retrieval is local and needs no network. To run
+air-gapped, copy a populated model cache and use the local provider. Cloud
+embeddings send indexed text and search queries to the configured endpoint;
+configure that only when you accept the data handling and possible costs. If
+embeddings are unavailable, JIT returns no match rather than changing retrieval
+semantics. JIT does not choose or contact a cloud provider unless you configure
+one.
 configuration of its own and leaves that to the environment you run it in.
 
 Auth is opt-in. When `JIT_API_KEY` is set (or a key is saved in Settings),

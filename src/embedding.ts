@@ -1,31 +1,32 @@
+import OpenAI from "openai";
 import {
   env,
   pipeline,
   type FeatureExtractionPipeline,
 } from "@huggingface/transformers";
 
-import { EMBEDDING_DIM, EMBEDDING_MODEL, MODEL_CACHE_DIR } from "./config.js";
+import { getEmbeddingSettings, MODEL_CACHE_DIR } from "./config.js";
 import { logger } from "./logger.js";
 
 env.cacheDir = MODEL_CACHE_DIR;
 env.allowLocalModels = true;
 env.allowRemoteModels = true;
 
-// JIT_DISABLE_EMBEDDINGS=1 skips model loading. Retrieval requires embeddings,
-// so queries return an explicit unavailable warning instead of a lexical result.
 const EMBEDDINGS_DISABLED = /^(1|true|yes|on)$/i.test(
   process.env.JIT_DISABLE_EMBEDDINGS || "",
 );
 
 let extractorPromise: Promise<FeatureExtractionPipeline> | null = null;
-// When the model cannot load (offline, missing runtime, first-run download
-// blocked) every call would otherwise pay the full load timeout again. Remember
-// the failure and refuse quickly for a cooldown so strict retrieval fails fast
-// instead of hanging on every query.
+let extractorModel = "";
 let lastFailureAt = 0;
 const RETRY_AFTER_MS = 300_000;
 
-function getExtractor(): Promise<FeatureExtractionPipeline> {
+function getExtractor(model: string): Promise<FeatureExtractionPipeline> {
+  if (extractorModel !== model) {
+    extractorPromise = null;
+    extractorModel = model;
+    lastFailureAt = 0;
+  }
   if (EMBEDDINGS_DISABLED) {
     return Promise.reject(
       new Error("embeddings are disabled by JIT_DISABLE_EMBEDDINGS"),
@@ -34,23 +35,23 @@ function getExtractor(): Promise<FeatureExtractionPipeline> {
   if (extractorPromise) return extractorPromise;
   if (lastFailureAt && Date.now() - lastFailureAt < RETRY_AFTER_MS) {
     return Promise.reject(
-      new Error(`embedding model ${EMBEDDING_MODEL} is unavailable (last load failed)`),
+      new Error(`embedding model ${model} is unavailable (last load failed)`),
     );
   }
-  logger.info("loading embedding model %s", EMBEDDING_MODEL);
-  extractorPromise = pipeline("feature-extraction", EMBEDDING_MODEL, {
+  logger.info("loading local embedding model %s", model);
+  extractorPromise = pipeline("feature-extraction", model, {
     dtype: "fp32",
   }).catch((error: unknown) => {
     extractorPromise = null;
     lastFailureAt = Date.now();
     logger.warn(
-      "embedding model %s could not be loaded; remote-backed retrieval is unavailable for %ds: %s",
-      EMBEDDING_MODEL,
+      "local embedding model %s could not be loaded; retrieval is unavailable for %ds: %s",
+      model,
       Math.round(RETRY_AFTER_MS / 1000),
       error instanceof Error ? error.message : String(error),
     );
     throw new Error(
-      `could not load embedding model ${EMBEDDING_MODEL}: ${
+      `could not load local embedding model ${model}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -58,42 +59,104 @@ function getExtractor(): Promise<FeatureExtractionPipeline> {
   return extractorPromise;
 }
 
-// Allow a later attempt (for example after the model finishes downloading)
-// without restarting the process.
 export function resetEmbeddingModel(): void {
   extractorPromise = null;
+  extractorModel = "";
   lastFailureAt = 0;
 }
 
-export async function embedTexts(texts: string[]): Promise<Float32Array[]> {
-  if (texts.length === 0) return [];
-  const extractor = await getExtractor();
-  const output = await extractor(texts, {
-    pooling: "cls",
-    normalize: true,
-  });
-  const data = output.data as Float32Array;
-  const dims = output.dims as number[];
-  const dim = dims[dims.length - 1] || 0;
-  if (!dim || data.length % dim !== 0) {
-    throw new Error("embedding model returned an unexpected tensor shape");
-  }
-  if (dim !== EMBEDDING_DIM) {
+function normalizedVector(values: ArrayLike<number>, dimensions: number): Float32Array {
+  if (values.length !== dimensions) {
     throw new Error(
-      `embedding model returned ${dim} dimensions; expected ${EMBEDDING_DIM}`,
+      `embedding provider returned ${values.length} dimensions; expected ${dimensions}`,
     );
   }
-  const count = data.length / dim;
+  const vector = Float32Array.from(values);
+  let normSquared = 0;
+  for (const value of vector) {
+    if (!Number.isFinite(value)) {
+      throw new Error("embedding provider returned a non-finite value");
+    }
+    normSquared += value * value;
+  }
+  const norm = Math.sqrt(normSquared);
+  if (!norm) throw new Error("embedding provider returned a zero vector");
+  for (let index = 0; index < vector.length; index += 1) {
+    vector[index] = (vector[index] || 0) / norm;
+  }
+  return vector;
+}
+
+async function embedLocally(texts: string[]): Promise<Float32Array[]> {
+  const settings = getEmbeddingSettings();
+  const extractor = await getExtractor(settings.model);
+  const output = await extractor(texts, { pooling: "cls", normalize: true });
+  const data = output.data as Float32Array;
+  const dims = output.dims as number[];
+  const dimensions = dims[dims.length - 1] || 0;
+  if (!dimensions || data.length !== texts.length * dimensions) {
+    throw new Error("local embedding model returned an unexpected tensor shape");
+  }
+  if (dimensions !== settings.dimensions) {
+    throw new Error(
+      `local embedding model returned ${dimensions} dimensions; expected ${settings.dimensions}`,
+    );
+  }
   const vectors: Float32Array[] = [];
-  for (let index = 0; index < count; index += 1) {
-    vectors.push(data.slice(index * dim, (index + 1) * dim));
+  for (let index = 0; index < texts.length; index += 1) {
+    const start = index * dimensions;
+    vectors.push(normalizedVector(data.subarray(start, start + dimensions), dimensions));
   }
   return vectors;
 }
 
+async function embedWithApi(texts: string[]): Promise<Float32Array[]> {
+  if (EMBEDDINGS_DISABLED) {
+    throw new Error("embeddings are disabled by JIT_DISABLE_EMBEDDINGS");
+  }
+  const settings = getEmbeddingSettings();
+  if (!settings.apiBase || !settings.model) {
+    throw new Error("configure an embeddings API base and model in Settings");
+  }
+  let localEndpoint = false;
+  try {
+    const hostname = new URL(settings.apiBase).hostname.toLowerCase();
+    localEndpoint = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(hostname);
+  } catch {
+    throw new Error("embeddings API base is not a valid URL");
+  }
+  if (!settings.apiKey && !localEndpoint) {
+    throw new Error("a remote embeddings endpoint requires an API key");
+  }
+
+  const client = new OpenAI({
+    baseURL: settings.apiBase,
+    apiKey: settings.apiKey || "local-no-key",
+    timeout: 45_000,
+  });
+  const response = await client.embeddings.create({
+    model: settings.model,
+    input: texts,
+    dimensions: settings.dimensions,
+  });
+  if (response.data.length !== texts.length) {
+    throw new Error("embeddings API returned an unexpected number of vectors");
+  }
+  const ordered = [...response.data].sort((a, b) => a.index - b.index);
+  return ordered.map((entry) => normalizedVector(entry.embedding, settings.dimensions));
+}
+
+export async function embedTexts(texts: string[]): Promise<Float32Array[]> {
+  if (texts.length === 0) return [];
+  const settings = getEmbeddingSettings();
+  return settings.provider === "openai-compatible"
+    ? embedWithApi(texts)
+    : embedLocally(texts);
+}
+
 export async function embedQuery(text: string): Promise<Float32Array> {
   const [vector] = await embedTexts([text]);
-  if (!vector) throw new Error("embedding model returned no vector");
+  if (!vector) throw new Error("embedding provider returned no vector");
   return vector;
 }
 

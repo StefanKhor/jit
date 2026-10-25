@@ -2,7 +2,13 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import { EMBEDDING_DIM, INDEX_DIR, META_DB } from "../config.js";
+import {
+  embeddingSignature,
+  EMBEDDING_SIGNATURE_KEY,
+  getEmbeddingSettings,
+  INDEX_DIR,
+  META_DB,
+} from "../config.js";
 import type {
   Counts,
   IndexItem,
@@ -277,6 +283,8 @@ export function getExisting(
 }
 
 export function listItems(db: DatabaseSync): ListItem[] {
+  const dimensionBytes = getEmbeddingSettings().dimensions * 4;
+  const embeddingsCurrent = getMeta(db, EMBEDDING_SIGNATURE_KEY) === embeddingSignature();
   const rows = db
     .prepare(
       `SELECT id, name, description, categories, path, aliases, kind, enabled,
@@ -287,7 +295,7 @@ export function listItems(db: DatabaseSync): ListItem[] {
          FROM skills
         ORDER BY kind, name`,
     )
-    .all(EMBEDDING_DIM * 4) as Row[];
+    .all(dimensionBytes) as Row[];
   return rows.map((row) => ({
     id: String(row.id),
     name: String(row.name || row.id),
@@ -299,7 +307,7 @@ export function listItems(db: DatabaseSync): ListItem[] {
     enabled: row.enabled !== 0,
     tokens: Number(row.tokens || 0),
     catalog_tokens: Number(row.catalog_tokens || 0),
-    has_embedding: row.has_embedding === 1,
+    has_embedding: embeddingsCurrent && row.has_embedding === 1,
   }));
 }
 
@@ -320,6 +328,8 @@ export function countItems(db: DatabaseSync): Counts {
 }
 
 export function getStats(db: DatabaseSync): Stats {
+  const dimensionBytes = getEmbeddingSettings().dimensions * 4;
+  const embeddingsCurrent = getMeta(db, EMBEDDING_SIGNATURE_KEY) === embeddingSignature();
   const row = db
     .prepare(
       `SELECT COUNT(*) AS total,
@@ -335,7 +345,7 @@ export function getStats(db: DatabaseSync): Stats {
               COALESCE(MAX((length(COALESCE(body, '')) + 3) / 4), 0) AS largest
          FROM skills`,
     )
-    .get(EMBEDDING_DIM * 4, EMBEDDING_DIM * 4) as Row;
+    .get(dimensionBytes, dimensionBytes) as Row;
 
   const heaviestRows = db
     .prepare(
@@ -374,9 +384,9 @@ export function getStats(db: DatabaseSync): Stats {
       .map(([name, count]) => ({ name, count })),
     embedding_coverage: {
       skills_total: Number(row.skills || 0),
-      skills_embedded: Number(row.skills_embedded || 0),
+      skills_embedded: embeddingsCurrent ? Number(row.skills_embedded || 0) : 0,
       tools_total: Number(row.tools || 0),
-      tools_embedded: Number(row.tools_embedded || 0),
+      tools_embedded: embeddingsCurrent ? Number(row.tools_embedded || 0) : 0,
     },
   };
 }

@@ -91,6 +91,13 @@ export interface Counts {
 }
 
 export interface Config {
+  embedding_provider: "local" | "openai-compatible";
+  embedding_local_model: string;
+  embedding_local_dim: number;
+  embedding_api_key: string;
+  embedding_api_base: string;
+  embedding_api_model: string;
+  embedding_api_dim: number;
   rerank_api_key: string;
   rerank_api_base: string;
   rerank_model: string;
@@ -107,6 +114,12 @@ export interface PublicConfig extends Config {
   auth_enabled: boolean;
   index_dir: string;
   embedding_model: string;
+  embedding_dim: number;
+  embedding_provider_env: boolean;
+  embedding_key_env: boolean;
+  embedding_base_env: boolean;
+  embedding_model_env: boolean;
+  embedding_dim_env: boolean;
   skillspector_llm_env: boolean;
   rerank_key_env: boolean;
   rerank_base_env: boolean;

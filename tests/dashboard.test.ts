@@ -15,6 +15,11 @@ process.env.JIT_DISABLE_EMBEDDINGS = "1";
 process.env.JIT_SKILLSPECTOR = FAKE_SKILLSPECTOR;
 delete process.env.JIT_API_KEY;
 delete process.env.JIT_RERANK_API_KEY;
+delete process.env.JIT_EMBEDDING_PROVIDER;
+delete process.env.JIT_EMBEDDING_API_KEY;
+delete process.env.JIT_EMBEDDING_API_BASE;
+delete process.env.JIT_EMBEDDING_API_MODEL;
+delete process.env.JIT_EMBEDDING_API_DIM;
 delete process.env.JIT_MARKETPLACE_URL;
 delete process.env.JIT_CONFIDENCE_THRESHOLD;
 
@@ -229,16 +234,19 @@ test("the dashboard is served with a restrictive CSP", async () => {
 });
 
 test("the public config is redacted and has no dead settings", async () => {
+  saveConfig({ embedding_api_key: "embedding-secret-9876" });
   saveConfig({ rerank_api_key: "rerank-secret-4321" });
   const response = await app.request("/api/config");
   const config = (await response.json()) as Record<string, unknown>;
   assert.equal(config.rerank_api_key, "***4321");
+  assert.equal(config.embedding_api_key, "***9876");
   assert.equal(config.api_key, "");
   assert.equal("nemotron_ultra_model" in config, false);
   assert.ok(Array.isArray(config.marketplace_urls));
   assert.equal(config.skillspector_llm_enabled, false);
   assert.equal(config.skillspector_llm_env, false);
   saveConfig({ rerank_api_key: "" });
+  saveConfig({ embedding_api_key: "" });
 });
 
 test("config writes are validated", async () => {
@@ -253,6 +261,32 @@ test("config writes are validated", async () => {
   assert.equal((await post({ confidence_threshold: "abc" })).status, 400);
   assert.equal((await post({ marketplace_urls: "nope" })).status, 400);
   assert.equal((await post({ rerank_api_base: "http://evil.test" })).status, 400);
+  assert.equal((await post({ embedding_provider: "unknown" })).status, 400);
+  assert.equal((await post({ embedding_api_dim: 0 })).status, 400);
+  assert.equal(
+    (await post({
+      embedding_provider: "openai-compatible",
+      embedding_api_base: "https://api.example.com/v1",
+      embedding_api_model: "test-embed",
+      embedding_api_dim: 3,
+    })).status,
+    400,
+    "remote embedding endpoints require an API key",
+  );
+  const cloudEmbedding = await post({
+    embedding_provider: "openai-compatible",
+    embedding_api_key: "embedding-test-secret",
+    embedding_api_base: "https://api.example.com/v1/",
+    embedding_api_model: "test-embed",
+    embedding_api_dim: 3,
+  });
+  assert.equal(cloudEmbedding.status, 200);
+  const cloudConfig = (await cloudEmbedding.json()) as {
+    config: Record<string, unknown>;
+  };
+  assert.equal(cloudConfig.config.embedding_api_base, "https://api.example.com/v1");
+  assert.equal(cloudConfig.config.embedding_api_key, "***cret");
+  await post({ embedding_provider: "local", embedding_api_key: "" });
   const scannerSetting = await post({ skillspector_llm_enabled: true });
   assert.equal(scannerSetting.status, 200);
   assert.equal(

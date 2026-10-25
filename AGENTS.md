@@ -22,10 +22,11 @@ JIT is a local Node.js/TypeScript app with an MCP server and a React dashboard. 
 ## Important behavior and constraints
 
 - **Embeddings are required for retrieval.** Do not add a setting, environment override, or implicit fallback that permits keyword-only results. BM25 is a complementary ranking signal for vector candidates, not a substitute. If the query embedding or indexed vectors are unavailable, return no result with an actionable warning.
-- Use the configured `EMBEDDING_DIM` when validating vector size or reporting coverage; do not duplicate the model dimension as a magic number. Keep the dashboard's per-item vector status and coverage stats consistent with retrieval eligibility.
+- Use the active dimension from `getEmbeddingSettings()` when validating vector size or reporting coverage; do not duplicate model dimensions as magic numbers. Keep the dashboard's per-item vector status and coverage stats consistent with retrieval eligibility.
+- **Embeddings are required, but provider choice is configurable.** Keep the built-in local model as the default and support OpenAI-compatible embeddings endpoints. Cloud embeddings require deliberate configuration; local endpoints may omit an API key, while remote endpoints require one. Provider/model/dimension changes invalidate existing vectors and require reindexing.
 - **Reranking is optional.** Keep it generic to OpenAI-compatible endpoints; local endpoints may omit an API key, while remote endpoints require one. Do not reintroduce provider-specific compatibility settings unless explicitly requested.
 - Skill installation/indexing must continue to respect the SkillSpector scan and acknowledgement gate. Do not silently treat scanner failures as safe.
-- Keep indexed user content local by default. Only send candidate content to a remote service when the user has configured and enabled reranking.
+- Keep indexed user content local by default. Send it to a remote service only when the user explicitly configures cloud embeddings or enables remote reranking; make this data flow clear in the UI.
 - Keep server and web types in sync (`src/types.ts` and `web/src/types.ts`) when changing API payloads.
 - The production dashboard is built into `static/dashboard.html`; edit its React/Vite sources under `web/src/`, not the generated bundle.
 

@@ -101,6 +101,16 @@ function isSecureApiBase(value: string): boolean {
   }
 }
 
+function isLocalEndpoint(value: string): boolean {
+  try {
+    return ["localhost", "127.0.0.1", "[::1]", "::1"].includes(
+      new URL(value).hostname.toLowerCase(),
+    );
+  } catch {
+    return false;
+  }
+}
+
 function boolValue(value: unknown, fallback: boolean): boolean {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value !== 0;
@@ -299,6 +309,71 @@ export function createApp(): Hono {
   app.post("/api/config", async (c) => {
     const body = await readJson(c);
     const updates: Record<string, unknown> = {};
+    for (const key of [
+      "embedding_local_model",
+      "embedding_api_key",
+      "embedding_api_base",
+      "embedding_api_model",
+    ]) {
+      if (key in body) updates[key] = String(body[key] || "").trim();
+    }
+    if ("embedding_api_base" in updates) {
+      updates.embedding_api_base = String(updates.embedding_api_base).replace(/\/+$/, "");
+    }
+    if ("embedding_provider" in body) {
+      if (!["local", "openai-compatible"].includes(String(body.embedding_provider))) {
+        throw new HttpError(400, "embedding_provider must be local or openai-compatible");
+      }
+      updates.embedding_provider = body.embedding_provider;
+    }
+    for (const bodyKey of ["embedding_local_dim", "embedding_api_dim"] as const) {
+      if (!(bodyKey in body)) continue;
+      const dimension = Number(body[bodyKey]);
+      if (!Number.isInteger(dimension) || dimension < 1 || dimension > 16384) {
+        throw new HttpError(400, `${bodyKey} must be an integer from 1 to 16384`);
+      }
+      updates[bodyKey] = dimension;
+    }
+    const currentConfig = loadConfig();
+    const embeddingProvider = String(
+      updates.embedding_provider || currentConfig.embedding_provider,
+    );
+    const embeddingBase = String(
+      updates.embedding_api_base ?? currentConfig.embedding_api_base,
+    );
+    const embeddingModel = String(
+      updates.embedding_api_model ?? currentConfig.embedding_api_model,
+    );
+    const embeddingKey = String(
+      updates.embedding_api_key ?? currentConfig.embedding_api_key,
+    );
+    const localEmbeddingModel = String(
+      updates.embedding_local_model ?? currentConfig.embedding_local_model,
+    );
+    if (
+      Object.keys(updates).some((key) => key.startsWith("embedding_")) &&
+      embeddingProvider === "local" &&
+      !localEmbeddingModel
+    ) {
+      throw new HttpError(400, "a local embedding model is required");
+    }
+    if (
+      Object.keys(updates).some((key) => key.startsWith("embedding_")) &&
+      embeddingProvider === "openai-compatible"
+    ) {
+      if (!embeddingBase || !isSecureApiBase(embeddingBase)) {
+        throw new HttpError(
+          400,
+          "embeddings API base must use https:// (http:// is allowed only for localhost)",
+        );
+      }
+      if (!embeddingModel) {
+        throw new HttpError(400, "an embeddings model is required");
+      }
+      if (!embeddingKey && !isLocalEndpoint(embeddingBase)) {
+        throw new HttpError(400, "a remote embeddings endpoint requires an API key");
+      }
+    }
     for (const key of ["rerank_api_key", "rerank_api_base", "rerank_model"]) {
       if (key in body) updates[key] = String(body[key] || "").trim();
     }
@@ -367,6 +442,24 @@ export function createApp(): Hono {
     if (boolValue(body.complete_setup, false)) updates.first_run = false;
     saveConfig(updates as Partial<import("../types.js").Config>);
     return c.json({ saved: true, config: publicConfig() });
+  });
+
+  app.post("/api/embeddings/reindex", async (c) => {
+    const items = getAllItems(initDb());
+    let added = 0;
+    let updated = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+    for (const kind of ["skill", "tool"] as const) {
+      const group = items.filter((item) => item.kind === kind);
+      if (!group.length) continue;
+      const result = await indexItems(group, kind);
+      added += result.added;
+      updated += result.updated;
+      skipped += result.skipped;
+      errors.push(...result.errors);
+    }
+    return c.json({ added, updated, skipped, errors });
   });
 
   app.get("/api/skills", (c) => {

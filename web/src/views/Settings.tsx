@@ -8,6 +8,7 @@ import { Badge, Meta } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { Field, Input, ToggleRow } from "../ui/Field";
 import { PageHead, Panel, PanelBody, PanelHead } from "../ui/Panel";
+import { Select } from "../ui/Select";
 import { Slider } from "../ui/Slider";
 
 export function Settings() {
@@ -17,6 +18,13 @@ export function Settings() {
   const [rerankBase, setRerankBase] = useState("");
   const [rerankModel, setRerankModel] = useState("");
   const [rerank, setRerank] = useState(false);
+  const [embeddingProvider, setEmbeddingProvider] = useState<"local" | "openai-compatible">("local");
+  const [localEmbeddingModel, setLocalEmbeddingModel] = useState("");
+  const [localEmbeddingDim, setLocalEmbeddingDim] = useState("384");
+  const [embeddingKey, setEmbeddingKey] = useState("");
+  const [embeddingBase, setEmbeddingBase] = useState("");
+  const [embeddingModel, setEmbeddingModel] = useState("");
+  const [embeddingDim, setEmbeddingDim] = useState("1536");
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState("");
   const [marketUrls, setMarketUrls] = useState<string[]>([]);
@@ -30,6 +38,12 @@ export function Settings() {
     setRerankBase(config.rerank_api_base || "");
     setRerankModel(config.rerank_model || "");
     setRerank(Boolean(config.rerank_enabled));
+    setEmbeddingProvider(config.embedding_provider || "local");
+    setLocalEmbeddingModel(config.embedding_local_model || "");
+    setLocalEmbeddingDim(String(config.embedding_local_dim || 384));
+    setEmbeddingBase(config.embedding_api_base || "");
+    setEmbeddingModel(config.embedding_api_model || "");
+    setEmbeddingDim(String(config.embedding_api_dim || 1536));
     setThreshold(Number(config.confidence_threshold ?? 0.6));
     setSkillspectorLlm(Boolean(config.skillspector_llm_enabled));
     setMarketUrls(Array.isArray(config.marketplace_urls) ? config.marketplace_urls : []);
@@ -65,6 +79,66 @@ export function Settings() {
       ctx.toast(error instanceof Error ? error.message : String(error), "error");
     } finally {
       setSaving("");
+    }
+  };
+
+  const saveEmbedding = async (event: FormEvent) => {
+    event.preventDefault();
+    setSaving("embedding");
+    try {
+      const updates: Record<string, unknown> = {
+        embedding_provider: embeddingProvider,
+        embedding_local_model: localEmbeddingModel.trim(),
+        embedding_local_dim: Number(localEmbeddingDim),
+        embedding_api_base: embeddingBase.trim(),
+        embedding_api_model: embeddingModel.trim(),
+        embedding_api_dim: Number(embeddingDim),
+      };
+      if (embeddingKey.trim()) updates.embedding_api_key = embeddingKey.trim();
+      await ctx.saveConfig(updates);
+      setEmbeddingKey("");
+      ctx.toast("Embedding settings saved. Rebuild the vector index if the active provider or model changed.");
+    } catch (error) {
+      ctx.toast(error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      setSaving("");
+    }
+  };
+
+  const reindexEmbeddings = async () => {
+    setSaving("embedding-reindex");
+    try {
+      const result = await ctx.api<{
+        added: number;
+        updated: number;
+        skipped: number;
+        errors: string[];
+      }>("/api/embeddings/reindex", { method: "POST" });
+      await ctx.refreshAll();
+      if (result.errors.length) {
+        ctx.toast(`Rebuild finished with ${result.errors.length} error(s): ${result.errors[0]}`, "error");
+      } else {
+        ctx.toast(`Vector index rebuilt: ${fmt(result.updated + result.added)} item(s) updated.`);
+      }
+    } catch (error) {
+      ctx.toast(error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      setSaving("");
+    }
+  };
+
+  const removeEmbeddingKey = async () => {
+    const ok = await ctx.confirmAction(
+      "Remove the embeddings API key?",
+      "Remote embedding providers require an API key. A local OpenAI-compatible endpoint may not.",
+      "Remove",
+    );
+    if (!ok) return;
+    try {
+      await ctx.saveConfig({ embedding_api_key: "" });
+      ctx.toast("Embeddings API key removed.");
+    } catch (error) {
+      ctx.toast(error instanceof Error ? error.message : String(error), "error");
     }
   };
 
@@ -237,6 +311,7 @@ export function Settings() {
   };
 
   const hasKey = Boolean(config?.rerank_api_key);
+  const hasEmbeddingKey = Boolean(config?.embedding_api_key);
   const authOn = Boolean(config?.auth_enabled);
   const indexDir = config?.index_dir || "~/.jit";
   const keyHelp = config?.rerank_key_env
@@ -257,17 +332,172 @@ export function Settings() {
     : rerankConfigured
       ? "active"
       : "configuration needed";
+  const localEmbeddingEndpoint = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::|\/|$)/i.test(
+    embeddingBase.trim(),
+  );
+  const cloudEmbeddingConfigured = Boolean(
+    embeddingBase.trim() &&
+      embeddingModel.trim() &&
+      (hasEmbeddingKey || embeddingKey.trim() || localEmbeddingEndpoint),
+  );
+  const embeddingState = embeddingProvider === "local"
+    ? "built in · local"
+    : cloudEmbeddingConfigured
+      ? "cloud endpoint configured"
+      : "configuration needed";
 
   return (
     <div className="space-y-8">
       <PageHead
         kicker="06 — Settings"
         title="Configuration."
-        description="Everything JIT reads at startup: the reranker, the retrieval bar, who may connect, and where state lives."
+        description="Choose local or OpenAI-compatible embeddings, configure the optional reranker, and manage access and index settings."
       />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="space-y-6">
+          <Panel>
+            <PanelHead
+              title="Embeddings"
+              hint="required for semantic retrieval"
+              actions={
+                <Badge tone={embeddingProvider === "local" ? "neutral" : cloudEmbeddingConfigured ? "accent" : "warn"}>
+                  {embeddingState}
+                </Badge>
+              }
+            />
+            <PanelBody className="space-y-5">
+              <p className="text-xs leading-relaxed text-ink-3">
+                Choose the built-in local model or an OpenAI-compatible embeddings API. Cloud mode sends skill text and search queries to that endpoint and may incur usage costs. Changing provider or model requires rebuilding indexed vectors.
+              </p>
+              <form className="space-y-5" onSubmit={saveEmbedding}>
+                <Field
+                  label="Embedding provider"
+                  hint={config?.embedding_provider_env ? "Set by JIT_EMBEDDING_PROVIDER in the environment." : undefined}
+                >
+                  <Select
+                    value={embeddingProvider}
+                    disabled={Boolean(config?.embedding_provider_env)}
+                    onValueChange={(value) => setEmbeddingProvider(value as "local" | "openai-compatible")}
+                    options={[
+                      { value: "local", label: "Built-in local model" },
+                      { value: "openai-compatible", label: "OpenAI-compatible cloud or local endpoint" },
+                    ]}
+                  />
+                </Field>
+
+                {embeddingProvider === "local" ? (
+                  <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_9rem]">
+                    <Field
+                      label="Local model"
+                      hint={config?.embedding_model_env ? "Controlled by JIT_EMBEDDING_MODEL." : "Downloaded to the local model cache on first use."}
+                    >
+                      <Input
+                        value={localEmbeddingModel}
+                        disabled={Boolean(config?.embedding_model_env)}
+                        onChange={(event) => setLocalEmbeddingModel(event.target.value)}
+                      />
+                    </Field>
+                    <Field
+                      label="Dimensions"
+                      hint={config?.embedding_dim_env ? "Controlled by JIT_EMBEDDING_DIM." : undefined}
+                    >
+                      <Input
+                        type="number"
+                        min={1}
+                        max={16384}
+                        value={localEmbeddingDim}
+                        disabled={Boolean(config?.embedding_dim_env)}
+                        onChange={(event) => setLocalEmbeddingDim(event.target.value)}
+                      />
+                    </Field>
+                  </div>
+                ) : (
+                  <div className="space-y-5">
+                    <Field
+                      label="Embeddings API key"
+                      hint={config?.embedding_key_env ? "Set by JIT_EMBEDDING_API_KEY in the environment." : `Stored in ${indexDir}/config.json with mode 600.`}
+                    >
+                      <Input
+                        type="password"
+                        autoComplete="off"
+                        placeholder={hasEmbeddingKey ? `saved · ${config?.embedding_api_key}` : "required for remote endpoints"}
+                        value={embeddingKey}
+                        disabled={Boolean(config?.embedding_key_env)}
+                        onChange={(event) => setEmbeddingKey(event.target.value)}
+                      />
+                    </Field>
+                    <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_9rem]">
+                      <Field
+                        label="OpenAI-compatible API base"
+                        hint={config?.embedding_base_env ? "Set by JIT_EMBEDDING_API_BASE." : "For example: https://api.openai.com/v1"}
+                      >
+                        <Input
+                          value={embeddingBase}
+                          spellCheck={false}
+                          disabled={Boolean(config?.embedding_base_env)}
+                          onChange={(event) => setEmbeddingBase(event.target.value)}
+                        />
+                      </Field>
+                      <Field
+                        label="Vector dimensions"
+                        hint={config?.embedding_dim_env ? "Set by JIT_EMBEDDING_API_DIM." : "Must match the endpoint model output."}
+                      >
+                        <Input
+                          type="number"
+                          min={1}
+                          max={16384}
+                          value={embeddingDim}
+                          disabled={Boolean(config?.embedding_dim_env)}
+                          onChange={(event) => setEmbeddingDim(event.target.value)}
+                        />
+                      </Field>
+                    </div>
+                    <Field
+                      label="Embedding model"
+                      hint={config?.embedding_model_env ? "Set by JIT_EMBEDDING_API_MODEL." : undefined}
+                    >
+                      <Input
+                        value={embeddingModel}
+                        spellCheck={false}
+                        disabled={Boolean(config?.embedding_model_env)}
+                        onChange={(event) => setEmbeddingModel(event.target.value)}
+                      />
+                    </Field>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button type="submit" variant="primary" disabled={saving === "embedding"}>
+                    {saving === "embedding" ? "Saving…" : "Save embedding settings"}
+                  </Button>
+                  {hasEmbeddingKey && !config?.embedding_key_env ? (
+                    <Button
+                      type="button"
+                      disabled={embeddingProvider === "openai-compatible" && !localEmbeddingEndpoint}
+                      onClick={() => void removeEmbeddingKey()}
+                    >
+                      Remove key
+                    </Button>
+                  ) : null}
+                </div>
+              </form>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line-2 pt-4">
+                <p className="max-w-sm text-xs leading-relaxed text-ink-3">
+                  Rebuild all stored vectors after changing the provider, model, endpoint, or dimensions. This sends existing skill contents to the selected provider.
+                </p>
+                <Button
+                  type="button"
+                  disabled={saving !== "" || !ctx.stats?.total}
+                  onClick={() => void reindexEmbeddings()}
+                >
+                  {saving === "embedding-reindex" ? "Rebuilding…" : "Rebuild vector index"}
+                </Button>
+              </div>
+            </PanelBody>
+          </Panel>
+
           <Panel>
             <PanelHead
               title="Optional reranker"
@@ -404,7 +634,7 @@ export function Settings() {
               <form className="space-y-5" onSubmit={saveThreshold}>
                 <Field
                   label="Confidence threshold"
-                  hint="Rerank scores are 0–3 scaled to 0–1; cosine and the keyword fallback are also 0–1. Default 0.6."
+                  hint="Rerank scores and cosine similarity are 0–1. Default 0.6."
                 >
                   <div className="flex items-center gap-4">
                     <Slider

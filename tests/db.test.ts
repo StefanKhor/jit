@@ -9,7 +9,7 @@ import path from "node:path";
 process.env.JIT_HOME = mkdtempSync(path.join(tmpdir(), "jit-test-"));
 
 const db = await import("../src/storage/db.js");
-const { EMBEDDING_DIM } = await import("../src/config.js");
+const { EMBEDDING_DIM, embeddingSignature } = await import("../src/config.js");
 
 import type { IndexItem } from "../src/types.js";
 
@@ -98,6 +98,7 @@ test("meta values round-trip", () => {
 
 test("stats and skill rows report whether a valid embedding is indexed", () => {
   const conn = db.initDb();
+  db.setMeta(conn, "embedding_signature", embeddingSignature());
   db.upsertItem(conn, {
     item: item({ id: "vector-skill", kind: "skill" }),
     contentHash: "vector-skill",

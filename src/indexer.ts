@@ -13,8 +13,8 @@ import matter from "gray-matter";
 
 import {
   DEFAULT_SKILL_PATHS,
-  EMBEDDING_DIM,
-  EMBEDDING_MODEL,
+  embeddingSignature,
+  EMBEDDING_SIGNATURE_KEY,
   INDEX_DIR,
   MAX_SKILL_BYTES,
 } from "./config.js";
@@ -62,15 +62,12 @@ const SKIP_DIRS = new Set([
 ]);
 const MAX_SCAN_DEPTH = 6;
 
-// Embeddings are computed locally, so an oversized single call can exhaust
-// memory (the import endpoint accepts up to 50k items). Embed in batches.
+// Batch local or remote embedding requests; import accepts up to 50k items.
 const EMBED_BATCH_SIZE = 64;
 
 // Records which embedding model produced the stored vectors. When the model or
 // dimension changes, every vector is invalid and must be recomputed even if the
 // entry text is unchanged.
-const EMBED_SIGNATURE_KEY = "embedding_signature";
-const EMBED_SIGNATURE = `${EMBEDDING_MODEL}:${EMBEDDING_DIM}`;
 
 export function expandHome(value: string): string {
   if (value === "~") return homedir();
@@ -275,7 +272,8 @@ export async function indexItems(
   const errors: string[] = [];
 
   try {
-    const modelChanged = getMeta(db, EMBED_SIGNATURE_KEY) !== EMBED_SIGNATURE;
+    const activeSignature = embeddingSignature();
+    const modelChanged = getMeta(db, EMBEDDING_SIGNATURE_KEY) !== activeSignature;
     const existing = getExisting(db);
     const pending: Array<{
       item: IndexItem;
@@ -334,11 +332,9 @@ export async function indexItems(
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.warn("embedding failed; indexing metadata only: %s", message);
-      // Embeddings are an enhancement. A model download or runtime failure
-      // should not make an otherwise successful index operation look failed.
-      // Keep a previous vector only when the content and model are unchanged. A
-      // stale vector for changed content (or a changed model) would silently
-      // poison retrieval.
+      // Keep a previous vector only when the content and provider/model settings
+      // are unchanged. Strict retrieval refuses entries without current vectors.
+      errors.push(`embedding failed: ${message}`);
       embeddings = pending.map(({ current, digest }) =>
         !modelChanged && current?.content_hash === digest
           ? current.embedding
@@ -365,7 +361,7 @@ export async function indexItems(
       }
       // Only record the signature once vectors were actually produced, so a
       // failed run retries instead of marking stale vectors as current.
-      if (embedded) setMeta(db, EMBED_SIGNATURE_KEY, EMBED_SIGNATURE);
+      if (embedded) setMeta(db, EMBEDDING_SIGNATURE_KEY, activeSignature);
     });
     added += addedNow;
     updated += updatedNow;

@@ -1,9 +1,15 @@
-import { TOP_K_RETRIEVE, loadConfig } from "../config.js";
+import {
+  embeddingSignature,
+  EMBEDDING_SIGNATURE_KEY,
+  TOP_K_RETRIEVE,
+  loadConfig,
+} from "../config.js";
 import { cosineSimilarity, embedQuery } from "../embedding.js";
 import { logger } from "../logger.js";
 import {
   dataVersion,
   getAllItems,
+  getMeta,
   initDb,
   logRetrieval,
 } from "../storage/db.js";
@@ -126,6 +132,17 @@ async function rank(
       "query embedding failed; vector retrieval is unavailable: %s",
       error instanceof Error ? error.message : String(error),
     );
+  }
+
+  if (getMeta(initDb(), EMBEDDING_SIGNATURE_KEY) !== embeddingSignature()) {
+    return {
+      candidates: [],
+      cosine: new Map(),
+      lexical: new Map(),
+      vectorUsed: false,
+      warning:
+        "Embedding retrieval is required, but the index vectors do not match the active embedding provider/model. Rebuild the vector index in Settings.",
+    };
   }
 
   if (!queryVector) {

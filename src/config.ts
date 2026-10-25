@@ -84,6 +84,11 @@ export const TOP_K_RETRIEVE = envNumber("JIT_TOP_K", 20, 1, 1000, true);
 export const EMBEDDING_MODEL =
   process.env.JIT_EMBEDDING_MODEL || "Xenova/bge-small-en-v1.5";
 export const EMBEDDING_DIM = envNumber("JIT_EMBEDDING_DIM", 384, 1, 16384, true);
+export const EMBEDDING_SIGNATURE_KEY = "embedding_signature";
+const DEFAULT_EMBEDDING_PROVIDER =
+  process.env.JIT_EMBEDDING_PROVIDER === "openai-compatible"
+    ? "openai-compatible"
+    : "local";
 
 export const DEFAULT_HOST = process.env.JIT_HOST || "127.0.0.1";
 export const DEFAULT_PORT = envNumber("JIT_PORT", 3000, 1, 65535, true);
@@ -103,6 +108,13 @@ export const MAX_SKILL_BYTES = envNumber(
 );
 
 export const DEFAULT_CONFIG: Config = {
+  embedding_provider: DEFAULT_EMBEDDING_PROVIDER,
+  embedding_local_model: EMBEDDING_MODEL,
+  embedding_local_dim: EMBEDDING_DIM,
+  embedding_api_key: process.env.JIT_EMBEDDING_API_KEY || "",
+  embedding_api_base: process.env.JIT_EMBEDDING_API_BASE || "",
+  embedding_api_model: process.env.JIT_EMBEDDING_API_MODEL || "",
+  embedding_api_dim: envNumber("JIT_EMBEDDING_API_DIM", 1536, 1, 16384, true),
   rerank_api_key: process.env.JIT_RERANK_API_KEY || "",
   rerank_api_base: "",
   rerank_model: "",
@@ -115,6 +127,13 @@ export const DEFAULT_CONFIG: Config = {
 };
 
 const FILE_KEYS = new Set<keyof Config>([
+  "embedding_provider",
+  "embedding_local_model",
+  "embedding_local_dim",
+  "embedding_api_key",
+  "embedding_api_base",
+  "embedding_api_model",
+  "embedding_api_dim",
   "rerank_api_key",
   "rerank_api_base",
   "rerank_model",
@@ -127,6 +146,9 @@ const FILE_KEYS = new Set<keyof Config>([
 ]);
 
 const ENV_KEYS: Partial<Record<keyof Config, string>> = {
+  embedding_api_key: "JIT_EMBEDDING_API_KEY",
+  embedding_api_base: "JIT_EMBEDDING_API_BASE",
+  embedding_api_model: "JIT_EMBEDDING_API_MODEL",
   rerank_api_key: "JIT_RERANK_API_KEY",
   rerank_api_base: "JIT_RERANK_API_BASE",
   rerank_model: "JIT_RERANK_MODEL",
@@ -181,6 +203,19 @@ function readStoredConfig(): Partial<Config> {
   for (const key of FILE_KEYS) {
     if (!(key in raw)) continue;
     const value = raw[key];
+    if (key === "embedding_provider") {
+      if (value === "local" || value === "openai-compatible") {
+        stored.embedding_provider = value;
+      }
+      continue;
+    }
+    if (key === "embedding_local_dim" || key === "embedding_api_dim") {
+      const parsed = Number(value);
+      if (Number.isInteger(parsed) && parsed >= 1 && parsed <= 16384) {
+        stored[key] = parsed;
+      }
+      continue;
+    }
     if (
       key === "rerank_enabled" ||
       key === "first_run" ||
@@ -257,6 +292,30 @@ export function loadConfig(): Config {
       scannerLlmEnv.trim().toLowerCase(),
     );
   }
+  if (process.env.JIT_EMBEDDING_PROVIDER === "local" ||
+      process.env.JIT_EMBEDDING_PROVIDER === "openai-compatible") {
+    config.embedding_provider = process.env.JIT_EMBEDDING_PROVIDER;
+  }
+  const localModelEnv = process.env.JIT_EMBEDDING_MODEL;
+  if (localModelEnv) config.embedding_local_model = localModelEnv;
+  const localDimEnv = Number(process.env.JIT_EMBEDDING_DIM);
+  if (
+    process.env.JIT_EMBEDDING_DIM &&
+    Number.isInteger(localDimEnv) &&
+    localDimEnv >= 1 &&
+    localDimEnv <= 16384
+  ) {
+    config.embedding_local_dim = localDimEnv;
+  }
+  const apiDimEnv = Number(process.env.JIT_EMBEDDING_API_DIM);
+  if (
+    process.env.JIT_EMBEDDING_API_DIM &&
+    Number.isInteger(apiDimEnv) &&
+    apiDimEnv >= 1 &&
+    apiDimEnv <= 16384
+  ) {
+    config.embedding_api_dim = apiDimEnv;
+  }
   const envThreshold = Number(process.env.JIT_CONFIDENCE_THRESHOLD);
   if (process.env.JIT_CONFIDENCE_THRESHOLD && Number.isFinite(envThreshold)) {
     config.confidence_threshold = envThreshold;
@@ -275,6 +334,40 @@ export function loadConfig(): Config {
     ? config.marketplace_urls.map((value) => String(value).trim()).filter(Boolean)
     : [];
   return config;
+}
+
+export interface ActiveEmbeddingSettings {
+  provider: Config["embedding_provider"];
+  apiKey: string;
+  apiBase: string;
+  model: string;
+  dimensions: number;
+}
+
+export function getEmbeddingSettings(
+  config = loadConfig(),
+): ActiveEmbeddingSettings {
+  if (config.embedding_provider === "openai-compatible") {
+    return {
+      provider: config.embedding_provider,
+      apiKey: config.embedding_api_key,
+      apiBase: config.embedding_api_base,
+      model: config.embedding_api_model,
+      dimensions: config.embedding_api_dim,
+    };
+  }
+  return {
+    provider: "local",
+    apiKey: "",
+    apiBase: "",
+    model: config.embedding_local_model,
+    dimensions: config.embedding_local_dim,
+  };
+}
+
+export function embeddingSignature(): string {
+  const { provider, apiBase, model, dimensions } = getEmbeddingSettings();
+  return JSON.stringify({ provider, apiBase, model, dimensions });
 }
 
 export function saveConfig(updates: Partial<Config>): Config {
@@ -308,6 +401,9 @@ export function publicConfig(): PublicConfig {
   const config = loadConfig();
   const redacted: PublicConfig = {
     ...config,
+    embedding_api_key: config.embedding_api_key
+      ? `***${config.embedding_api_key.slice(-4)}`
+      : "",
     rerank_api_key: config.rerank_api_key
       ? `***${config.rerank_api_key.slice(-4)}`
       : "",
@@ -315,7 +411,19 @@ export function publicConfig(): PublicConfig {
     auth_env: Boolean(process.env.JIT_API_KEY),
     auth_enabled: Boolean(config.api_key),
     index_dir: INDEX_DIR,
-    embedding_model: EMBEDDING_MODEL,
+    embedding_model: getEmbeddingSettings(config).model,
+    embedding_dim: getEmbeddingSettings(config).dimensions,
+    embedding_provider_env: Boolean(process.env.JIT_EMBEDDING_PROVIDER),
+    embedding_key_env: Boolean(process.env.JIT_EMBEDDING_API_KEY),
+    embedding_base_env: Boolean(process.env.JIT_EMBEDDING_API_BASE),
+    embedding_model_env:
+      config.embedding_provider === "local"
+        ? Boolean(process.env.JIT_EMBEDDING_MODEL)
+        : Boolean(process.env.JIT_EMBEDDING_API_MODEL),
+    embedding_dim_env:
+      config.embedding_provider === "local"
+        ? Boolean(process.env.JIT_EMBEDDING_DIM)
+        : Boolean(process.env.JIT_EMBEDDING_API_DIM),
     skillspector_llm_env:
       process.env.JIT_SKILLSPECTOR_LLM !== undefined &&
       process.env.JIT_SKILLSPECTOR_LLM.trim() !== "",

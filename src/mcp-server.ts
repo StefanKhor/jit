@@ -8,7 +8,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { z } from "zod";
 
 import {
-  EMBEDDING_MODEL,
+  getEmbeddingSettings,
   MAX_SKILL_BYTES,
   VERSION,
   loadConfig,
@@ -374,7 +374,9 @@ export function registerStatus(server: McpServer): void {
         servers: manager.getStatus(),
         settings: {
           confidence_threshold: loadConfig().confidence_threshold,
-          embedding_model: EMBEDDING_MODEL,
+          embedding_provider: getEmbeddingSettings().provider,
+          embedding_model: getEmbeddingSettings().model,
+          embedding_dim: getEmbeddingSettings().dimensions,
         },
       });
     },

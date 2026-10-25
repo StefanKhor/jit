@@ -1,5 +1,7 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import { once } from "node:events";
 import { mkdtempSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
@@ -16,13 +18,59 @@ const { cosineSimilarity, embedQuery, embedTexts } = await import(
 );
 const db = await import("../src/storage/db.js");
 const retriever = await import("../src/retrieval/retriever.js");
-const { EMBEDDING_DIM } = await import("../src/config.js");
+const config = await import("../src/config.js");
+const { EMBEDDING_DIM } = config;
 
 import type { IndexItem } from "../src/types.js";
 
 const SKIP = /^(1|true|yes|on)$/i.test(
   process.env.JIT_SKIP_EMBEDDING_TESTS || "",
 );
+
+test("OpenAI-compatible embeddings work with a local endpoint and normalize vectors", async () => {
+  const server = createServer(async (request, response) => {
+    let body = "";
+    for await (const chunk of request) body += chunk;
+    const payload = JSON.parse(body) as { model: string; dimensions: number };
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({
+      object: "list",
+      model: payload.model,
+      data: [
+        { object: "embedding", index: 0, embedding: [3, 4] },
+      ],
+      usage: { prompt_tokens: 1, total_tokens: 1 },
+    }));
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const previous = config.loadConfig();
+  try {
+    config.saveConfig({
+      embedding_provider: "openai-compatible",
+      embedding_api_key: "",
+      embedding_api_base: `http://127.0.0.1:${address.port}/v1`,
+      embedding_api_model: "local-test-embed",
+      embedding_api_dim: 2,
+    });
+    const [vector] = await embedTexts(["test text"]);
+    assert.ok(vector);
+    assert.ok(Math.abs(vector[0]! - 0.6) < 1e-6);
+    assert.ok(Math.abs(vector[1]! - 0.8) < 1e-6);
+  } finally {
+    config.saveConfig({
+      embedding_provider: previous.embedding_provider,
+      embedding_api_key: previous.embedding_api_key,
+      embedding_api_base: previous.embedding_api_base,
+      embedding_api_model: previous.embedding_api_model,
+      embedding_api_dim: previous.embedding_api_dim,
+    });
+    server.close();
+    await once(server, "close");
+  }
+});
 let available = false;
 
 before(async () => {
@@ -91,6 +139,7 @@ test("related text is closer than unrelated text", async (t) => {
 test("retrieval uses the vector path and reports cosine confidence", async (t) => {
   if (!requireModel(t)) return;
   const conn = db.initDb();
+  db.setMeta(conn, "embedding_signature", config.embeddingSignature());
   const entries: Array<{ id: string; text: string; body: string }> = [
     {
       id: "commit-msg",
