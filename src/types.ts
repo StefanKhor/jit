@@ -59,15 +59,21 @@ export interface Stats {
   heaviest: HeaviestItem[];
   categories: Array<{ name: string; count: number }>;
   tokens?: {
-    static: number;
+    // One JIT call: the fixed tool schema plus the one entry body it returns.
     jit: number;
+    // The alternative per task that uses a skill: a catalog of every entry's
+    // name and description, plus the one body that task loads.
+    baseline: number;
+    // The catalog alone — every name and description, no body.
+    catalog: number;
     startup: number;
     average_item: number;
     largest_item: number;
     saved: number;
     reduction_pct: number;
-    // Entries required before JIT's per-task cost beats loading everything
-    // statically (startup / average_item). Below this the index is a net cost.
+    // Entries required before a JIT call beats keeping a catalog of every
+    // entry in context (startup / average catalog entry). Below this the index
+    // is a net cost.
     break_even: number;
   };
 }

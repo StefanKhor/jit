@@ -73,32 +73,30 @@ test("health and status report from the live index", async () => {
   }
 });
 
-// The reference 6-entry index: schema 636, average body 3,267, catalog 79.
-// Sanity: at one entry static is 3,346 and JIT is 3,903, so JIT cannot win
-// until the index is two entries deep.
-test("break-even is the first size where JIT beats loading everything", () => {
-  assert.equal(breakEvenSize(636, 3267, 79), 2);
-  // A flat index of small skills where the catalog dominates: JIT needs volume.
-  assert.equal(breakEvenSize(636, 27, 43), 10);
-  // An empty index has no crossing point.
-  assert.equal(breakEvenSize(636, 0, 0), 0);
+// The reference index: schema 636, average catalog entry 79 tokens. The body a
+// task loads cancels from both sides, so break-even is where the catalog passes
+// the schema — 636 / 79 crosses at the ninth entry.
+test("break-even is the first size where JIT beats a skill catalog", () => {
+  assert.equal(breakEvenSize(636, 79), 9);
+  // A richer catalog crosses sooner.
+  assert.equal(breakEvenSize(636, 212), 4);
+  // No entries means no crossing point.
+  assert.equal(breakEvenSize(636, 0), 0);
 
-  // The invariant, whatever the inputs: at the break-even size a JIT call is
-  // strictly cheaper than static, and one entry below it is not.
-  const cases: Array<[number, number, number]> = [
-    [636, 3267, 79],
-    [636, 27, 43],
-    [617, 120, 30],
-    [900, 5000, 120],
+  // The invariant, whatever the inputs: at the break-even size the catalog
+  // exceeds the schema, and one entry below it does not.
+  const cases: Array<[number, number]> = [
+    [636, 79],
+    [636, 212],
+    [617, 30],
+    [900, 120],
   ];
-  for (const [schema, body, catalog] of cases) {
-    const size = breakEvenSize(schema, body, catalog);
-    const jit = schema + body;
-    const perEntry = body + catalog;
-    assert.ok(size * perEntry > jit, `JIT should win at size ${size}`);
+  for (const [schema, catalog] of cases) {
+    const size = breakEvenSize(schema, catalog);
+    assert.ok(size * catalog > schema, `JIT should win at size ${size}`);
     assert.ok(
-      (size - 1) * perEntry <= jit,
-      `static should not lose below size ${size}`,
+      (size - 1) * catalog <= schema,
+      `the catalog should not lose below size ${size}`,
     );
   }
 });

@@ -120,12 +120,13 @@ cheaper and more predictable.
 Being honest about the boundary is part of being production-ready.
 
 - **Small indexes are a net cost.** JIT adds a fixed per-task cost: the schema of
-  its four tools (measured, ~630 tokens) plus one retrieved body. Static loading
-  costs the size of your whole catalog. The Overview page shows the **break-even
-  count** where the two cross. Below roughly a dozen entries, loading everything
-  is cheaper and simpler, and JIT says so on the page rather than pretending
-  otherwise. JIT earns its place when you have many skills, many MCP servers, or
-  both.
+  its four tools (measured, ~630 tokens) plus one retrieved body. The alternative
+  keeps the whole catalog — every name and description — in context plus the one
+  body a task loads. The Overview page shows the **break-even count** where the
+  two cross: the point at which the catalog outgrows JIT's fixed tool schema.
+  Below roughly a dozen entries, listing your skills is cheaper and simpler, and
+  JIT says so on the page rather than pretending otherwise. JIT earns its place
+  when you have many skills, many MCP servers, or both.
 - **Attention is still the agent's job.** An MCP server cannot push context; the
   agent has to call `JIT_FIND`. The tool descriptions plus a one-line client
   instruction (above) are the lever. If a client ever offers a retrieval hook,
@@ -147,7 +148,7 @@ Being honest about the boundary is part of being production-ready.
 
 A single-file React SPA served by the Node process.
 
-- **Overview** — context per task vs. static loading, reduction or overhead,
+- **Overview** — context per task vs. a skill catalog, reduction or overhead,
   the break-even index size, index composition, heaviest entries, categories,
   and the measured retrieval miss rate.
 - **Skills** — list, read, enable/disable, index a path, transfer, and remove.

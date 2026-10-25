@@ -149,21 +149,18 @@ async function readJson(c: Context): Promise<Record<string, unknown>> {
   return body as Record<string, unknown>;
 }
 
-// The smallest index size at which one JIT call costs less than loading the
-// whole index statically. A JIT call pays its fixed tool schema plus the one
-// entry body it returns; loading everything pays every body and every catalog
-// entry. The two meet where
-//   schema + body == size * (body + catalog)
-// so the first size that wins is one past that crossing. Sizes below the
-// result favour loading everything, sizes at or above it favour JIT.
+// The smallest index size at which a JIT call costs less than the alternative:
+// keeping a catalog of every entry's name and description in context. Both
+// approaches pull in one entry body when a skill is used, so the body cancels
+// and the comparison is really JIT's fixed tool schema against the catalog.
+// They meet where schema == size * catalog, so the first size that wins is one
+// past that crossing. Sizes below the result favour the catalog.
 export function breakEvenSize(
   schemaTokens: number,
-  averageBody: number,
   averageCatalog: number,
 ): number {
-  const perEntry = averageBody + averageCatalog;
-  if (perEntry <= 0) return 0;
-  return Math.floor((schemaTokens + averageBody) / perEntry) + 1;
+  if (averageCatalog <= 0) return 0;
+  return Math.floor(schemaTokens / averageCatalog) + 1;
 }
 
 let dashboardCache: string | null = null;
@@ -242,30 +239,29 @@ export function createApp(): Hono {
   app.get("/api/stats", async (c) => {
     const stats = getStats(initDb());
     const schemaTokens = await jitSchemaTokens();
-    const staticTokens = stats.body_tokens + stats.catalog_tokens;
-    const taskTokens = stats.total
+    // A JIT call pays the fixed tool schema plus the one body it returns. The
+    // alternative — keeping every entry's name and description in context —
+    // pays the whole catalog plus that same body, so the body cancels and the
+    // comparison is the schema against the catalog.
+    const jitTokens = stats.total
       ? schemaTokens + stats.average_body
       : schemaTokens;
-    const saved = Math.max(0, staticTokens - taskTokens);
-    const reduction = staticTokens
-      ? Number(((1 - taskTokens / staticTokens) * 100).toFixed(1))
+    const baselineTokens = stats.catalog_tokens + stats.average_body;
+    const saved = Math.max(0, baselineTokens - jitTokens);
+    const reduction = baselineTokens
+      ? Number(((1 - jitTokens / baselineTokens) * 100).toFixed(1))
       : 0;
-    // Per-task cost is roughly startup + one average entry; static cost grows
-    // with the index. Break-even is the size where those two cross.
     const averageCatalog = stats.total
       ? Math.floor(stats.catalog_tokens / stats.total)
       : 0;
-    const breakEven = breakEvenSize(
-      schemaTokens,
-      stats.average_body,
-      averageCatalog,
-    );
+    const breakEven = breakEvenSize(schemaTokens, averageCatalog);
     const retrieval = retrievalStats(initDb(), 1);
     return c.json({
       ...stats,
       tokens: {
-        static: staticTokens,
-        jit: taskTokens,
+        jit: jitTokens,
+        baseline: baselineTokens,
+        catalog: stats.catalog_tokens,
         startup: schemaTokens,
         average_item: stats.average_body,
         largest_item: stats.largest,

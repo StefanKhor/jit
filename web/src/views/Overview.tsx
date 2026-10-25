@@ -30,7 +30,7 @@ function Figures({ stats }: { stats: Stats }) {
   const reduction = Number(tokens?.reduction_pct || 0);
   const overhead = Math.max(
     0,
-    Number(tokens?.jit || 0) - Number(tokens?.static || 0),
+    Number(tokens?.jit || 0) - Number(tokens?.baseline || 0),
   );
   const retrieval = stats.retrieval;
   const measured = Number(retrieval?.total || 0) > 0;
@@ -52,7 +52,7 @@ function Figures({ stats }: { stats: Stats }) {
       label: "Context per task",
       value: <AnimatedNumber value={tokens?.jit || 0} />,
       unit: "tok",
-      hint: `${fmt(tokens?.static || 0)} if loaded statically`,
+      hint: `${fmt(tokens?.baseline || 0)} with a skill catalog`,
     },
     {
       key: "reduction",
@@ -106,8 +106,9 @@ function Figures({ stats }: { stats: Stats }) {
             break-even. JIT's{" "}
             <span className="num text-ink-2">{fmt(tokens?.startup || 0)}</span>-token
             tool schema is a fixed cost, so at {fmt(total)}{" "}
-            {total === 1 ? "entry" : "entries"} loading everything statically (
-            <span className="num text-ink-2">{fmt(tokens?.static || 0)}</span> tok) is
+            {total === 1 ? "entry" : "entries"} a catalog of names and descriptions
+            plus the one skill you load (
+            <span className="num text-ink-2">{fmt(tokens?.baseline || 0)}</span> tok) is
             cheaper per task. JIT wins at {fmt(breakEven)} entries or more.
           </span>
         </p>
@@ -309,7 +310,7 @@ function Quality({ stats }: { stats: Stats }) {
 
 function Budget({ stats }: { stats: Stats }) {
   const tokens = stats.tokens;
-  const rawRatio = tokens?.static ? (tokens.jit / tokens.static) * 100 : 0;
+  const rawRatio = tokens?.baseline ? (tokens.jit / tokens.baseline) * 100 : 0;
   const fillRatio = Math.min(100, rawRatio);
   const breakEven = Number(tokens?.break_even || 0);
   const total = stats.total || 0;
@@ -321,8 +322,8 @@ function Budget({ stats }: { stats: Stats }) {
       <PanelBody className="space-y-5">
         <div>
           <div className="flex items-baseline justify-between gap-4 text-xs">
-            <span className="text-ink-2">One JIT call against loading everything</span>
-            <span className="num text-ink">{rawRatio.toFixed(1)}% of static</span>
+            <span className="text-ink-2">One JIT call against a skill catalog</span>
+            <span className="num text-ink">{rawRatio.toFixed(1)}% of a catalog</span>
           </div>
           <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-line">
             <div
@@ -349,9 +350,9 @@ function Budget({ stats }: { stats: Stats }) {
           </span>
           <span className="flex items-center gap-2">
             <span aria-hidden="true" className="size-2 rounded-full bg-line-2" />
-            <span className="text-ink-3">Static loading</span>
+            <span className="text-ink-3">Catalog + one skill</span>
             <span className="num font-medium text-ink">
-              {fmt(tokens?.static || 0)} tok
+              {fmt(tokens?.baseline || 0)} tok
             </span>
           </span>
         </div>
@@ -360,8 +361,8 @@ function Budget({ stats }: { stats: Stats }) {
           {breakEven > 0 ? (
             <>
               Break-even at <span className="num text-ink-2">{fmt(breakEven)}</span>{" "}
-              entries: below that, loading everything statically costs less per task
-              than JIT's{" "}
+              entries: below that, keeping a catalog of every skill's name and
+              description in context costs less per task than JIT's{" "}
               <span className="num text-ink-2">{fmt(tokens?.startup || 0)}</span>
               -token tool schema.{" "}
               {belowBreakEven ? (

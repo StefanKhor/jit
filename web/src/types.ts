@@ -44,8 +44,9 @@ export interface Stats {
   heaviest: Array<{ name: string; kind: ItemKind; tokens: number }>;
   categories: Array<{ name: string; count: number }>;
   tokens: {
-    static: number;
     jit: number;
+    baseline: number;
+    catalog: number;
     startup: number;
     average_item: number;
     largest_item: number;
