@@ -18,7 +18,7 @@ RUN npm run build
 # request does not depend on the network. The model cache is separate from the
 # user's /data volume. An air-gapped or offline build can pass
 # --build-arg JIT_SKIP_MODEL_WARMUP=1 and supply the model at run time; JIT
-# falls back to lexical retrieval until it is there.
+# returns no match until it is there.
 ARG JIT_SKIP_MODEL_WARMUP=0
 RUN mkdir -p /app/models \
     && if [ "$JIT_SKIP_MODEL_WARMUP" = "1" ]; then \

@@ -1,7 +1,6 @@
 export type View =
   | "overview"
   | "skills"
-  | "marketplace"
   | "mcp"
   | "search"
   | "settings";
@@ -36,9 +35,6 @@ export interface PublicConfig {
   api_key: string;
   confidence_threshold: number;
   first_run: boolean;
-  marketplace_urls: string[];
-  skillspector_llm_enabled: boolean;
-  skillspector_llm_env: boolean;
   rerank_key_env: boolean;
   rerank_base_env: boolean;
   rerank_model_env: boolean;
@@ -140,105 +136,6 @@ export interface ConfigPath {
   exists: boolean;
 }
 
-export interface MarketplaceInput {
-  key: string;
-  label?: string;
-  type?: string;
-  default?: string;
-  required?: boolean;
-  secret?: boolean;
-  help?: string;
-}
-
-export interface MarketplaceItem {
-  id: string;
-  kind: "skill" | "mcp";
-  name: string;
-  description: string;
-  category: string;
-  author?: string;
-  license?: string;
-  source?: string;
-  requires?: string;
-  inputs: MarketplaceInput[];
-  install: Record<string, unknown>;
-  origin?: string;
-  checksum_present?: boolean;
-  installed?: boolean;
-  installs?: number;
-  weekly_installs?: number[];
-}
-
-export interface MarketplaceResponse {
-  items: MarketplaceItem[];
-  source: string;
-  warning: string;
-}
-
-/** Results from the skills.sh directory: search hits or the ranked leaderboard. */
-export interface MarketplaceDiscovery {
-  items: MarketplaceItem[];
-  warning: string;
-}
-
-export interface MarketplaceTopResponse extends MarketplaceDiscovery {
-  view: string;
-  page: number;
-  page_size: number;
-  has_more: boolean;
-  total: number;
-}
-
-export interface ScanFinding {
-  level: "critical" | "high" | "medium" | "low";
-  rule: string;
-  detail: string;
-  category?: string;
-  pattern?: string;
-  confidence?: number;
-  explanation?: string;
-  remediation?: string;
-  snippet?: string;
-  code_snippet?: string;
-  intent?: string;
-  tags?: string[];
-  location?: {
-    file: string;
-    start_line?: number;
-    end_line?: number;
-  };
-  evidence?: Record<string, unknown>;
-  /** Which scanner produced the finding. */
-  scanner?: "builtin" | "skillspector";
-}
-
-export interface ScanReport {
-  ok: boolean;
-  requires_ack: boolean;
-  findings: ScanFinding[];
-  /** The phase the install gate acts on. */
-  gate?: "allow" | "ack" | "block";
-  risk_score?: number;
-  severity?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
-  recommendation?: "SAFE" | "CAUTION" | "DO_NOT_INSTALL";
-  safe_to_install?: boolean;
-  llm_used?: boolean;
-  scanner_available?: boolean;
-  scanner_source?: "env" | "path" | "uvx" | "off" | "none";
-  scanner_version?: string;
-  scanners?: string[];
-  /** How to install the scanner, or why a full scan was not possible. */
-  note?: string;
-}
-
-export interface InspectResult {
-  id: string;
-  kind: "skill" | "mcp";
-  checksum_required: boolean;
-  checksum_present: boolean;
-  report: ScanReport;
-}
-
 export interface NearMiss {
   id: string;
   name: string;
@@ -253,9 +150,7 @@ export interface SearchCandidate {
   description: string;
   kind: ItemKind;
   cosine: number;
-  rrf: number;
   rerank: number | null;
-  lexical: number;
   score: number;
   passes_threshold: boolean;
 }
@@ -268,7 +163,6 @@ export interface SearchResult {
   content: string;
   confidence: number;
   reranked: boolean;
-  keyword_only?: boolean;
   related?: string[];
   source?: string;
   trust?: "first-party" | "third-party";
@@ -281,7 +175,6 @@ export interface SearchResponse {
   candidates: SearchCandidate[];
   near_misses: NearMiss[];
   reranked: boolean;
-  keyword_only: boolean;
   warning?: string;
   ranking_warning?: string;
   threshold: number;
@@ -298,10 +191,8 @@ export interface RetrievalLogEntry {
   score: number;
   cosine: number;
   rerank: number | null;
-  lexical: number;
   candidates: number;
   decision: "hit" | "miss";
-  keyword_only: boolean;
   elapsed_ms: number;
 }
 
@@ -310,7 +201,6 @@ export interface RetrievalStats {
   hits: number;
   misses: number;
   miss_rate: number;
-  keyword_only: number;
   threshold: number;
   recent: RetrievalLogEntry[];
   misses_recent: RetrievalLogEntry[];
@@ -334,14 +224,6 @@ export interface ExportSkillsResult {
   destination: string;
 }
 
-export interface ExportMcpResult {
-  exported: string[];
-  skipped: string[];
-  errors: string[];
-  path: string;
-  format: string;
-}
-
 export interface InstallResult {
   ok?: boolean;
   id?: string;
@@ -353,8 +235,6 @@ export interface InstallResult {
   skipped?: number;
   errors?: string[];
   error?: string;
-  warnings?: ScanFinding[];
-  scan_report?: ScanReport;
   tools_removed?: number;
   removed?: boolean;
 }

@@ -12,8 +12,6 @@ import { api, authKey, setAuthKey, setUnauthorizedHandler } from "../api";
 import type {
   ConfirmRequest,
   Health,
-  MarketplaceItem,
-  MarketplaceResponse,
   McpServerSummary,
   PublicConfig,
   SkillDetail,
@@ -25,18 +23,14 @@ import type {
 } from "../types";
 
 /**
- * Dialog state is one object rather than eight flags: they are mutually
+ * Dialog state is one object rather than seven flags: they are mutually
  * independent panels over the dashboard, and keeping them together means one
- * setter instead of eight and no risk of a stale sibling.
+ * setter instead of seven and no risk of a stale sibling.
  */
 export interface DialogState {
   skill: boolean;
   skillDetail: SkillDetail | null;
-  market: MarketplaceItem | null;
-  /** The entries a bulk install was opened for, or null. */
-  marketBulk: MarketplaceItem[] | null;
   mcpAdd: boolean;
-  mcpExport: boolean;
   transfer: boolean;
   transferTab: "in" | "out";
   setup: boolean;
@@ -45,10 +39,7 @@ export interface DialogState {
 const NO_DIALOGS: DialogState = {
   skill: false,
   skillDetail: null,
-  market: null,
-  marketBulk: null,
   mcpAdd: false,
-  mcpExport: false,
   transfer: false,
   transferTab: "in",
   setup: false,
@@ -78,11 +69,6 @@ export interface AppContextValue {
   loadMcp: () => Promise<McpServerSummary[]>;
   refreshAll: () => Promise<void>;
 
-  /* marketplace */
-  marketplace: MarketplaceResponse | null;
-  marketLoaded: boolean;
-  loadMarketplace: (force?: boolean) => Promise<void>;
-
   /* navigation & chrome */
   view: View;
   setView: (view: View) => void;
@@ -98,16 +84,10 @@ export interface AppContextValue {
   dialogs: DialogState;
   openSkill: (id: string) => Promise<void>;
   closeSkill: () => void;
-  openMarket: (item: MarketplaceItem) => void;
-  closeMarket: () => void;
-  openMarketBulk: (items: MarketplaceItem[]) => void;
-  closeMarketBulk: () => void;
   openTransfer: (tab?: "in" | "out") => Promise<void>;
   closeTransfer: () => void;
   openMcpAdd: () => void;
   closeMcpAdd: () => void;
-  openMcpExport: () => Promise<void>;
-  closeMcpExport: () => void;
   setSetupOpen: (open: boolean) => void;
 
   api: typeof api;
@@ -135,8 +115,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [stats, setStats] = useState<Stats | null>(null);
   const [skills, setSkills] = useState<SkillListItem[]>([]);
   const [mcpServers, setMcpServers] = useState<McpServerSummary[]>([]);
-  const [marketplace, setMarketplace] = useState<MarketplaceResponse | null>(null);
-  const [marketLoaded, setMarketLoaded] = useState(false);
   const [view, setViewState] = useState<View>("overview");
   const [toastMessage, setToastMessage] = useState<ToastMessage | null>(null);
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
@@ -218,19 +196,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const refreshAll = useCallback(async (): Promise<void> => {
     await Promise.allSettled([loadStats(), loadSkills(), loadMcp()]);
   }, [loadMcp, loadSkills, loadStats]);
-
-  const loadMarketplace = useCallback(
-    async (force = false): Promise<void> => {
-      if (marketLoaded && !force) return;
-      try {
-        setMarketplace(await api<MarketplaceResponse>("/api/marketplace"));
-        setMarketLoaded(true);
-      } catch (error) {
-        reportError(error);
-      }
-    },
-    [marketLoaded, reportError],
-  );
 
   const saveConfig = useCallback(
     async (updates: Record<string, unknown>): Promise<PublicConfig> => {
@@ -350,10 +315,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     (next: View) => {
       setViewState(next);
       window.scrollTo(0, 0);
-      if (next === "marketplace") void loadMarketplace();
       if (next === "mcp") void loadMcp();
     },
-    [loadMarketplace, loadMcp],
+    [loadMcp],
   );
 
   const openSkill = useCallback(
@@ -376,15 +340,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [loadSkills, patchDialogs],
   );
 
-  const openMcpExport = useCallback(async () => {
-    const servers = await loadMcp();
-    if (servers.length === 0) {
-      showToast("No JIT-managed MCP servers to export.", "error");
-      return;
-    }
-    patchDialogs({ mcpExport: true });
-  }, [loadMcp, patchDialogs, showToast]);
-
   const value: AppContextValue = {
     booting,
     loginRequired,
@@ -403,9 +358,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     loadSkills,
     loadMcp,
     refreshAll,
-    marketplace,
-    marketLoaded,
-    loadMarketplace,
     view,
     setView,
     toast: showToast,
@@ -416,16 +368,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dialogs,
     openSkill,
     closeSkill: () => patchDialogs({ skill: false }),
-    openMarket: (item) => patchDialogs({ market: item }),
-    closeMarket: () => patchDialogs({ market: null }),
-    openMarketBulk: (items) => patchDialogs({ marketBulk: items }),
-    closeMarketBulk: () => patchDialogs({ marketBulk: null }),
     openTransfer,
     closeTransfer: () => patchDialogs({ transfer: false }),
     openMcpAdd: () => patchDialogs({ mcpAdd: true }),
     closeMcpAdd: () => patchDialogs({ mcpAdd: false }),
-    openMcpExport,
-    closeMcpExport: () => patchDialogs({ mcpExport: false }),
     setSetupOpen: (open) => patchDialogs({ setup: open }),
     api,
   };

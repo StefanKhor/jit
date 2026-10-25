@@ -31,25 +31,6 @@ npm run typecheck
 npm run build
 ```
 
-Retrieval changes should also move the numbers:
-
-```bash
-npm run eval   # recall@1 / @3, MRR, precision, threshold sweep
-```
-
-`npm run eval` seeds a throwaway index from `eval/fixture.jsonl` and runs
-`eval/queries.jsonl`, so it needs no setup and no network. Add a query when you
-add a behavior. Run it with `JIT_DISABLE_EMBEDDINGS=1` to verify strict retrieval
-returns an unavailable warning instead of a keyword-only match; run it normally
-to compare the vector-retrieval metrics.
-
-To score your own index, pass both a home and a query file (with `--home`, the
-fixtures are not seeded, so your entries are the corpus):
-
-```bash
-npm run eval -- --home ~/.jit --queries mine.jsonl
-```
-
 Verify behavior changes manually against the dashboard and the MCP server:
 
 ```bash
@@ -64,30 +45,8 @@ Useful smoke checks:
 - The dashboard loads with no console errors and shows real index counts.
 - `JIT_STATUS` over MCP reports the same counts as the dashboard.
 - Adding, toggling, and removing a skill updates both views.
-- A marketplace MCP install connects and indexes its tools.
 - Import and export leave the external side untouched.
 - A query with no match returns `near_misses`, not a silent empty result.
-- `GET /api/marketplace` reports `source: "none"` until you add a source.
-- A GitHub source (`owner/repo`) lists the skills the `skills` CLI installs;
-  `POST /api/marketplace/inspect` shows the findings before you install.
-- The directory browser (`/api/marketplace/search`, `/api/marketplace/top`)
-  returns entries, and installing one needs no configured source.
-
-## Marketplace sources
-
-JIT ships no catalog of its own, so the marketplace is whatever the user points
-it at: an HTTPS catalog URL, or a repository source (`owner/repo[@ref][#dir]`,
-or a `skills.sh/<owner>/<repo>[/<skill>]` link) that JIT hands to the open
-`skills` CLI. `src/github.ts` and `src/skillsSh.ts` only validate references;
-`src/skillsCli.ts` runs the CLI and `src/marketplace.ts` normalizes every entry.
-Do not reimplement repository resolution here — that is the CLI's job.
-
-`src/skillsSh.ts` also reads the directory's own public JSON API for search and
-its ranking. That is a read-only listing, not an install: every install still
-goes through the CLI, and an entry found there carries the source it came from so
-the review and install calls can resolve it. Remote skill bodies must carry a
-`sha256`; repository skills carry the hash the CLI reports. Never relax the
-checksum requirement, and keep every entry scanned before install.
 
 ## Pull requests
 

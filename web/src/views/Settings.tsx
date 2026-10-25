@@ -26,10 +26,7 @@ export function Settings() {
   const [embeddingDim, setEmbeddingDim] = useState("1536");
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState("");
-  const [marketUrls, setMarketUrls] = useState<string[]>([]);
-  const [newMarketUrl, setNewMarketUrl] = useState("");
   const [threshold, setThreshold] = useState(0.6);
-  const [skillspectorLlm, setSkillspectorLlm] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -43,8 +40,6 @@ export function Settings() {
     setEmbeddingModel(config.embedding_api_model || "");
     setEmbeddingDim(String(config.embedding_api_dim || 1536));
     setThreshold(Number(config.confidence_threshold ?? 0.6));
-    setSkillspectorLlm(Boolean(config.skillspector_llm_enabled));
-    setMarketUrls(Array.isArray(config.marketplace_urls) ? config.marketplace_urls : []);
   }, [config]);
 
   const saveRerank = async (event: FormEvent) => {
@@ -139,53 +134,6 @@ export function Settings() {
     }
   };
 
-  const saveSkillspectorLlm = async (enabled: boolean) => {
-    setSkillspectorLlm(enabled);
-    setSaving("skillspector-llm");
-    try {
-      await ctx.saveConfig({ skillspector_llm_enabled: enabled });
-      ctx.toast(
-        enabled
-          ? "SkillSpector semantic LLM analysis enabled."
-          : "SkillSpector static-only analysis enabled.",
-      );
-    } catch (error) {
-      setSkillspectorLlm(Boolean(config?.skillspector_llm_enabled));
-      ctx.toast(error instanceof Error ? error.message : String(error), "error");
-    } finally {
-      setSaving("");
-    }
-  };
-
-  const saveMarketplaces = async (next: string[]) => {
-    setSaving("market");
-    try {
-      await ctx.saveConfig({ marketplace_urls: next });
-      setMarketUrls(next);
-      ctx.toast("Marketplace catalogs saved.");
-    } catch (error) {
-      ctx.toast(error instanceof Error ? error.message : String(error), "error");
-    } finally {
-      setSaving("");
-    }
-  };
-
-  const addMarketplace = async (event: FormEvent) => {
-    event.preventDefault();
-    const value = newMarketUrl.trim();
-    if (!value) return;
-    if (marketUrls.includes(value)) {
-      setNewMarketUrl("");
-      return;
-    }
-    await saveMarketplaces([...marketUrls, value]);
-    setNewMarketUrl("");
-  };
-
-  const removeMarketplace = async (url: string) => {
-    await saveMarketplaces(marketUrls.filter((item) => item !== url));
-  };
-
   const removeKey = async () => {
     const ok = await ctx.confirmAction(
       "Remove the reranker API key?",
@@ -277,7 +225,6 @@ export function Settings() {
         (result.errors || []).length ? "error" : "ok",
       );
       await ctx.refreshAll();
-      if (ctx.marketLoaded) await ctx.loadMarketplace(true);
     } catch (error) {
       ctx.toast(
         error instanceof SyntaxError
@@ -301,7 +248,6 @@ export function Settings() {
       await ctx.api("/api/clear", { method: "POST" });
       ctx.toast("Index cleared.");
       await ctx.refreshAll();
-      if (ctx.marketLoaded) await ctx.loadMarketplace(true);
     } catch (error) {
       ctx.toast(error instanceof Error ? error.message : String(error), "error");
     }
@@ -579,47 +525,12 @@ export function Settings() {
           </Panel>
 
           <Panel>
-            <PanelHead
-              title="SkillSpector analysis"
-              hint={skillspectorLlm ? "static + semantic" : "static only"}
-              actions={
-                <Badge tone={skillspectorLlm ? "accent" : "neutral"}>
-                  {skillspectorLlm ? "LLM on" : "LLM off"}
-                </Badge>
-              }
-            />
-            <PanelBody className="space-y-5">
-              <p className="text-xs leading-relaxed text-ink-3">
-                Static checks always run. Semantic analysis sends skill content
-                to SkillSpector’s configured model provider and may add latency
-                or provider costs. Configure provider credentials in the JIT
-                process environment before enabling it.
-              </p>
-              <ToggleRow
-                label="Enable semantic LLM analysis"
-                hint={
-                  config?.skillspector_llm_env
-                    ? "Controlled by JIT_SKILLSPECTOR_LLM in the environment."
-                    : "Off by default; static SkillSpector scanning needs no model credentials."
-                }
-                checked={skillspectorLlm}
-                disabled={Boolean(config?.skillspector_llm_env) || saving === "skillspector-llm"}
-                onCheckedChange={(enabled) => void saveSkillspectorLlm(enabled)}
-              />
-            </PanelBody>
-          </Panel>
-
-          <Panel>
             <PanelHead title="Retrieval threshold" hint="recall vs precision" />
             <PanelBody className="space-y-5">
               <p className="text-xs leading-relaxed text-ink-3">
                 JIT returns a match only when the score clears this bar. Lower it
                 to catch more (more false positives), raise it to return only
-                confident matches. Measure the effect with{" "}
-                <code className="num rounded border border-line-2 bg-raised px-1 py-0.5 text-[11px] text-ink-2">
-                  npm run eval
-                </code>{" "}
-                and the Search view.
+                confident matches. Weigh the effect against the Search view.
               </p>
               <form className="space-y-5" onSubmit={saveThreshold}>
                 <Field
@@ -702,81 +613,6 @@ export function Settings() {
         </div>
 
         <div className="space-y-6">
-          <Panel>
-            <PanelHead
-              title="Marketplace catalogs"
-              hint={
-                marketUrls.length
-                  ? `${fmt(marketUrls.length)} configured`
-                  : "none configured"
-              }
-            />
-            <PanelBody className="space-y-5">
-              <p className="text-xs leading-relaxed text-ink-3">
-                JIT has no built-in catalog. Add one or more remote catalog URLs
-                (JSON with an items array) to populate the marketplace; a later
-                source overrides an earlier entry with the same id. A repository
-                works too: enter{" "}
-                <code className="num rounded border border-line-2 bg-raised px-1 py-0.5 text-[11px] text-ink-2">
-                  owner/repo
-                </code>{" "}
-                or a repo link, and JIT resolves it with the{" "}
-                <code className="num rounded border border-line-2 bg-raised px-1 py-0.5 text-[11px] text-ink-2">
-                  skills
-                </code>{" "}
-                CLI.
-              </p>
-              <form
-                className="flex flex-col gap-2 sm:flex-row"
-                onSubmit={addMarketplace}
-              >
-                <Input
-                  type="text"
-                  aria-label="Catalog URL"
-                  placeholder="https://example.com/catalog.json or owner/repo"
-                  spellCheck={false}
-                  autoComplete="off"
-                  value={newMarketUrl}
-                  onChange={(event) => setNewMarketUrl(event.target.value)}
-                  className="flex-1"
-                />
-                <Button
-                  type="submit"
-                  variant="primary"
-                  disabled={saving === "market" || !newMarketUrl.trim()}
-                >
-                  {saving === "market" ? "Saving…" : "Add"}
-                </Button>
-              </form>
-              {marketUrls.length === 0 ? (
-                <p className="text-xs text-ink-3">No catalogs configured.</p>
-              ) : (
-                <ul className="divide-y divide-line overflow-hidden rounded-lg border border-line">
-                  {marketUrls.map((url) => (
-                    <li
-                      key={url}
-                      className="flex items-center justify-between gap-3 px-3 py-2.5"
-                    >
-                      <span
-                        className="num min-w-0 truncate text-xs text-ink-2"
-                        title={url}
-                      >
-                        {url}
-                      </span>
-                      <Button
-                        size="sm"
-                        variant="danger"
-                        onClick={() => void removeMarketplace(url)}
-                      >
-                        Remove
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </PanelBody>
-          </Panel>
-
           <Panel>
             <PanelHead title="Data" hint="portable JSON" />
             <PanelBody className="space-y-5">

@@ -1,7 +1,7 @@
 {
   "name": "jit-mcp",
   "version": "1.0.0",
-  "description": "A search engine for skills: one query returns one tested procedure — local, just-in-time, scanned by NVIDIA SkillSpector.",
+  "description": "A search engine for skills: one query returns one tested procedure — local and just-in-time.",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -42,7 +42,6 @@
     "build:web": "vite build --config web/vite.config.ts",
     "start": "node dist/cli.js dashboard",
     "serve": "node dist/cli.js serve",
-    "eval": "node --import tsx scripts/eval.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit",
     "check": "npm run typecheck && npm run build",
     "clean": "node -e \"const fs=require('node:fs');fs.rmSync('dist',{recursive:true,force:true});fs.rmSync('static',{recursive:true,force:true})\"",

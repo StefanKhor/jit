@@ -3,7 +3,6 @@ import type { TransferResult, View } from "./types";
 export const viewLabels: Record<View, string> = {
   overview: "Overview",
   skills: "Skills",
-  marketplace: "Marketplace",
   mcp: "MCP",
   search: "Search",
   settings: "Settings",
@@ -17,7 +16,6 @@ export const viewLabels: Record<View, string> = {
 export const NAV_VIEWS: View[] = [
   "overview",
   "skills",
-  "marketplace",
   "search",
   "settings",
 ];

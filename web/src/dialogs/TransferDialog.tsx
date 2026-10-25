@@ -28,9 +28,6 @@ export function TransferDialog({
   const [exportOverwrite, setExportOverwrite] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
-  const [ack, setAck] = useState(false);
-  // Shown only after the scanner asks for one; the first pass is always clean.
-  const [needsAck, setNeedsAck] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -44,8 +41,6 @@ export function TransferDialog({
     setSelected(
       new Set(ctx.skills.filter((skill) => skill.managed).map((skill) => skill.id)),
     );
-    setAck(false);
-    setNeedsAck(false);
     setError("");
     setBusy(false);
     // Skills are refreshed before the dialog opens; do not reset the form when
@@ -68,21 +63,17 @@ export function TransferDialog({
         errors?: string[];
       }>("/api/skills/transfer", {
         method: "POST",
-        body: JSON.stringify({ path, copy, overwrite, acknowledge: ack }),
+        body: JSON.stringify({ path, copy, overwrite }),
       });
       const errors = result.errors || [];
       if (errors.length) {
         setError(errors[0] || "");
-        if (errors.some((message) => /acknowledgement/i.test(message))) {
-          setNeedsAck(true);
-        }
         ctx.toast(summary(result), "error");
       } else {
         onClose();
         ctx.toast(summary(result));
       }
       await ctx.refreshAll();
-      if (ctx.marketLoaded) await ctx.loadMarketplace(true);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -193,13 +184,6 @@ export function TransferDialog({
               checked={overwrite}
               onCheckedChange={setOverwrite}
             />
-            {needsAck ? (
-              <ToggleRow
-                label="The scan asked for an acknowledgement. I have read why, and want to import these skills anyway."
-                checked={ack}
-                onCheckedChange={setAck}
-              />
-            ) : null}
           </TabPanel>
 
           <TabPanel value="out" className="space-y-4">

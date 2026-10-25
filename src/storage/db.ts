@@ -52,10 +52,8 @@ CREATE TABLE IF NOT EXISTS retrieval_log (
     score        REAL,
     cosine       REAL,
     rerank       REAL,
-    lexical      REAL,
     candidates   INTEGER,
     decision     TEXT,
-    keyword_only INTEGER,
     elapsed_ms   REAL
 );
 CREATE INDEX IF NOT EXISTS idx_retrieval_id ON retrieval_log(id DESC);
@@ -495,10 +493,8 @@ export interface RetrievalRecord {
   score: number;
   cosine: number;
   rerank: number | null;
-  lexical: number;
   candidates: number;
   decision: "hit" | "miss";
-  keywordOnly: boolean;
   elapsedMs: number;
 }
 
@@ -506,8 +502,8 @@ export function logRetrieval(db: DatabaseSync, record: RetrievalRecord): void {
   db.prepare(
     `INSERT INTO retrieval_log
        (ts, source, intent, best_id, best_name, score, cosine, rerank,
-        lexical, candidates, decision, keyword_only, elapsed_ms)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        candidates, decision, elapsed_ms)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     new Date().toISOString(),
     record.source,
@@ -517,10 +513,8 @@ export function logRetrieval(db: DatabaseSync, record: RetrievalRecord): void {
     record.score,
     record.cosine,
     record.rerank,
-    record.lexical,
     record.candidates,
     record.decision,
-    record.keywordOnly ? 1 : 0,
     record.elapsedMs,
   );
   // Keep the log bounded; it is telemetry, not an audit trail.
@@ -540,10 +534,8 @@ function rowToRetrieval(row: Row): import("../types.js").RetrievalLogEntry {
     score: Number(row.score || 0),
     cosine: Number(row.cosine || 0),
     rerank: row.rerank === null || row.rerank === undefined ? null : Number(row.rerank),
-    lexical: Number(row.lexical || 0),
     candidates: Number(row.candidates || 0),
     decision: row.decision === "hit" ? "hit" : "miss",
-    keyword_only: row.keyword_only === 1,
     elapsed_ms: Number(row.elapsed_ms || 0),
   };
 }
@@ -563,8 +555,7 @@ export function retrievalStats(
     .prepare(
       `SELECT COUNT(*) AS total,
               COALESCE(SUM(decision = 'hit'), 0) AS hits,
-              COALESCE(SUM(decision = 'miss'), 0) AS misses,
-              COALESCE(SUM(keyword_only = 1), 0) AS keyword_only
+              COALESCE(SUM(decision = 'miss'), 0) AS misses
          FROM retrieval_log`,
     )
     .get() as Row;
@@ -590,7 +581,6 @@ export function retrievalStats(
     hits,
     misses,
     miss_rate: total ? Number(((misses / total) * 100).toFixed(1)) : 0,
-    keyword_only: Number(totals.keyword_only || 0),
     threshold: 0,
     recent,
     misses_recent: recent.filter((entry) => entry.decision === "miss"),

@@ -159,7 +159,7 @@ export function Search() {
         </Panel>
       ) : data.warning ? (
         <Panel className="border-warn/30 bg-warn/5">
-          <PanelHead title="Embedding search unavailable" hint="no keyword fallback used" />
+          <PanelHead title="Embedding search unavailable" hint="no fallback used" />
           <PanelBody>
             <p className="max-w-3xl text-sm leading-relaxed text-ink-2">
               {data.warning}
@@ -343,7 +343,7 @@ function SearchOutput({ data }: { data: SearchResponse }) {
       <Panel>
         <PanelHead
           title="Ranked candidates"
-          hint="score · cosine · rerank · lexical"
+          hint="score · cosine · rerank"
         />
         <TableWrap>
           <Table className="table-fixed">
@@ -357,9 +357,6 @@ function SearchOutput({ data }: { data: SearchResponse }) {
                 </Th>
                 <Th className="num hidden w-20 text-right md:table-cell">
                   Rerank
-                </Th>
-                <Th className="num hidden w-20 text-right lg:table-cell">
-                  Lexical
                 </Th>
                 <Th className="w-24">Threshold</Th>
               </tr>
@@ -392,9 +389,6 @@ function SearchOutput({ data }: { data: SearchResponse }) {
                     {candidate.rerank == null
                       ? "—"
                       : Number(candidate.rerank).toFixed(2)}
-                  </Td>
-                  <Td className="num hidden text-right text-ink-2 lg:table-cell">
-                    {Number(candidate.lexical).toFixed(3)}
                   </Td>
                   <Td>
                     <span className="inline-flex items-center gap-1.5 text-xs text-ink-2">
@@ -480,7 +474,6 @@ function RetrievalHistory({
                         tone={entry.decision === "hit" ? "ok" : "warn"}
                       />
                       {entry.decision === "hit" ? "hit" : "miss"}
-                      {entry.keyword_only ? " · kw" : ""}
                     </span>
                   </Td>
                 </Tr>

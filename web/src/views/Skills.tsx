@@ -37,20 +37,7 @@ export function Skills() {
         body: JSON.stringify({ path: value, ...extra }),
       });
     try {
-      let result = await post({});
-      const first = (result.errors || [])[0] || "";
-      // SkillSpector's caution — or an unavailable scanner — asks for a
-      // deliberate acknowledgement before the skill is indexed. A hard block
-      // does not offer a way through here; that one is refused.
-      if (/acknowledgement/i.test(first)) {
-        const proceed = await ctx.confirmAction(
-          "Index without a clean scan?",
-          `${first}\n\nAdd it to the index anyway?`,
-          "Add anyway",
-        );
-        if (!proceed) return;
-        result = await post({ acknowledge: true });
-      }
+      const result = await post({});
       ctx.toast(
         summary(result),
         (result.errors || []).length ? "error" : "ok",
@@ -99,7 +86,6 @@ export function Skills() {
       );
       ctx.toast(managed ? `Uninstalled ${id}.` : `${id} unindexed.`);
       await ctx.refreshAll();
-      if (ctx.marketLoaded) await ctx.loadMarketplace(true);
     } catch (error) {
       ctx.toast(error instanceof Error ? error.message : String(error), "error");
     } finally {
@@ -145,7 +131,6 @@ export function Skills() {
       ctx.toast(parts.join(" · "), result.failed.length ? "error" : "ok");
       sel.clear();
       await ctx.refreshAll();
-      if (action === "remove" && ctx.marketLoaded) await ctx.loadMarketplace(true);
     } catch (error) {
       ctx.toast(error instanceof Error ? error.message : String(error), "error");
     } finally {
@@ -168,15 +153,7 @@ export function Skills() {
         }
         description="Only what you import is indexed. JIT never scans your skill folders on startup. Transfer copies files in or out; indexing a path leaves the file where it lives."
         actions={
-          <>
-            <Button
-              variant="primary"
-              onClick={() => ctx.setView("marketplace")}
-            >
-              Browse marketplace
-            </Button>
-            <Button onClick={() => ctx.openTransfer("in")}>Transfer</Button>
-          </>
+          <Button onClick={() => ctx.openTransfer("in")}>Transfer</Button>
         }
       />
 
@@ -209,20 +186,12 @@ export function Skills() {
           <Empty
             title="Nothing indexed yet."
             actions={
-              <>
-                <Button
-                  variant="primary"
-                  onClick={() => ctx.setView("marketplace")}
-                >
-                  Browse marketplace
-                </Button>
-                <Button onClick={() => ctx.openTransfer("in")}>
-                  Transfer skills
-                </Button>
-              </>
+              <Button variant="primary" onClick={() => ctx.openTransfer("in")}>
+                Transfer skills
+              </Button>
             }
           >
-            Install from the marketplace, or paste a path above.
+            Paste a path above to index a skill in place.
           </Empty>
         </Panel>
       ) : (

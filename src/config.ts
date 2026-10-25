@@ -121,8 +121,6 @@ export const DEFAULT_CONFIG: Config = {
   api_key: "",
   confidence_threshold: CONFIDENCE_THRESHOLD,
   first_run: true,
-  marketplace_urls: [],
-  skillspector_llm_enabled: false,
 };
 
 const FILE_KEYS = new Set<keyof Config>([
@@ -139,8 +137,6 @@ const FILE_KEYS = new Set<keyof Config>([
   "api_key",
   "confidence_threshold",
   "first_run",
-  "marketplace_urls",
-  "skillspector_llm_enabled",
 ]);
 
 const ENV_KEYS: Partial<Record<keyof Config, string>> = {
@@ -214,7 +210,7 @@ function readStoredConfig(): Partial<Config> {
       }
       continue;
     }
-    if (key === "first_run" || key === "skillspector_llm_enabled") {
+    if (key === "first_run") {
       if (typeof value === "boolean") {
         (stored as Record<string, unknown>)[key] = value;
       }
@@ -230,11 +226,6 @@ function readStoredConfig(): Partial<Config> {
     if (typeof value === "string") {
       (stored as Record<string, unknown>)[key] = value;
     }
-  }
-  if (Array.isArray(raw.marketplace_urls)) {
-    stored.marketplace_urls = raw.marketplace_urls
-      .map((value) => String(value).trim())
-      .filter(Boolean);
   }
   return stored;
 }
@@ -279,12 +270,6 @@ export function loadConfig(): Config {
     }
   }
   config.first_run = Boolean(config.first_run);
-  const scannerLlmEnv = process.env.JIT_SKILLSPECTOR_LLM;
-  if (scannerLlmEnv !== undefined && scannerLlmEnv.trim() !== "") {
-    config.skillspector_llm_enabled = ["1", "true", "yes", "on"].includes(
-      scannerLlmEnv.trim().toLowerCase(),
-    );
-  }
   if (process.env.JIT_EMBEDDING_PROVIDER === "local" ||
       process.env.JIT_EMBEDDING_PROVIDER === "openai-compatible") {
     config.embedding_provider = process.env.JIT_EMBEDDING_PROVIDER;
@@ -316,16 +301,6 @@ export function loadConfig(): Config {
   config.confidence_threshold = Number.isFinite(Number(config.confidence_threshold))
     ? Math.min(1, Math.max(0, Number(config.confidence_threshold)))
     : CONFIDENCE_THRESHOLD;
-  const envUrls = (process.env.JIT_MARKETPLACE_URL || "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
-  if (envUrls.length) {
-    config.marketplace_urls = [...new Set([...(config.marketplace_urls || []), ...envUrls])];
-  }
-  config.marketplace_urls = Array.isArray(config.marketplace_urls)
-    ? config.marketplace_urls.map((value) => String(value).trim()).filter(Boolean)
-    : [];
   return config;
 }
 
@@ -417,9 +392,6 @@ export function publicConfig(): PublicConfig {
       config.embedding_provider === "local"
         ? Boolean(process.env.JIT_EMBEDDING_DIM)
         : Boolean(process.env.JIT_EMBEDDING_API_DIM),
-    skillspector_llm_env:
-      process.env.JIT_SKILLSPECTOR_LLM !== undefined &&
-      process.env.JIT_SKILLSPECTOR_LLM.trim() !== "",
     rerank_key_env: Boolean(process.env.JIT_RERANK_API_KEY),
     rerank_base_env: Boolean(process.env.JIT_RERANK_API_BASE),
     rerank_model_env: Boolean(process.env.JIT_RERANK_MODEL),

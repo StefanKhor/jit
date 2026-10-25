@@ -29,7 +29,7 @@ export function SetupDialog({
     await ctx.saveConfig({ complete_setup: true });
   };
 
-  const finish = async (goMarketplace: boolean) => {
+  const finish = async () => {
     if (busy) return;
     setBusy(true);
     try {
@@ -49,10 +49,6 @@ export function SetupDialog({
       }
       onClose();
       await ctx.refreshAll();
-      if (goMarketplace) {
-        ctx.setView("marketplace");
-        await ctx.loadMarketplace();
-      }
     } catch (error) {
       ctx.toast(error instanceof Error ? error.message : String(error), "error");
     } finally {
@@ -61,7 +57,7 @@ export function SetupDialog({
   };
 
   const dismiss = () => {
-    if (!busy) void finish(false);
+    if (!busy) void finish();
   };
 
   return (
@@ -75,7 +71,7 @@ export function SetupDialog({
         className="flex min-h-0 flex-1 flex-col"
         onSubmit={(event) => {
           event.preventDefault();
-          void finish(false);
+          void finish();
         }}
       >
         <DialogHead
@@ -86,8 +82,8 @@ export function SetupDialog({
         <DialogBody className="space-y-5">
           <Wordmark className="text-sm" />
           <p className="text-sm leading-relaxed text-ink-2">
-            JIT starts empty. Install from the marketplace, or import what you
-            already use. Nothing is read from your client configs automatically.
+            JIT starts empty. Import the skills you already use. Nothing is read
+            from your client configs automatically.
           </p>
           <p className="text-xs leading-relaxed text-ink-3">
             Optional OpenAI-compatible reranking can be configured later in
@@ -104,14 +100,7 @@ export function SetupDialog({
           <Button
             variant="ghost"
             disabled={busy}
-            onClick={() => void finish(true)}
-          >
-            Browse marketplace
-          </Button>
-          <Button
-            variant="ghost"
-            disabled={busy}
-            onClick={() => void finish(false)}
+            onClick={() => void finish()}
           >
             Skip for now
           </Button>

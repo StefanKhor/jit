@@ -753,14 +753,11 @@ export function Overview() {
           <PanelBody className="flex flex-col items-center gap-3 py-14 text-center">
             <div className="text-sm font-medium text-ink">The index is empty.</div>
             <p className="max-w-md text-sm leading-relaxed text-ink-2">
-              JIT only indexes what you choose. Start with a skill from the
-              marketplace, or import what you already use.
+              JIT only indexes what you choose. Import the skills you already
+              use.
             </p>
             <div className="mt-2 flex flex-wrap justify-center gap-2">
-              <Button variant="primary" onClick={() => ctx.setView("marketplace")}>
-                Browse marketplace
-              </Button>
-              <Button onClick={() => void ctx.openTransfer("in")}>
+              <Button variant="primary" onClick={() => void ctx.openTransfer("in")}>
                 Transfer skills
               </Button>
             </div>

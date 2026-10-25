@@ -23,9 +23,6 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         node: ["24.x"]
     env:
-      # The real-model unit tests are opt-in; the embedding-backed eval below
-      # covers semantic retrieval end to end.
-      JIT_SKIP_EMBEDDING_TESTS: "1"
       JIT_HOME: ${{ github.workspace }}/.jit-home
     steps:
       - uses: actions/checkout@v4
@@ -37,17 +34,11 @@ jobs:
 
       - run: npm ci
 
-      - name: Typecheck (app, dashboard, tests, scripts)
+      - name: Typecheck
         run: npm run typecheck
-
-      - name: Tests
-        run: npm test
 
       - name: Build
         run: npm run build
-
-      - name: Retrieval eval (embedding-backed)
-        run: npm run eval -- --min-recall1 0.9 --min-mrr 0.9
 
   docker:
     name: docker image

@@ -1,10 +1,7 @@
 import { Login } from "./Login";
 import { Shell } from "./Shell";
-import { BulkInstallDialog } from "../dialogs/BulkInstallDialog";
 import { ConfirmDialog } from "../dialogs/ConfirmDialog";
-import { MarketDialog } from "../dialogs/MarketDialog";
 import { McpAddDialog } from "../dialogs/McpAddDialog";
-import { McpExportDialog } from "../dialogs/McpExportDialog";
 import { SetupDialog } from "../dialogs/SetupDialog";
 import { SkillDialog } from "../dialogs/SkillDialog";
 import { TransferDialog } from "../dialogs/TransferDialog";
@@ -12,7 +9,6 @@ import { AppProvider, useJit } from "../state/store";
 import { Wordmark } from "../ui/Display";
 import { Toast } from "../ui/Toast";
 import { Mcp } from "../views/Mcp";
-import { Marketplace } from "../views/Marketplace";
 import { Overview } from "../views/Overview";
 import { Search } from "../views/Search";
 import { Settings } from "../views/Settings";
@@ -41,7 +37,6 @@ function Root() {
       <Shell>
         {ctx.view === "overview" ? <Overview /> : null}
         {ctx.view === "skills" ? <Skills /> : null}
-        {ctx.view === "marketplace" ? <Marketplace /> : null}
         {ctx.view === "mcp" ? <Mcp /> : null}
         {ctx.view === "search" ? <Search /> : null}
         {ctx.view === "settings" ? <Settings /> : null}
@@ -56,20 +51,11 @@ function Root() {
         detail={ctx.dialogs.skillDetail}
         onClose={ctx.closeSkill}
       />
-      <MarketDialog item={ctx.dialogs.market} onClose={ctx.closeMarket} />
-      <BulkInstallDialog
-        items={ctx.dialogs.marketBulk}
-        onClose={ctx.closeMarketBulk}
-      />
       <McpAddDialog open={ctx.dialogs.mcpAdd} onClose={ctx.closeMcpAdd} />
       <TransferDialog
         open={ctx.dialogs.transfer}
         initialTab={ctx.dialogs.transferTab}
         onClose={ctx.closeTransfer}
-      />
-      <McpExportDialog
-        open={ctx.dialogs.mcpExport}
-        onClose={ctx.closeMcpExport}
       />
       <ConfirmDialog request={ctx.confirmRequest} onDone={ctx.clearConfirm} />
       <Toast toast={ctx.toastMessage} />

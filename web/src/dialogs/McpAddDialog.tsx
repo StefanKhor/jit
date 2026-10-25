@@ -70,7 +70,6 @@ export function McpAddDialog({
         ctx.toast(`Added ${safeName} · ${fmt(result.added || 0)} tools indexed.`);
       }
       await ctx.refreshAll();
-      if (ctx.marketLoaded) await ctx.loadMarketplace(true);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {

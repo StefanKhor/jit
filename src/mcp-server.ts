@@ -30,9 +30,7 @@ import { defaultManager } from "./mcp/client.js";
 import { validateToolArguments } from "./mcp/validate.js";
 import { warmupEmbeddingModel } from "./embedding.js";
 import { evaluate, recordRetrieval } from "./retrieval/retriever.js";
-import { enforceGate } from "./skillScan.js";
-import { scanSkillPayload } from "./skillspector.js";
-import type { IndexItem, ScanReport } from "./types.js";
+import type { IndexItem } from "./types.js";
 
 const INSTRUCTIONS = `JIT is a just-in-time skill index: it loads the one skill you need, when you need it, instead of keeping every skill in context.
 
@@ -40,7 +38,7 @@ At the start of every new task — not just the first of the session — call JI
 
 Phrase the intent like a search query, not a task brief: one sentence, concrete action, platform or domain named — e.g. "automate posting a twitter thread", "deploy a node app to azure". Leave out file paths, quotes, and task details; they dilute the match. On {"found": false} with near_misses, retry once with different phrasing — sharper if the intent was vague, broader if it was over-specified — then proceed without a skill. A miss is a normal outcome, not an error. A multi-part task spans skills: a hit lists related candidates, so call again to load the next domain.
 
-JIT_ADD installs a new skill into the index. It is scanned by NVIDIA SkillSpector first: a skill that fails the scan is dangerous and refused.`;
+JIT_ADD installs a new skill into the index.`;
 
 function textResult(payload: unknown, isError = false) {
   return {
@@ -147,9 +145,7 @@ export function registerAdd(server: McpServer): void {
       title: "Add a skill",
       description:
         "Add a skill to the index. Source: a filesystem path, an http(s) URL " +
-        "to a SKILL.md, inline markdown, or an installed MCP server name. " +
-        "NVIDIA SkillSpector scans it first — DO_NOT_INSTALL is refused, and " +
-        "CAUTION is refused unless acknowledged.",
+        "to a SKILL.md, inline markdown, or an installed MCP server name.",
       inputSchema: {
         source: z.string().describe("Path, URL, inline markdown, or MCP server name."),
         format: z
@@ -160,36 +156,9 @@ export function registerAdd(server: McpServer): void {
           .enum(["skill", "tool"])
           .optional()
           .describe("Entry kind; skill by default."),
-        acknowledge: z.boolean().optional().describe("Accept a CAUTION verdict."),
-        force: z
-          .boolean()
-          .optional()
-          .describe("Install despite DO_NOT_INSTALL."),
       },
     },
-    async ({ source, format: requestedFormat, kind, acknowledge, force }) => {
-      const gate = { acknowledge: Boolean(acknowledge), force: Boolean(force) };
-      // Run SkillSpector before anything reaches the index. A refused skill
-      // comes back as an error result carrying the report, so the caller sees
-      // exactly why and can retry with acknowledge or force.
-      const check = async (report: ScanReport) => {
-        try {
-          enforceGate(report, gate);
-          return null;
-        } catch (error) {
-          return textResult(
-            {
-              added: 0,
-              updated: 0,
-              skipped: 0,
-              errors: [error instanceof Error ? error.message : String(error)],
-              security: report,
-              total_indexed: totalIndexed(),
-            },
-            true,
-          );
-        }
-      };
+    async ({ source, format: requestedFormat, kind }) => {
       let format = requestedFormat || "auto";
       if (format === "auto") {
         if (/^https?:\/\//.test(source)) format = "url";
@@ -211,8 +180,6 @@ export function registerAdd(server: McpServer): void {
         if (Buffer.byteLength(source, "utf8") > MAX_SKILL_BYTES) {
           errors.push("inline skill exceeds the size limit");
         } else {
-          const refused = await check(await scanSkillPayload({ body: source }));
-          if (refused) return refused;
           try {
             const item = parseSkillText(source, "", "inline-skill");
             const result = await indexItems([item], "skill");
@@ -237,8 +204,6 @@ export function registerAdd(server: McpServer): void {
             total_indexed: totalIndexed(),
           });
         }
-        const refused = await check(await scanSkillPayload({ path: target }));
-        if (refused) return refused;
         const files = statSync(target).isFile()
           ? [target]
           : discoverSkills([target]);
@@ -263,8 +228,6 @@ export function registerAdd(server: McpServer): void {
           if (!/^\s*---\s*\r?\n/.test(text)) {
             errors.push("URL did not return a skill file with frontmatter");
           } else {
-            const refused = await check(await scanSkillPayload({ body: text }));
-            if (refused) return refused;
             const item = parseSkillText(text, "", "remote-skill");
             const result = await indexItems([item], "skill");
             added = result.added;

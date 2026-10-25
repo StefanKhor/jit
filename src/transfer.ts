@@ -12,7 +12,6 @@ import {
   atomicWriteFile,
   JIT_SKILLS_DIR,
   MAX_SKILL_BYTES,
-  MCP_CONFIG,
 } from "./config.js";
 import {
   deleteItem,
@@ -24,15 +23,10 @@ import {
   parseSkillText,
 } from "./indexer.js";
 import { logger } from "./logger.js";
-import { defaultManager } from "./mcp/client.js";
-import { enforceGate, type SecurityGate } from "./skillScan.js";
-import { scanSkillPayload } from "./skillspector.js";
 import { initDb } from "./storage/db.js";
 import type {
-  ExportMcpResult,
   ExportSkillsResult,
   IndexItem,
-  McpServerConfig,
   TransferResult,
 } from "./types.js";
 
@@ -81,7 +75,6 @@ async function indexParsed(
 export async function copySkillsToJit(
   rawPath?: string,
   overwrite = false,
-  gate: SecurityGate = {},
 ): Promise<TransferResult> {
   const files = discover(rawPath);
   const copied: string[] = [];
@@ -108,8 +101,6 @@ export async function copySkillsToJit(
       }
 
       const text = readFileSync(file, "utf8");
-      // SkillSpector decides whether this leaves the source machine at all.
-      enforceGate(await scanSkillPayload({ path: file }), gate);
       // Validate against the destination path before replacing an existing
       // copy. This keeps the previous JIT-owned skill intact on bad input.
       const parsed = parseSkillText(text, destination);
@@ -140,15 +131,12 @@ export async function copySkillsToJit(
 
 export async function indexSkillsInPlace(
   rawPath?: string,
-  gate: SecurityGate = {},
 ): Promise<TransferResult> {
   const files = discover(rawPath);
   const items: IndexItem[] = [];
   const errors: string[] = [];
   for (const file of files) {
     try {
-      // Every skill that lands on JIT is scanned by SkillSpector first.
-      enforceGate(await scanSkillPayload({ path: file }), gate);
       items.push(parseSkillFile(file));
     } catch (error) {
       errors.push(
@@ -174,11 +162,10 @@ export async function transferSkills(
   rawPath?: string,
   copy = true,
   overwrite = false,
-  gate: SecurityGate = {},
 ): Promise<TransferResult> {
   return copy
-    ? copySkillsToJit(rawPath, overwrite, gate)
-    : indexSkillsInPlace(rawPath, gate);
+    ? copySkillsToJit(rawPath, overwrite)
+    : indexSkillsInPlace(rawPath);
 }
 
 export async function exportSkills(
@@ -250,170 +237,6 @@ export async function exportSkills(
   }
 
   return { exported, skipped, errors, destination: dest };
-}
-
-function openCodeEntry(config: McpServerConfig): Record<string, unknown> {
-  const url = config.url || config.serverUrl;
-  if (url) {
-    const entry: Record<string, unknown> = {
-      type: "remote",
-      url: String(url),
-      enabled: true,
-    };
-    if (config.headers && Object.keys(config.headers).length > 0) {
-      entry.headers = { ...config.headers };
-    }
-    return entry;
-  }
-  const entry: Record<string, unknown> = {
-    type: "local",
-    command: [
-      String(config.command || ""),
-      ...(config.args || []).map(String),
-    ],
-    enabled: true,
-  };
-  if (config.env && Object.keys(config.env).length > 0) {
-    entry.environment = { ...config.env };
-  }
-  return entry;
-}
-
-function cleanConfig(config: McpServerConfig): McpServerConfig {
-  const result: McpServerConfig = {};
-  for (const [key, value] of Object.entries(config)) {
-    if (!key.startsWith("_") && value !== undefined) {
-      (result as Record<string, unknown>)[key] = value;
-    }
-  }
-  return result;
-}
-
-export async function exportMcp(
-  servers: unknown,
-  destination: unknown,
-  overwrite = false,
-): Promise<ExportMcpResult> {
-  if (!Array.isArray(servers) || servers.length === 0) {
-    throw new Error("select at least one server");
-  }
-  if (servers.length > 100) throw new Error("too many servers");
-  const rawDestination = String(destination || "").trim();
-  if (!rawDestination) throw new Error("destination config is required");
-  const dest = path.resolve(expandHome(rawDestination));
-  if (dest === path.resolve(MCP_CONFIG)) {
-    throw new Error("choose a client config, not JIT's own mcp.json");
-  }
-  if (existsSync(dest) && statSync(dest).isDirectory()) {
-    throw new Error("destination is a folder");
-  }
-
-  const managed = defaultManager().managedServers();
-  const configs: Record<string, McpServerConfig> = {};
-  for (const rawName of servers) {
-    const name = String(rawName || "").trim();
-    const config = managed[name];
-    if (!config) throw new Error(`'${name}' is not managed by JIT`);
-    configs[name] = config;
-  }
-
-  let data: Record<string, unknown> = {};
-  if (existsSync(dest)) {
-    try {
-      const parsed = JSON.parse(readFileSync(dest, "utf8")) as unknown;
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        throw new Error("destination must contain a JSON object");
-      }
-      data = parsed as Record<string, unknown>;
-    } catch (error) {
-      throw new Error(
-        `destination is not valid JSON: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
-  }
-
-  const opencode = ["opencode.json", "opencode.jsonc"].includes(
-    path.basename(dest),
-  );
-  let target: Record<string, unknown>;
-  let entries: Record<string, unknown>;
-  if (opencode) {
-    const section = data.mcp;
-    if (section && typeof section === "object" && !Array.isArray(section)) {
-      const mcp = section as Record<string, unknown>;
-      if (
-        mcp.servers &&
-        typeof mcp.servers === "object" &&
-        !Array.isArray(mcp.servers)
-      ) {
-        target = mcp.servers as Record<string, unknown>;
-      } else if (mcp.servers !== undefined) {
-        throw new Error("destination 'mcp.servers' must be an object");
-      } else {
-        target = mcp;
-      }
-    } else {
-      target = {};
-      data.mcp = target;
-    }
-    entries = Object.fromEntries(
-      Object.entries(configs).map(([name, config]) => [
-        name,
-        openCodeEntry(config),
-      ]),
-    );
-  } else {
-    const section = data.mcpServers;
-    if (section && typeof section === "object" && !Array.isArray(section)) {
-      target = section as Record<string, unknown>;
-    } else {
-      target = {};
-      data.mcpServers = target;
-    }
-    entries = Object.fromEntries(
-      Object.entries(configs).map(([name, config]) => [
-        name,
-        cleanConfig(config),
-      ]),
-    );
-  }
-
-  const exported: string[] = [];
-  const skipped: string[] = [];
-  for (const [name, entry] of Object.entries(entries)) {
-    if (name in target && !overwrite) {
-      skipped.push(name);
-      continue;
-    }
-    target[name] = entry;
-    exported.push(name);
-  }
-
-  if (exported.length > 0) {
-    let mode = 0o600;
-    if (existsSync(dest)) {
-      try {
-        mode = statSync(dest).mode & 0o777;
-      } catch {
-        // Keep the default.
-      }
-    }
-    atomicWriteFile(
-      dest,
-      JSON.stringify(data, null, 2) + "\n",
-      mode,
-    );
-  }
-
-  return {
-    exported,
-    skipped,
-    errors: [],
-    path: dest,
-    format: opencode ? "opencode" : "mcpServers",
-  };
 }
 
 export async function removeSkillCopy(id: string): Promise<boolean> {

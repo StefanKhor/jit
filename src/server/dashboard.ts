@@ -19,8 +19,6 @@ import {
   publicConfig,
   saveConfig,
 } from "../config.js";
-import { isGithubRef } from "../github.js";
-import { isSkillsShRef, isSkillsShUrl } from "../skillsSh.js";
 import {
   clearIndex,
   deleteItem,
@@ -41,14 +39,6 @@ import {
 } from "../storage/db.js";
 import { logger } from "../logger.js";
 import {
-  annotatedCatalog,
-  inspect as inspectMarketplace,
-  install as installMarketplace,
-  searchMarketplace,
-  topMarketplace,
-  uninstall as uninstallMarketplace,
-} from "../marketplace.js";
-import {
   defaultManager,
   MCPClientManager,
   shutdown as shutdownMcp,
@@ -56,14 +46,12 @@ import {
 import { jitSchemaTokens } from "../mcp-server.js";
 import { evaluate, recordRetrieval } from "../retrieval/retriever.js";
 import {
-  exportMcp,
   exportSkills,
   indexSkillsInPlace,
   removeSkillCopy,
   transferSkills,
 } from "../transfer.js";
 import type { IndexItem, ItemKind } from "../types.js";
-import { scanSkillPayload } from "../skillspector.js";
 
 const START_TIME = Date.now();
 
@@ -120,28 +108,6 @@ function boolValue(value: unknown, fallback: boolean): boolean {
     if (["0", "false", "no", "off", ""].includes(normalized)) return false;
   }
   return fallback;
-}
-
-/** The acknowledgement / override a caller presents to the security gate. */
-function gateFrom(body: Record<string, unknown>) {
-  return {
-    acknowledge: boolValue(body.acknowledge, false),
-    force: boolValue(body.force, false),
-  };
-}
-
-/**
- * Read a JSON body when the caller sent one. Dashboard actions that take no
- * input post no body at all, so an absent or empty body reads as `{}` rather
- * than an error.
- */
-async function readJsonOptional(c: Context): Promise<Record<string, unknown>> {
-  try {
-    return await readJson(c);
-  } catch (error) {
-    if (error instanceof HttpError && error.status === 400) return {};
-    throw error;
-  }
 }
 
 async function readJson(c: Context): Promise<Record<string, unknown>> {
@@ -387,12 +353,6 @@ export function createApp(): Hono {
     if ("rerank_api_base" in updates) {
       updates.rerank_api_base = rerankBase.replace(/\/+$/, "");
     }
-    if ("skillspector_llm_enabled" in body) {
-      updates.skillspector_llm_enabled = boolValue(
-        body.skillspector_llm_enabled,
-        false,
-      );
-    }
     if ("confidence_threshold" in body) {
       const parsed = Number(body.confidence_threshold);
       if (!Number.isFinite(parsed)) {
@@ -401,41 +361,6 @@ export function createApp(): Hono {
       updates.confidence_threshold = Math.min(1, Math.max(0, parsed));
     }
     if ("api_key" in body) updates.api_key = String(body.api_key || "").trim();
-    if ("marketplace_urls" in body) {
-      const raw = body.marketplace_urls;
-      if (!Array.isArray(raw)) {
-        throw new HttpError(400, "marketplace_urls must be an array of URLs");
-      }
-      const urls: string[] = [];
-      for (const entry of raw) {
-        const url = String(entry || "").trim();
-        if (url && !urls.includes(url)) urls.push(url);
-      }
-      if (urls.length > 10) {
-        throw new HttpError(400, "at most 10 marketplace catalogs are supported");
-      }
-      // Match the fetch policy in marketplace.ts so a catalog cannot be
-      // configured that would only fail later at fetch time. A repository is
-      // accepted as `owner/repo`, `owner/repo@ref`, or a URL, and a link to the
-      // skills.sh directory resolves to the repository behind it.
-      for (const url of urls) {
-        if (isGithubRef(url) || isSkillsShRef(url)) continue;
-        // A skills.sh link that addresses neither a repository nor a skill is a
-        // mistake, not a catalog; say so instead of failing at fetch time.
-        if (isSkillsShUrl(url)) {
-          throw new HttpError(
-            400,
-            "a skills.sh link must address a repository or a skill",
-          );
-        }
-        if (isSecureApiBase(url)) continue;
-        throw new HttpError(
-          400,
-          "catalog entries must be https:// URLs, GitHub repositories, or skills.sh links",
-        );
-      }
-      updates.marketplace_urls = urls;
-    }
     if (boolValue(body.complete_setup, false)) updates.first_run = false;
     saveConfig(updates as Partial<import("../types.js").Config>);
     return c.json({ saved: true, config: publicConfig() });
@@ -530,7 +455,7 @@ export function createApp(): Hono {
     const rawPath = String(body.path || "").trim();
     if (!rawPath) throw new HttpError(400, "path required");
     try {
-      return c.json(await indexSkillsInPlace(rawPath, gateFrom(body)));
+      return c.json(await indexSkillsInPlace(rawPath));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new HttpError(message.includes("path not found") ? 404 : 400, message);
@@ -538,8 +463,7 @@ export function createApp(): Hono {
   });
 
   app.post("/api/skills/scan", async (c) => {
-    const body = await readJsonOptional(c);
-    return c.json(await indexSkillsInPlace(undefined, gateFrom(body)));
+    return c.json(await indexSkillsInPlace());
   });
 
   app.post("/api/skills/transfer", async (c) => {
@@ -548,24 +472,10 @@ export function createApp(): Hono {
     const copy = boolValue(body.copy, true);
     const overwrite = boolValue(body.overwrite, false);
     try {
-      return c.json(
-        await transferSkills(rawPath, copy, overwrite, gateFrom(body)),
-      );
+      return c.json(await transferSkills(rawPath, copy, overwrite));
     } catch (error) {
       throw new HttpError(400, error instanceof Error ? error.message : String(error));
     }
-  });
-
-  // SkillSpector, on demand, for a skill already on disk. The install gate runs
-  // it automatically; this is how the dashboard re-checks something and shows
-  // the full verdict without touching the index.
-  app.post("/api/skills/:id/security", async (c) => {
-    const id = c.req.param("id");
-    const item = getItem(initDb(), id);
-    if (!item) throw new HttpError(404, "not found");
-    const target = item.path ? String(item.path) : "";
-    if (!target) throw new HttpError(400, "this entry has no file to scan");
-    return c.json({ id, report: await scanSkillPayload({ path: target }) });
   });
 
   app.post("/api/skills/export", async (c) => {
@@ -623,95 +533,6 @@ export function createApp(): Hono {
     return c.json({ action, ok, failed, files_removed: filesRemoved });
   });
 
-  app.get("/api/marketplace", async (c) => {
-    return c.json(await annotatedCatalog());
-  });
-
-  // An entry discovered on skills.sh is in no configured catalog. It carries
-  // the source it came from, which is what the review and install calls below
-  // pass back so the CLI can resolve it.
-  const sourceHint = (body: Record<string, unknown>) => ({
-    source: String(body.source || "").trim(),
-    skill: String(body.skill || "").trim(),
-  });
-
-  app.get("/api/marketplace/search", async (c) => {
-    const query = String(c.req.query("q") || "").trim();
-    try {
-      return c.json(await searchMarketplace(query));
-    } catch (error) {
-      throw new HttpError(
-        400,
-        error instanceof Error ? error.message : "search failed",
-      );
-    }
-  });
-
-  app.get("/api/marketplace/top", async (c) => {
-    const view = String(c.req.query("view") || "all-time").trim();
-    const page = Number(c.req.query("page") || 1);
-    const pageSize = Number(c.req.query("per_page") || 100);
-    try {
-      if (!Number.isInteger(page) || page < 1) {
-        throw new Error("page must be a positive integer");
-      }
-      if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 200) {
-        throw new Error("per_page must be an integer from 1 to 200");
-      }
-      return c.json(await topMarketplace(view, page, pageSize));
-    } catch (error) {
-      throw new HttpError(
-        400,
-        error instanceof Error ? error.message : "leaderboard failed",
-      );
-    }
-  });
-
-  app.post("/api/marketplace/inspect", async (c) => {
-    const body = await readJson(c);
-    const id = String(body.id || "").trim().toLowerCase();
-    if (!id) throw new HttpError(400, "id required");
-    try {
-      return c.json(await inspectMarketplace(id, sourceHint(body)));
-    } catch (error) {
-      throw new HttpError(400, error instanceof Error ? error.message : "inspect failed");
-    }
-  });
-
-  app.post("/api/marketplace/install", async (c) => {
-    const body = await readJson(c);
-    const id = String(body.id || "").trim().toLowerCase();
-    if (!id) throw new HttpError(400, "id required");
-    const inputs =
-      body.inputs && typeof body.inputs === "object" && !Array.isArray(body.inputs)
-        ? (body.inputs as Record<string, unknown>)
-        : {};
-    const acknowledge = boolValue(body.acknowledge, false);
-    const force = boolValue(body.force, false);
-    try {
-      return c.json(
-        await installMarketplace(id, inputs, {
-          acknowledge,
-          force,
-          ...sourceHint(body),
-        }),
-      );
-    } catch (error) {
-      throw new HttpError(400, error instanceof Error ? error.message : "install failed");
-    }
-  });
-
-  app.post("/api/marketplace/uninstall", async (c) => {
-    const body = await readJson(c);
-    const id = String(body.id || "").trim().toLowerCase();
-    if (!id) throw new HttpError(400, "id required");
-    try {
-      return c.json(await uninstallMarketplace(id));
-    } catch (error) {
-      throw new HttpError(400, error instanceof Error ? error.message : "uninstall failed");
-    }
-  });
-
   app.get("/api/mcp", async (c) => {
     return c.json({ servers: await manager.statusSummary() });
   });
@@ -724,13 +545,6 @@ export function createApp(): Hono {
     return c.json({ paths, servers: manager.externalServers() });
   });
 
-  app.get("/api/mcp/configs", (c) => {
-    const paths = MCPClientManager.externalConfigPaths();
-    return c.json({
-      paths: paths.map((item) => ({ path: item, exists: existsSync(item) })),
-    });
-  });
-
   app.post("/api/mcp/import", async (c) => {
     const body = await readJson(c);
     if (!Array.isArray(body.servers) || body.servers.length === 0) {
@@ -738,24 +552,6 @@ export function createApp(): Hono {
     }
     if (body.servers.length > 100) throw new HttpError(413, "too many servers");
     return c.json(await manager.importServers(body.servers));
-  });
-
-  app.post("/api/mcp/export", async (c) => {
-    const body = await readJson(c);
-    if (!Array.isArray(body.servers) || body.servers.length === 0) {
-      throw new HttpError(400, "servers must be a non-empty list");
-    }
-    try {
-      return c.json(
-        await exportMcp(
-          body.servers,
-          body.destination,
-          boolValue(body.overwrite, false),
-        ),
-      );
-    } catch (error) {
-      throw new HttpError(400, error instanceof Error ? error.message : String(error));
-    }
   });
 
   app.post("/api/mcp/add", async (c) => {
@@ -844,56 +640,6 @@ export function createApp(): Hono {
     }
     deleteToolsForServer(server);
     return c.json(await indexItems(manifests, "tool"));
-  });
-
-  // Batch the MCP verbs the same way as skills: best-effort per server, with a
-  // full account of what changed and what did not.
-  app.post("/api/mcp/bulk", async (c) => {
-    const body = await readJson(c);
-    const servers = Array.isArray(body.servers)
-      ? body.servers.map((value: unknown) => String(value).trim()).filter(Boolean)
-      : [];
-    if (servers.length === 0) throw new HttpError(400, "servers must be a non-empty list");
-    if (servers.length > 100) throw new HttpError(413, "too many servers");
-    const action = String(body.action || "").trim();
-    if (!["connect", "disconnect", "index", "remove"].includes(action)) {
-      throw new HttpError(400, "action must be connect, disconnect, index, or remove");
-    }
-
-    const ok: string[] = [];
-    const failed: Array<{ server: string; error: string }> = [];
-    const tools: Record<string, number> = {};
-    if (action === "connect" || action === "index") await manager.loadConfigs();
-
-    for (const server of servers) {
-      try {
-        if (action === "remove") {
-          manager.removeServer(server);
-          tools[server] = deleteToolsForServer(server);
-        } else if (action === "disconnect") {
-          await manager.disconnect(server);
-        } else {
-          if (!(await manager.connect(server))) {
-            throw new Error(manager.getStatus()[server]?.error || "connection failed");
-          }
-          if (action === "index") {
-            const manifests = manager.indexTools(server);
-            deleteToolsForServer(server);
-            if (manifests.length === 0) throw new Error("server exposes no tools");
-            tools[server] = (await indexItems(manifests, "tool")).added;
-          } else {
-            tools[server] = manager.getTools(server).length;
-          }
-        }
-        ok.push(server);
-      } catch (error) {
-        failed.push({
-          server,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-    return c.json({ action, ok, failed, tools });
   });
 
   app.get("/api/search", async (c) => {
@@ -1036,7 +782,6 @@ async function search(intent: string): Promise<Record<string, unknown>> {
     candidates: evaluation.candidates,
     near_misses: evaluation.nearMisses,
     reranked: evaluation.reranked,
-    keyword_only: evaluation.keywordOnly,
     ...(evaluation.warning ? { warning: evaluation.warning } : {}),
     ...(evaluation.rankingWarning
       ? { ranking_warning: evaluation.rankingWarning }

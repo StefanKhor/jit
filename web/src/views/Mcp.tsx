@@ -2,14 +2,12 @@ import { useState } from "react";
 
 import { fmt, summary } from "../format";
 import { useJit } from "../state/store";
-import type { BulkResult, ConfigPath, McpImportServer } from "../types";
+import type { ConfigPath, McpImportServer } from "../types";
 import { StatusDot } from "../ui/Badge";
 import { Button } from "../ui/Button";
-import { cx } from "../ui/cx";
 import { Empty } from "../ui/Display";
 import { Checkbox } from "../ui/Field";
 import { PageHead, Panel, PanelBody, PanelHead } from "../ui/Panel";
-import { SelectAll, SelectionBar, useSelection } from "../ui/Selection";
 import { Table, TableWrap, Td, Th, Tr } from "../ui/Table";
 
 export function Mcp() {
@@ -21,8 +19,6 @@ export function Mcp() {
   const [importBusy, setImportBusy] = useState(false);
   const [importError, setImportError] = useState("");
   const [busy, setBusy] = useState("");
-  const [bulkBusy, setBulkBusy] = useState(false);
-  const bulkSel = useSelection(ctx.mcpServers.map((server) => server.name));
 
   const showImports = async () => {
     setImportOpen(true);
@@ -132,58 +128,10 @@ export function Mcp() {
         );
       }
       await ctx.refreshAll();
-      if (action === "remove" && ctx.marketLoaded) {
-        await ctx.loadMarketplace(true);
-      }
     } catch (error) {
       ctx.toast(error instanceof Error ? error.message : String(error), "error");
     } finally {
       setBusy("");
-    }
-  };
-
-  const bulk = async (
-    action: "connect" | "disconnect" | "index" | "remove",
-  ) => {
-    const servers = [...bulkSel.selected];
-    if (servers.length === 0 || bulkBusy) return;
-    if (action === "remove") {
-      const ok = await ctx.confirmAction(
-        `Remove ${servers.length} server${servers.length === 1 ? "" : "s"} from JIT?`,
-        "They and their indexed tools are removed from JIT. The external servers and their own configs are untouched.",
-        "Remove",
-      );
-      if (!ok) return;
-    }
-    setBulkBusy(true);
-    try {
-      const result = await ctx.api<BulkResult>("/api/mcp/bulk", {
-        method: "POST",
-        body: JSON.stringify({ servers, action }),
-      });
-      const verb = {
-        connect: "Connected",
-        disconnect: "Disconnected",
-        index: "Indexed",
-        remove: "Removed",
-      }[action];
-      const parts = [`${verb} ${result.ok.length}`];
-      const tools = Object.values(result.tools || {}).reduce(
-        (count, value) => count + value,
-        0,
-      );
-      if (tools && (action === "connect" || action === "index")) {
-        parts.push(`${fmt(tools)} tools`);
-      }
-      if (result.failed.length) parts.push(`${result.failed.length} failed`);
-      ctx.toast(parts.join(" · "), result.failed.length ? "error" : "ok");
-      bulkSel.clear();
-      await ctx.refreshAll();
-      if (action === "remove" && ctx.marketLoaded) await ctx.loadMarketplace(true);
-    } catch (error) {
-      ctx.toast(error instanceof Error ? error.message : String(error), "error");
-    } finally {
-      setBulkBusy(false);
     }
   };
 
@@ -207,12 +155,10 @@ export function Mcp() {
             <span className="num text-sm text-ink-3">{total}</span>
           </span>
         }
-        description="JIT manages its own MCP servers. Import a client config to copy servers in, or export JIT servers back out. Neither direction changes the other side unless you choose it."
+        description="JIT manages its own MCP servers. Import servers from a client config, or add one manually. JIT's copy is separate from the client's."
         actions={
           <>
-            <Button onClick={() => ctx.setView("marketplace")}>Marketplace</Button>
             <Button onClick={() => void showImports()}>Import configs</Button>
-            <Button onClick={() => void ctx.openMcpExport()}>Export</Button>
             <Button variant="primary" onClick={ctx.openMcpAdd}>
               Add server
             </Button>
@@ -225,75 +171,24 @@ export function Mcp() {
           <Empty
             title="No servers yet."
             actions={
-              <>
-                <Button
-                  variant="primary"
-                  onClick={() => ctx.setView("marketplace")}
-                >
-                  Browse marketplace
-                </Button>
-                <Button onClick={() => void showImports()}>Import configs</Button>
-              </>
+              <Button variant="primary" onClick={() => void showImports()}>
+                Import configs
+              </Button>
             }
           >
-            Install one from the marketplace, or import a server you already use.
+            Import a server you already use, or add one manually.
           </Empty>
         </Panel>
       ) : (
         <Panel id="servers-table">
           <PanelHead
-            title={bulkSel.count ? `${fmt(bulkSel.count)} selected` : "Servers"}
-            hint={
-              bulkSel.count
-                ? undefined
-                : `${fmt(connected)} of ${fmt(total)} connected`
-            }
-            actions={
-              bulkSel.count ? (
-                <SelectionBar count={bulkSel.count} onClear={bulkSel.clear}>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={bulkBusy}
-                    onClick={() => void bulk("connect")}
-                  >
-                    Connect
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={bulkBusy}
-                    onClick={() => void bulk("index")}
-                  >
-                    Index
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={bulkBusy}
-                    onClick={() => void bulk("disconnect")}
-                  >
-                    Disconnect
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="danger"
-                    disabled={bulkBusy}
-                    onClick={() => void bulk("remove")}
-                  >
-                    {bulkBusy ? "Working…" : "Remove"}
-                  </Button>
-                </SelectionBar>
-              ) : null
-            }
+            title="Servers"
+            hint={`${fmt(connected)} of ${fmt(total)} connected`}
           />
           <TableWrap>
             <Table className="w-full min-w-[600px] table-fixed">
               <thead>
                 <tr>
-                  <Th className="w-[44px]">
-                    <SelectAll selection={bulkSel} label="Select all servers" />
-                  </Th>
                   <Th>Server</Th>
                   <Th className="w-[130px]">Status</Th>
                   <Th className="num hidden w-[80px] text-right sm:table-cell">
@@ -312,21 +207,8 @@ export function Mcp() {
                         : server.status === "connecting"
                           ? "warn"
                           : "neutral";
-                  const picked = bulkSel.has(server.name);
                   return (
-                    <Tr
-                      key={server.name}
-                      className={cx(picked && "bg-accent/[0.04]")}
-                    >
-                      <Td className="w-[44px]">
-                        <Checkbox
-                          checked={picked}
-                          aria-label={`Select ${server.name}`}
-                          onChange={(event) =>
-                            bulkSel.toggle(server.name, event.target.checked)
-                          }
-                        />
-                      </Td>
+                    <Tr key={server.name}>
                       <Td>
                         <span
                           className="block min-w-0 truncate text-sm font-medium text-ink"
