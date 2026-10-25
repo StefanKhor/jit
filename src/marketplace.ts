@@ -330,6 +330,7 @@ function itemFromHit(hit: SkillsShHit): MarketplaceItem | null {
       skills_hash: "",
     },
     installs: hit.installs,
+    weekly_installs: hit.weekly,
   };
 }
 
@@ -356,9 +357,10 @@ export async function searchMarketplace(
 export async function topMarketplace(
   view: string,
   page = 1,
+  pageSize = 100,
 ): Promise<MarketplaceTopResponse> {
   const current: TopView = view === "trending" ? "trending" : "all-time";
-  const result = await topSkills(current, page);
+  const result = await topSkills(current, page, pageSize);
   const items = result.hits
     .map(itemFromHit)
     .filter((item): item is MarketplaceItem => item !== null);
@@ -367,6 +369,7 @@ export async function topMarketplace(
     warning: "",
     view: result.view,
     page: result.page,
+    page_size: result.pageSize,
     has_more: result.hasMore,
     total: result.total,
   };

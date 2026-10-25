@@ -12,6 +12,7 @@ const TOP_TTL_MS = 600_000;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_CACHE_ENTRIES = 64;
 const TIMEOUT_MS = 12_000;
+const UPSTREAM_PAGE_SIZE = 200;
 
 const SEGMENT = /^[A-Za-z0-9._-]+$/;
 
@@ -42,6 +43,7 @@ export interface TopResult {
   total: number;
   hasMore: boolean;
   page: number;
+  pageSize: number;
   view: TopView;
 }
 
@@ -158,7 +160,7 @@ function bound<T>(cache: Map<string, T>): void {
 const searchCache = new Map<string, { at: number; hits: SkillsShHit[] }>();
 const topCache = new Map<
   string,
-  { at: number; hits: SkillsShHit[]; total: number; hasMore: boolean; page: number }
+  { at: number; hits: SkillsShHit[]; total: number; hasMore: boolean }
 >();
 
 /** Full-text search over the directory, best-installed first. */
@@ -184,37 +186,59 @@ export async function searchSkillsSh(query: string): Promise<SkillsShHit[]> {
  * The directory's own ranking. `all-time` is the lifetime install leaderboard;
  * `trending` is the recent-installs view. Pages hold up to 200 entries.
  */
-export async function topSkills(view: TopView, page = 1): Promise<TopResult> {
+export async function topSkills(
+  view: TopView,
+  page = 1,
+  perPage = 100,
+): Promise<TopResult> {
   const current: TopView = view === "trending" ? "trending" : "all-time";
-  const number = Number.isFinite(page)
-    ? Math.min(50, Math.max(1, Math.floor(page)))
+  const pageNumber = Number.isFinite(page)
+    ? Math.max(1, Math.floor(page))
     : 1;
-  const key = `${current}:${number}`;
+  const pageSize = Number.isFinite(perPage)
+    ? Math.min(200, Math.max(1, Math.floor(perPage)))
+    : 100;
+  const offset = (pageNumber - 1) * pageSize;
+  const upstreamPage = Math.floor(offset / UPSTREAM_PAGE_SIZE);
+  const pageOffset = offset % UPSTREAM_PAGE_SIZE;
+  const key = `${current}:${upstreamPage}`;
 
   const cached = topCache.get(key);
   if (cached && Date.now() - cached.at < TOP_TTL_MS) {
+    const hits = cached.hits.slice(pageOffset, pageOffset + pageSize);
     return {
-      hits: cached.hits,
+      hits,
       total: cached.total,
-      hasMore: cached.hasMore,
-      page: cached.page,
+      hasMore: offset + hits.length < cached.total,
+      page: pageNumber,
+      pageSize,
       view: current,
     };
   }
 
   const data = await getJson(
-    `/api/skills/${current}/${number}`,
+    `/api/skills/${current}/${upstreamPage}`,
     "skills.sh leaderboard",
   );
   const hits = keep((Array.isArray(data.skills) ? data.skills : []).map(normalizeHit));
   const total = Number(data.total);
-  const result = {
-    hits,
-    total: Number.isFinite(total) ? total : hits.length,
-    hasMore: Boolean(data.hasMore),
-    page: number,
-  };
+  const totalHits = Number.isFinite(total)
+    ? total
+    : upstreamPage * UPSTREAM_PAGE_SIZE + hits.length;
   bound(topCache);
-  topCache.set(key, { at: Date.now(), ...result });
-  return { ...result, view: current };
+  topCache.set(key, {
+    at: Date.now(),
+    hits,
+    total: totalHits,
+    hasMore: Boolean(data.hasMore),
+  });
+  const pageHits = hits.slice(pageOffset, pageOffset + pageSize);
+  return {
+    hits: pageHits,
+    total: totalHits,
+    hasMore: offset + pageHits.length < totalHits,
+    page: pageNumber,
+    pageSize,
+    view: current,
+  };
 }

@@ -143,6 +143,7 @@ export interface MarketplaceItem {
   checksum_present?: boolean;
   installed?: boolean;
   installs?: number;
+  weekly_installs?: number[];
 }
 
 export interface MarketplaceResponse {
@@ -160,6 +161,7 @@ export interface MarketplaceDiscovery {
 export interface MarketplaceTopResponse extends MarketplaceDiscovery {
   view: string;
   page: number;
+  page_size: number;
   has_more: boolean;
   total: number;
 }

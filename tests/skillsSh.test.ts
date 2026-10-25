@@ -33,6 +33,7 @@ const HITS = [
     installs: 900,
   },
 ];
+const leaderboardPages: number[] = [];
 
 const server: Server = createServer((req, res) => {
   const url = new URL(req.url || "/", "http://127.0.0.1");
@@ -65,9 +66,15 @@ const server: Server = createServer((req, res) => {
   if (url.pathname.startsWith("/api/skills/")) {
     const parts = url.pathname.split("/").filter(Boolean);
     const view = parts[2] || "";
-    const page = Number(parts[3] || 1);
+    const page = Number(parts[3] || 0);
+    leaderboardPages.push(page);
     if (view === "all-time") {
-      json(res, { skills: [HITS[1]], total: 500, hasMore: true, page });
+      json(res, {
+        skills: [HITS[1], HITS[0]],
+        total: 500,
+        hasMore: true,
+        page,
+      });
       return;
     }
     if (view === "trending") {
@@ -157,14 +164,26 @@ test("the leaderboard reports a view, a page, and whether more follow", async ()
   const ranked = await topSkills("all-time");
   assert.equal(ranked.view, "all-time");
   assert.equal(ranked.page, 1);
+  assert.equal(ranked.pageSize, 100);
   assert.equal(ranked.total, 500);
   assert.equal(ranked.hasMore, true);
-  assert.deepEqual(ranked.hits.map((hit) => hit.skill), ["fast-skill"]);
+  assert.deepEqual(
+    ranked.hits.map((hit) => hit.skill),
+    ["fast-skill", "slow-skill"],
+  );
+  assert.ok(leaderboardPages.includes(0), "the leaderboard starts at page zero");
 
-  // An unknown view falls back to the lifetime ranking, and the page is capped.
-  const clamped = await topSkills("nonsense" as "all-time", 999);
-  assert.equal(clamped.view, "all-time");
-  assert.equal(clamped.page, 50);
+  // User pages smaller than the upstream's fixed 200-row page are sliced from
+  // the cached response, then advance to the next upstream page when needed.
+  const second = await topSkills("all-time", 2, 1);
+  assert.equal(second.page, 2);
+  assert.deepEqual(second.hits.map((hit) => hit.skill), ["slow-skill"]);
+  const nextUpstreamPage = await topSkills("all-time", 201, 1);
+  assert.equal(nextUpstreamPage.page, 201);
+  assert.ok(leaderboardPages.includes(1));
+
+  const fallback = await topSkills("nonsense" as "all-time", 1, 100);
+  assert.equal(fallback.view, "all-time");
 });
 
 test("a discovery entry carries the source the install step needs", async () => {
@@ -184,6 +203,7 @@ test("the ranked view is exposed as marketplace entries", async () => {
   const ranked = await topMarketplace("trending", 1);
   assert.equal(ranked.view, "trending");
   assert.equal(ranked.page, 1);
+  assert.equal(ranked.page_size, 100);
   assert.equal(ranked.total, 1);
   assert.equal(ranked.has_more, false);
   assert.deepEqual(ranked.items.map((item) => item.id), ["slow-skill"]);

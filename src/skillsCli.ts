@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 
@@ -38,7 +38,7 @@ export interface CliResult {
   warning: string;
 }
 
-const cache = new Map<string, { at: number; result: CliResult }>();
+const cache = new Map<string, { at: number; result: CliResult; dir: string }>();
 
 function cacheKey(source: string): string {
   return createHash("sha256").update(source).digest("hex").slice(0, 16);
@@ -131,14 +131,36 @@ export async function materializeSource(
   // The cache is keyed by the scope too, so listing a repository and installing
   // one of its skills do not overwrite each other's directory.
   const key = scope ? `${source}\u0000${scope}` : source;
-  const dir = path.join(CACHE_DIR, cacheKey(key));
   const hit = cache.get(key);
   const now = Date.now();
-  if (hit && now - hit.at < CACHE_TTL_MS && existsSync(dir)) return hit.result;
+  if (hit && now - hit.at < CACHE_TTL_MS && existsSync(hit.dir)) {
+    return hit.result;
+  }
 
-  // Start clean so a skill removed upstream disappears here too.
-  rmSync(dir, { recursive: true, force: true });
-  mkdirSync(dir, { recursive: true });
+  // Reuse the stable directory when it can be cleared. On Windows, antivirus
+  // scanners or another process can briefly hold a file in the old checkout;
+  // that must not make the entire source unavailable. Fall back to a fresh
+  // sibling directory when cleanup is blocked.
+  const dir = hit?.dir || path.join(CACHE_DIR, cacheKey(key));
+  let useDir = dir;
+  try {
+    rmSync(dir, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 100,
+    });
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "EPERM" && code !== "EACCES" && code !== "EBUSY") {
+      throw error;
+    }
+    useDir = path.join(
+      CACHE_DIR,
+      `${cacheKey(key)}-${process.pid}-${randomBytes(6).toString("hex")}`,
+    );
+  }
+  mkdirSync(useDir, { recursive: true });
   const result = execute(
     [
       "add",
@@ -151,7 +173,7 @@ export async function materializeSource(
       "-y",
       "--json",
     ],
-    dir,
+    useDir,
   );
   const entries = readJson(result.stdout || "");
   if (!entries) {
@@ -163,7 +185,7 @@ export async function materializeSource(
     );
   }
 
-  const root = path.resolve(dir, INSTALL_ROOT);
+  const root = path.resolve(useDir, INSTALL_ROOT);
   const skills: CliSkill[] = [];
   const notes: string[] = [];
   for (const entry of entries) {
@@ -199,7 +221,7 @@ export async function materializeSource(
   }
 
   const payload: CliResult = { skills, warning: notes.join("; ") };
-  cache.set(key, { at: now, result: payload });
+  cache.set(key, { at: now, result: payload, dir: useDir });
   if (payload.warning) logger.warn("skills CLI: %s", payload.warning);
   logger.debug("skills CLI %s %s: %d skills", source, scope || "*", skills.length);
   return payload;

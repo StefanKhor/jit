@@ -565,8 +565,15 @@ export function createApp(): Hono {
   app.get("/api/marketplace/top", async (c) => {
     const view = String(c.req.query("view") || "all-time").trim();
     const page = Number(c.req.query("page") || 1);
+    const pageSize = Number(c.req.query("per_page") || 100);
     try {
-      return c.json(await topMarketplace(view, page));
+      if (!Number.isInteger(page) || page < 1) {
+        throw new Error("page must be a positive integer");
+      }
+      if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 200) {
+        throw new Error("per_page must be an integer from 1 to 200");
+      }
+      return c.json(await topMarketplace(view, page, pageSize));
     } catch (error) {
       throw new HttpError(
         400,

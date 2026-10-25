@@ -202,6 +202,8 @@ export interface MarketplaceItem {
   installed?: boolean;
   /** Install count when the entry came from the skills.sh directory. */
   installs?: number;
+  /** Weekly installs, oldest to newest, as shown in skills.sh's 8W activity. */
+  weekly_installs?: number[];
 }
 
 export interface MarketplaceResponse {
@@ -219,6 +221,7 @@ export interface MarketplaceDiscovery {
 export interface MarketplaceTopResponse extends MarketplaceDiscovery {
   view: string;
   page: number;
+  page_size: number;
   has_more: boolean;
   total: number;
 }
