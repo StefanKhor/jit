@@ -3,9 +3,22 @@ import { useEffect, useState, type ReactNode } from "react";
 import { fmt } from "../format";
 import { cx } from "./cx";
 
-/**
- * The JIT wordmark. There is no icon: the logotype is the mark.
- */
+const JIT_ASCII = [
+  "      ██╗ ██╗████████╗",
+  "      ██║ ██║╚══██╔══╝",
+  "      ██║ ██║   ██║",
+  "      ██║ ██║   ██║",
+  " ██   ██║ ██║   ██║",
+  " ╚█████╔╝ ██║   ██║",
+  "  ╚════╝  ╚═╝   ╚═╝",
+]
+  .map((line) => line.padEnd(21))
+  .join("\n");
+
+const ASCII_LOGO_STYLE =
+  "absolute inset-0 m-0 select-none whitespace-pre font-mono text-[0.56em] leading-[1.05]";
+
+/** JIT's compact block-letter ASCII logo. */
 export function Wordmark({
   className,
   dot = true,
@@ -15,14 +28,29 @@ export function Wordmark({
 }) {
   return (
     <span
+      role="img"
+      aria-label="JIT"
       className={cx(
-        "inline-flex items-center font-semibold tracking-[0.34em] text-ink",
+        "inline-flex items-center gap-1.5 text-ink",
         className,
       )}
     >
-      JIT
+      <span className="relative inline-block align-middle">
+        <pre aria-hidden="true" className={`${ASCII_LOGO_STYLE} invisible static`}>
+          {JIT_ASCII}
+        </pre>
+        <pre
+          aria-hidden="true"
+          className={`${ASCII_LOGO_STYLE} translate-x-px translate-y-px text-ink-3/60`}
+        >
+          {JIT_ASCII}
+        </pre>
+        <pre aria-hidden="true" className={`${ASCII_LOGO_STYLE} text-accent`}>
+          {JIT_ASCII}
+        </pre>
+      </span>
       {dot ? (
-        <span aria-hidden="true" className="ml-1.5 size-1.5 rounded-full bg-accent" />
+        <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-accent" />
       ) : null}
     </span>
   );

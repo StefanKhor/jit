@@ -550,9 +550,10 @@ systems this is a no-op.
 
 Built for the Nebius x NVIDIA Global AI Hackathon.
 
-- **Optional reranker** — any OpenAI-compatible chat-completions endpoint.
+- **Nebius runtime integration** — in Settings, select **Use Nebius Token Factory + NVIDIA Nemotron 3.5 Lightning**, enter a Nebius Token Factory API key, and save with reranking enabled. When vector candidates are found, JIT calls Nebius Token Factory's OpenAI-compatible chat-completions API using NVIDIA's open-weight `nvidia/Nemotron-3_5-Lightning` model to rerank them. Successful calls are recorded in the server log. The key can also be provided as `JIT_RERANK_API_KEY`.
+- **Flexible embeddings and reranking** — built-in local embeddings remain the default; embeddings and reranking can also use configured OpenAI-compatible endpoints.
+- **Public source** — [github.com/StefanKhor/jit](https://github.com/StefanKhor/jit) is public and includes the top-level MIT `LICENSE`.
 - **Dashboard** — real measurements from the local index, not marketing copy.
-- **License** — MIT.
 
 ## License
 

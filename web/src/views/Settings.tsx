@@ -562,6 +562,17 @@ export function Settings() {
                     />
                   </Field>
                 </div>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setRerankBase("https://api.tokenfactory.nebius.com/v1/");
+                    setRerankModel("nvidia/Nemotron-3_5-Lightning");
+                    setRerank(true);
+                    ctx.toast("Nebius + NVIDIA Nemotron preset selected. Add your API key and save.");
+                  }}
+                >
+                  Use Nebius Token Factory + NVIDIA Nemotron 3.5 Lightning
+                </Button>
                 <ToggleRow
                   label="Enable reranking"
                   hint="Re-score vector candidates with the configured OpenAI-compatible model."

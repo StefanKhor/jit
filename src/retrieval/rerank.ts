@@ -72,6 +72,12 @@ export async function rerankCandidates(
       const value = Math.min(Math.max(Number(parsed[index]) || 0, 0), 3);
       scores.set(candidate.id, value / 3);
     });
+    logger.info(
+      "reranked %d candidates with %s at %s",
+      candidates.length,
+      settings.rerank_model,
+      settings.rerank_api_base,
+    );
   } catch (error) {
     logger.warn(
       "OpenAI-compatible rerank failed, falling back to cosine: %s",
