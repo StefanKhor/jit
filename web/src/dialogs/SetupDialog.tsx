@@ -5,9 +5,9 @@ import { useJit } from "../state/store";
 import { Button } from "../ui/Button";
 import { Dialog, DialogBody, DialogFoot, DialogHead } from "../ui/Dialog";
 import { Wordmark } from "../ui/Display";
-import { Field, Input, ToggleRow } from "../ui/Field";
+import { ToggleRow } from "../ui/Field";
 
-/** First-run configuration: store an optional key and finish the setup write. */
+/** First-run configuration: optional local import and setup completion. */
 export function SetupDialog({
   open,
   onClose,
@@ -16,21 +16,17 @@ export function SetupDialog({
   onClose: () => void;
 }) {
   const ctx = useJit();
-  const [key, setKey] = useState("");
   const [scan, setScan] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (open) {
-      setKey("");
       setScan(false);
     }
   }, [open]);
 
   const save = async () => {
-    const updates: Record<string, unknown> = { complete_setup: true };
-    if (key.trim()) updates.nebius_api_key = key.trim();
-    await ctx.saveConfig(updates);
+    await ctx.saveConfig({ complete_setup: true });
   };
 
   const finish = async (goMarketplace: boolean) => {
@@ -93,18 +89,10 @@ export function SetupDialog({
             JIT starts empty. Install from the marketplace, or import what you
             already use. Nothing is read from your client configs automatically.
           </p>
-          <Field
-            label="Nebius API key optional"
-            hint="Enables Nemotron Nano reranking through Nebius Token Factory."
-          >
-            <Input
-              type="password"
-              autoComplete="off"
-              placeholder="nb_..."
-              value={key}
-              onChange={(event) => setKey(event.target.value)}
-            />
-          </Field>
+          <p className="text-xs leading-relaxed text-ink-3">
+            Optional OpenAI-compatible reranking can be configured later in
+            Settings.
+          </p>
           <ToggleRow
             label="Index skills already on this machine optional"
             hint="Reads the usual skill folders once. Source files are not modified."

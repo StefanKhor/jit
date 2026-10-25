@@ -33,7 +33,7 @@ npm run build
 ```
 
 There is a small suite in `tests/` covering storage/versioning, BM25, retrieval
-gating (including the keyword-only fallback), the HTTP API surface, the MCP stdio
+gating (including strict embedding-only retrieval), the HTTP API surface, the MCP stdio
 handshake, the source resolvers and the skills.sh directory client, the shared
 fetch policy, the marketplace end to end (catalog merging, checksum enforcement,
 scanner acknowledgement, catalog URL validation, installing an entry discovered
@@ -55,8 +55,9 @@ npm run eval   # recall@1 / @3, MRR, precision, threshold sweep
 
 `npm run eval` seeds a throwaway index from `eval/fixture.jsonl` and runs
 `eval/queries.jsonl`, so it needs no setup and no network. Add a query when you
-add a behavior. Run it with `JIT_DISABLE_EMBEDDINGS=1` to see the lexical-only
-numbers.
+add a behavior. Run it with `JIT_DISABLE_EMBEDDINGS=1` to verify strict retrieval
+returns an unavailable warning instead of a keyword-only match; run it normally
+to compare the vector-retrieval metrics.
 
 To score your own index, pass both a home and a query file (with `--home`, the
 fixtures are not seeded, so your entries are the corpus):

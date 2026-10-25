@@ -32,7 +32,7 @@ before(async () => {
     available = true;
   } catch (error) {
     // No model in the cache and no way to fetch it: report and skip rather than
-    // fail, since the lexical fallback is a supported mode.
+    // skip, since these tests specifically require the vector model.
     console.error(
       `embedding tests skipped: ${
         error instanceof Error ? error.message : String(error)

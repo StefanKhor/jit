@@ -9,6 +9,7 @@ import path from "node:path";
 process.env.JIT_HOME = mkdtempSync(path.join(tmpdir(), "jit-test-"));
 
 const db = await import("../src/storage/db.js");
+const { EMBEDDING_DIM } = await import("../src/config.js");
 
 import type { IndexItem } from "../src/types.js";
 
@@ -93,4 +94,29 @@ test("meta values round-trip", () => {
     db.getMeta(conn, "embedding_signature"),
     "Xenova/bge-small-en-v1.5:384",
   );
+});
+
+test("stats and skill rows report whether a valid embedding is indexed", () => {
+  const conn = db.initDb();
+  db.upsertItem(conn, {
+    item: item({ id: "vector-skill", kind: "skill" }),
+    contentHash: "vector-skill",
+    embedding: new Float32Array(EMBEDDING_DIM),
+    updatedAt: now,
+  });
+  db.upsertItem(conn, {
+    item: item({ id: "no-vector-skill", kind: "skill" }),
+    contentHash: "no-vector-skill",
+    embedding: null,
+    updatedAt: now,
+  });
+  const coverage = db.getStats(conn).embedding_coverage;
+  assert.equal(coverage.skills_embedded, 1);
+  const listed = db.listItems(conn);
+  assert.equal(
+    coverage.skills_total,
+    listed.filter((entry) => entry.kind === "skill").length,
+  );
+  assert.equal(listed.find((entry) => entry.id === "vector-skill")?.has_embedding, true);
+  assert.equal(listed.find((entry) => entry.id === "no-vector-skill")?.has_embedding, false);
 });

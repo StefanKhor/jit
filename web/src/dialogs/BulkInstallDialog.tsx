@@ -36,6 +36,35 @@ interface Row {
   state: RowState;
   findings: ScanFinding[];
   detail: string;
+  startedAt?: number;
+}
+
+function duration(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  if (total < 60) return `${total}s`;
+  return `${Math.floor(total / 60)}m ${String(total % 60).padStart(2, "0")}s`;
+}
+
+function installErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const acknowledgement = message.match(
+    /^this entry needs explicit acknowledgement before install(?::\s*(.*))?$/i,
+  );
+  if (acknowledgement) {
+    const reason = acknowledgement[1]?.trim();
+    return [
+      "Security review requires acknowledgement; this skill was not installed.",
+      reason || "Choose Review all first to see why, or explicitly allow it in Quick install.",
+    ].join(" ");
+  }
+  const timeout = message.match(/scan timed out after (\d+)s/i);
+  if (timeout) {
+    return `Security scan timed out after ${timeout[1]}s. This skill was not installed. You can retry it or explicitly acknowledge an unscanned install.`;
+  }
+  if (/no matching skill found|no longer provides|does not provide/i.test(message)) {
+    return `This skill is no longer available from its listed source. It was not installed. (${message})`;
+  }
+  return `Install failed. ${message}`;
 }
 
 /** Run `fn` over `items` with a small ceiling on how many are in flight. */
@@ -107,8 +136,11 @@ export function BulkInstallDialog({
   const [reviewRequested, setReviewRequested] = useState(false);
   const [reviewed, setReviewed] = useState(0);
   const [ack, setAck] = useState(false);
+  const [forceOverride, setForceOverride] = useState(false);
   const [quickAck, setQuickAck] = useState(false);
+  const [quickForce, setQuickForce] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [clock, setClock] = useState(() => Date.now());
   const [stopRequested, setStopRequested] = useState(false);
   const stopRequestedRef = useRef(false);
   // The size of the run, frozen when it starts: the rows move out of `ready` as
@@ -116,11 +148,19 @@ export function BulkInstallDialog({
   const [planned, setPlanned] = useState(0);
 
   useEffect(() => {
+    if (phase !== "review" && phase !== "install") return;
+    const timer = window.setInterval(() => setClock(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [phase]);
+
+  useEffect(() => {
     if (items) return;
     setPhase("choose");
     setReviewRequested(false);
     setAck(false);
+    setForceOverride(false);
     setQuickAck(false);
+    setQuickForce(false);
     stopRequestedRef.current = false;
     setStopRequested(false);
   }, [items]);
@@ -132,18 +172,25 @@ export function BulkInstallDialog({
     setPhase("review");
     setReviewed(0);
     setAck(false);
+    setForceOverride(false);
     setProgress(0);
     setRows(
       items.map((item) => ({
         id: item.id,
         item,
-        state: "pending" as RowState,
+        state: "queued" as RowState,
         findings: [],
         detail: "",
       })),
     );
 
     void mapLimit(items, 4, async (item) => {
+      const startedAt = Date.now();
+      setRows((current) =>
+        current.map((row) =>
+          row.id === item.id ? { ...row, state: "pending", startedAt } : row,
+        ),
+      );
       let result: InspectResult | null = null;
       let error = "";
       try {
@@ -169,15 +216,17 @@ export function BulkInstallDialog({
         const doNotInstall = result.report.gate === "block";
         const detail = blocked
           ? "no sha256 checksum to pin it to"
-          : doNotInstall
+            : doNotInstall
             ? `SkillSpector: ${result.report.recommendation || "DO_NOT_INSTALL"}${
                 typeof result.report.risk_score === "number"
                   ? ` · risk ${result.report.risk_score}/100`
                   : ""
               }`
-            : result.report.scanner_available === false
-              ? "not scanned — needs acknowledgement"
-              : "";
+              : result.report.scanner_available === false
+                ? `not scanned — needs acknowledgement${
+                    result.report.note ? ` · ${result.report.note}` : ""
+                  }`
+                : "";
         row = {
           id: result.id || item.id,
           item,
@@ -230,10 +279,22 @@ export function BulkInstallDialog({
   const ready = byState("ready");
   const flagged = byState("flagged");
   const blocked = [...byState("blocked"), ...byState("unavailable")];
-  const reviewing = rows.some((row) => row.state === "pending");
+  const queuedCount = rows.filter((row) => row.state === "queued").length;
+  const activeCount = rows.filter(
+    (row) => row.state === "pending" || row.state === "working",
+  ).length;
+  const reviewing = phase === "review" && (queuedCount > 0 || activeCount > 0);
   // Flagged entries only join the run once the user has acknowledged them.
-  const targets = ack ? [...ready, ...flagged] : ready;
-  const skipped = ack ? blocked.length : flagged.length + blocked.length;
+  const targets = forceOverride
+    ? [...ready, ...flagged, ...blocked]
+    : ack
+      ? [...ready, ...flagged]
+      : ready;
+  const skipped = forceOverride
+    ? 0
+    : ack
+      ? blocked.length
+      : flagged.length + blocked.length;
   const installing = phase === "install";
   const summary = [
     `${ready.length} ready`,
@@ -247,6 +308,7 @@ export function BulkInstallDialog({
     installTargets: Row[],
     acknowledge: boolean,
     skippedCount = 0,
+    force = false,
   ) => {
     if (installing || installTargets.length === 0) return;
     setPhase("install");
@@ -266,7 +328,13 @@ export function BulkInstallDialog({
       setRows((current) =>
         current.map((row) =>
           row.id === id
-            ? { ...row, state, detail, ...(findings ? { findings } : {}) }
+            ? {
+                ...row,
+                state,
+                detail,
+                startedAt: state === "working" ? Date.now() : undefined,
+                ...(findings ? { findings } : {}),
+              }
             : row,
         ),
       );
@@ -282,6 +350,7 @@ export function BulkInstallDialog({
             id: row.id,
             inputs: {},
             acknowledge,
+            force,
             ...sourceHint(row.item),
           }),
         });
@@ -301,7 +370,7 @@ export function BulkInstallDialog({
         }
       } catch (error) {
         failed += 1;
-        mark(row.id, "failed", error instanceof Error ? error.message : String(error));
+        mark(row.id, "failed", installErrorMessage(error));
       }
       setProgress((current) => current + 1);
     }, () => stopRequestedRef.current);
@@ -329,7 +398,7 @@ export function BulkInstallDialog({
   };
 
   const installReviewed = () =>
-    void runInstall(targets, ack, skipped);
+    void runInstall(targets, ack || forceOverride, skipped, forceOverride);
 
   const installWithoutReview = () => {
     const installTargets = items.map((item) => ({
@@ -339,7 +408,7 @@ export function BulkInstallDialog({
       findings: [],
       detail: "",
     }));
-    void runInstall(installTargets, quickAck);
+    void runInstall(installTargets, quickAck || quickForce, 0, quickForce);
   };
 
   const stopAfterCurrent = () => {
@@ -373,20 +442,53 @@ export function BulkInstallDialog({
             ? `${fmt(count)} selected. Choose whether to review all first or scan as each one installs.`
           : phase === "install"
               ? stopRequested
-                ? `Stopping after current installs · ${fmt(progress)} of ${fmt(planned)} complete…`
-                : `Installing ${fmt(progress)} of ${fmt(planned)}…`
+                ? `Stopping after active installs · ${fmt(progress)} of ${fmt(planned)} complete…`
+                : `Installing · ${fmt(progress)} of ${fmt(planned)} complete · ${activeCount} active · ${queuedCount} queued`
               : reviewing
-            ? `Reviewing ${fmt(reviewed)} of ${fmt(count)}…`
+            ? `Reviewing · ${fmt(reviewed)} of ${fmt(count)} complete · ${activeCount} active · ${queuedCount} queued`
             : summary}
       </DialogHead>
 
       <DialogBody className="space-y-4">
+        {phase === "review" || phase === "install" ? (
+          <div className="space-y-2 rounded-xl border border-line bg-inset/40 p-3">
+            <div
+              role="progressbar"
+              aria-label={phase === "review" ? "Review progress" : "Install progress"}
+              aria-valuemin={0}
+              aria-valuemax={phase === "review" ? count : planned}
+              aria-valuenow={phase === "review" ? reviewed : progress}
+              className="h-2 overflow-hidden rounded-full bg-raised"
+            >
+              <div
+                className="h-full rounded-full bg-accent transition-[width]"
+                style={{
+                  width: `${Math.round(
+                    ((phase === "review" ? reviewed / count : progress / planned) || 0) * 100,
+                  )}%`,
+                }}
+              />
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-ink-3">
+              <span>
+                {phase === "review" ? `${reviewed} of ${count} reviewed` : `${progress} of ${planned} installed`}
+              </span>
+              <span>
+                {activeCount} active · {queuedCount} queued
+              </span>
+            </div>
+          </div>
+        ) : null}
         {phase === "choose" ? (
           <div className="space-y-3 rounded-xl border border-line bg-inset/40 p-4">
             <p className="text-xs leading-relaxed text-ink-2">
               Quick install skips the all-at-once review. JIT still scans each
               skill immediately before installing it; flagged or unscanned
               entries remain gated unless you explicitly acknowledge them.
+            </p>
+            <p className="text-[11px] leading-relaxed text-ink-3">
+              Source fetches and scans can take several minutes. During a run,
+              each active row shows its elapsed time and the batch can be stopped.
             </p>
             <p className="text-xs leading-relaxed text-ink-3">
               Installed skills are copied only into{" "}
@@ -400,6 +502,12 @@ export function BulkInstallDialog({
               label="Allow entries when the scan is unavailable or returns CAUTION. DO_NOT_INSTALL results remain blocked."
               checked={quickAck}
               onCheckedChange={setQuickAck}
+            />
+            <ToggleRow
+              label="Force-install entries SkillSpector blocks."
+              hint="Overrides DO_NOT_INSTALL and unscanned results for this batch. Use only if you accept the unverified risk."
+              checked={quickForce}
+              onCheckedChange={setQuickForce}
             />
           </div>
         ) : null}
@@ -444,19 +552,32 @@ export function BulkInstallDialog({
                 ) : null}
               </div>
               <span className="shrink-0 pt-0.5 text-[11px] text-ink-3">
-                {LABEL[row.state]}
+                {row.startedAt && (row.state === "pending" || row.state === "working")
+                  ? `${LABEL[row.state]} · ${duration(clock - row.startedAt)}`
+                  : LABEL[row.state]}
               </span>
             </li>
           ))}
         </ul>
 
-        {phase === "review" && flagged.length ? (
+        {phase === "review" && flagged.length && !forceOverride ? (
           <ToggleRow
             label={`Install the ${fmt(flagged.length)} flagged ${
               flagged.length === 1 ? "entry" : "entries"
             } too. I have read the findings above.`}
             checked={ack}
             onCheckedChange={setAck}
+          />
+        ) : null}
+        {phase === "review" && blocked.length ? (
+          <ToggleRow
+            label={`Force-install ${fmt(blocked.length)} blocked or unscanned ${blocked.length === 1 ? "entry" : "entries"}.`}
+            hint="This overrides SkillSpector’s DO_NOT_INSTALL block or a missing scan report for these entries. Only continue if you accept that risk."
+            checked={forceOverride}
+            onCheckedChange={(enabled) => {
+              setForceOverride(enabled);
+              if (enabled) setAck(false);
+            }}
           />
         ) : null}
       </DialogBody>
@@ -490,7 +611,7 @@ export function BulkInstallDialog({
             onClick={stopAfterCurrent}
             disabled={stopRequested}
           >
-            {stopRequested ? "Stopping…" : "Stop after current skills"}
+            {stopRequested ? "Stopping…" : "Stop after active skills"}
           </Button>
         ) : (
           <>

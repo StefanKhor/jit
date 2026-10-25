@@ -93,6 +93,13 @@ export function registerFind(server: McpServer): void {
       const started = performance.now();
       const evaluation = await evaluate(intent, 3);
       recordRetrieval(evaluation, intent, "mcp", performance.now() - started);
+      if (evaluation.warning) {
+        return textResult({
+          found: false,
+          error: "embeddings_required_but_unavailable",
+          note: evaluation.warning,
+        });
+      }
       if (evaluation.result) {
         return textResult({ found: true, ...evaluation.result });
       }

@@ -14,7 +14,7 @@ import type {
   StoredItem,
 } from "../types.js";
 import { BM25Index, bm25Text } from "./bm25.js";
-import { nanoRerank } from "./rerank.js";
+import { rerankCandidates } from "./rerank.js";
 
 interface Corpus {
   version: string;
@@ -28,9 +28,9 @@ let cache: Corpus | null = null;
 // Raw BM25 scores are unbounded and scale with the corpus's idf, so a fixed
 // curve would score a two-entry index differently from a two-thousand-entry one.
 // Normalize against the corpus's mean idf instead; the resulting confidence is
-// roughly "how many of the query's terms this entry explains". The keyword-only
-// path (no embeddings, no reranker) is flagged so callers know the ranking is
-// lexical.
+// roughly "how many of the query's terms this entry explains". Lexical values
+// contribute to fusion, but are never used alone when vector embeddings are
+// unavailable.
 const LEXICAL_SCALE = 1.4;
 const MIN_LEXICAL_SCALE = 0.05;
 
@@ -78,6 +78,7 @@ async function rank(
   cosine: Map<string, number>;
   lexical: Map<string, number>;
   vectorUsed: boolean;
+  warning?: string;
 }> {
   const corpus = loadCorpus();
   if (!corpus || corpus.items.length === 0) {
@@ -115,14 +116,26 @@ async function rank(
   }
 
   let queryVector: Float32Array | null = null;
+  let embeddingError = "";
   try {
     queryVector = await embedQuery(intent);
   } catch (error) {
+    embeddingError = error instanceof Error ? error.message : String(error);
     // embedding.ts already warned once when the model became unavailable.
     logger.debug(
-      "query embedding failed; using keyword search only: %s",
+      "query embedding failed; vector retrieval is unavailable: %s",
       error instanceof Error ? error.message : String(error),
     );
+  }
+
+  if (!queryVector) {
+    return {
+      candidates: [],
+      cosine: new Map(),
+      lexical: new Map(),
+      vectorUsed: false,
+      warning: `Embedding retrieval is required, but the model is unavailable: ${embeddingError}`,
+    };
   }
 
   const cosine = new Map<string, number>();
@@ -145,13 +158,25 @@ async function rank(
     }
   }
 
-  const merged = rrf([bm25Ranked, vectorRanked]).slice(0, limit);
+  if (vectorRanked.length === 0) {
+    return {
+      candidates: [],
+      cosine,
+      lexical,
+      vectorUsed: false,
+      warning:
+        "The index has no stored embedding vectors. Reindex the skills; keyword-only retrieval is disabled.",
+    };
+  }
+
+  const lexicalForFusion = bm25Ranked.filter((id) => cosine.has(id));
+  const merged = rrf([lexicalForFusion, vectorRanked]).slice(0, limit);
   const candidates: Array<StoredItem & { rrf: number }> = [];
   for (const hit of merged) {
     const item = corpus.byId.get(hit.id);
     if (item) candidates.push({ ...item, rrf: hit.score });
   }
-  return { candidates, cosine, lexical, vectorUsed: Boolean(queryVector) };
+  return { candidates, cosine, lexical, vectorUsed: vectorRanked.length > 0 };
 }
 
 export interface Evaluation {
@@ -161,6 +186,7 @@ export interface Evaluation {
   reranked: boolean;
   keywordOnly: boolean;
   threshold: number;
+  warning?: string;
 }
 
 const EMPTY: Evaluation = {
@@ -181,12 +207,15 @@ export async function evaluate(
   const empty: Evaluation = { ...EMPTY, threshold };
   if (!intent || !intent.trim()) return empty;
 
-  const { candidates, cosine, lexical, vectorUsed } = await rank(intent);
-  if (candidates.length === 0) return empty;
+  const ranked = await rank(intent, TOP_K_RETRIEVE);
+  const { candidates, cosine, lexical, vectorUsed } = ranked;
+  if (candidates.length === 0) {
+    return { ...empty, warning: ranked.warning };
+  }
 
   let rerankScores = new Map<string, number>();
-  if (settings.nebius_api_key && settings.rerank_enabled) {
-    rerankScores = await nanoRerank(intent, candidates, settings);
+  if (settings.rerank_enabled) {
+    rerankScores = await rerankCandidates(intent, candidates, settings);
     if (rerankScores.size > 0) {
       candidates.sort(
         (a, b) => (rerankScores.get(b.id) || 0) - (rerankScores.get(a.id) || 0),
@@ -197,12 +226,11 @@ export async function evaluate(
   const reranked = rerankScores.size > 0;
   const keywordOnly = !vectorUsed && !reranked;
 
-  // Two-stage gate: trust the reranker (a real 0..1 relevance judgment) when it
-  // ran; otherwise cosine; otherwise a lexical fallback. Never mix scales.
+  // Trust the reranker (a real 0..1 relevance judgment) when it ran;
+  // otherwise use cosine. Candidates always have a vector score.
   const scoreOf = (id: string): number => {
     if (reranked) return rerankScores.get(id) || 0;
-    if (cosine.has(id)) return cosine.get(id) || 0;
-    return lexical.get(id) || 0;
+    return cosine.get(id) || 0;
   };
 
   const debug: SearchCandidate[] = candidates.slice(0, topN).map((item) => {

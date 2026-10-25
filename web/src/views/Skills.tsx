@@ -323,6 +323,18 @@ export function Skills() {
                           <Badge tone="neutral" className="shrink-0">
                             {managed ? "JIT copy" : "Local file"}
                           </Badge>
+                          <span
+                            className="shrink-0"
+                            title={
+                              skill.has_embedding
+                                ? "Embedding vector is indexed; eligible for semantic retrieval."
+                                : "No embedding vector is indexed; strict semantic retrieval cannot return this skill yet."
+                            }
+                          >
+                            <Badge tone={skill.has_embedding ? "info" : "warn"}>
+                              {skill.has_embedding ? "vector ready" : "no vector"}
+                            </Badge>
+                          </span>
                         </div>
                         <p
                           className="mt-1 min-w-0 truncate text-xs text-ink-3"

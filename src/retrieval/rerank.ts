@@ -3,18 +3,39 @@ import OpenAI from "openai";
 import { logger } from "../logger.js";
 import type { Config, StoredItem } from "../types.js";
 
-export async function nanoRerank(
+function isLocalEndpoint(value: string): boolean {
+  try {
+    const hostname = new URL(value).hostname.toLowerCase();
+    return ["127.0.0.1", "localhost", "::1", "[::1]"].includes(hostname);
+  } catch {
+    return false;
+  }
+}
+
+export async function rerankCandidates(
   intent: string,
   candidates: StoredItem[],
   settings: Config,
 ): Promise<Map<string, number>> {
   const scores = new Map<string, number>();
-  if (!settings.nebius_api_key || candidates.length === 0) return scores;
+  const hasCredentials =
+    Boolean(settings.rerank_api_key) || isLocalEndpoint(settings.rerank_api_base);
+  if (
+    !settings.rerank_enabled ||
+    !settings.rerank_api_base ||
+    !settings.rerank_model ||
+    !hasCredentials ||
+    candidates.length === 0
+  ) {
+    return scores;
+  }
 
   try {
     const client = new OpenAI({
-      baseURL: settings.nebius_api_base,
-      apiKey: settings.nebius_api_key,
+      baseURL: settings.rerank_api_base,
+      // OpenAI-compatible local endpoints such as Ollama do not need a key,
+      // but the SDK requires a non-empty string.
+      apiKey: settings.rerank_api_key || "local-no-key",
       timeout: 20_000,
     });
     const listing = candidates
@@ -24,7 +45,7 @@ export async function nanoRerank(
       )
       .join("\n");
     const response = await client.chat.completions.create({
-      model: settings.nemotron_nano_model,
+      model: settings.rerank_model,
       messages: [
         {
           role: "user",
@@ -53,7 +74,7 @@ export async function nanoRerank(
     });
   } catch (error) {
     logger.warn(
-      "Nemotron rerank failed, falling back to cosine: %s",
+      "OpenAI-compatible rerank failed, falling back to cosine: %s",
       error instanceof Error ? error.message : String(error),
     );
   }

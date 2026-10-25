@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import { INDEX_DIR, META_DB } from "../config.js";
+import { EMBEDDING_DIM, INDEX_DIR, META_DB } from "../config.js";
 import type {
   Counts,
   IndexItem,
@@ -280,13 +280,14 @@ export function listItems(db: DatabaseSync): ListItem[] {
   const rows = db
     .prepare(
       `SELECT id, name, description, categories, path, aliases, kind, enabled,
+              CASE WHEN length(embedding) = ? THEN 1 ELSE 0 END AS has_embedding,
               (length(COALESCE(body, '')) + 3) / 4 AS tokens,
               (length(COALESCE(name, '')) + 3) / 4
                 + (length(COALESCE(description, '')) + 3) / 4 + 12 AS catalog_tokens
          FROM skills
         ORDER BY kind, name`,
     )
-    .all() as Row[];
+    .all(EMBEDDING_DIM * 4) as Row[];
   return rows.map((row) => ({
     id: String(row.id),
     name: String(row.name || row.id),
@@ -298,6 +299,7 @@ export function listItems(db: DatabaseSync): ListItem[] {
     enabled: row.enabled !== 0,
     tokens: Number(row.tokens || 0),
     catalog_tokens: Number(row.catalog_tokens || 0),
+    has_embedding: row.has_embedding === 1,
   }));
 }
 
@@ -323,6 +325,8 @@ export function getStats(db: DatabaseSync): Stats {
       `SELECT COUNT(*) AS total,
               COALESCE(SUM(kind = 'skill'), 0) AS skills,
               COALESCE(SUM(kind = 'tool'), 0) AS tools,
+              COALESCE(SUM(CASE WHEN kind = 'skill' AND length(embedding) = ? THEN 1 ELSE 0 END), 0) AS skills_embedded,
+              COALESCE(SUM(CASE WHEN kind = 'tool' AND length(embedding) = ? THEN 1 ELSE 0 END), 0) AS tools_embedded,
               COALESCE(SUM(enabled = 1), 0) AS enabled,
               COALESCE(SUM(enabled = 0), 0) AS disabled,
               COALESCE(SUM((length(COALESCE(body, '')) + 3) / 4), 0) AS body_tokens,
@@ -331,7 +335,7 @@ export function getStats(db: DatabaseSync): Stats {
               COALESCE(MAX((length(COALESCE(body, '')) + 3) / 4), 0) AS largest
          FROM skills`,
     )
-    .get() as Row;
+    .get(EMBEDDING_DIM * 4, EMBEDDING_DIM * 4) as Row;
 
   const heaviestRows = db
     .prepare(
@@ -368,6 +372,12 @@ export function getStats(db: DatabaseSync): Stats {
     categories: [...categoryCounts.entries()]
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .map(([name, count]) => ({ name, count })),
+    embedding_coverage: {
+      skills_total: Number(row.skills || 0),
+      skills_embedded: Number(row.skills_embedded || 0),
+      tools_total: Number(row.tools || 0),
+      tools_embedded: Number(row.tools_embedded || 0),
+    },
   };
 }
 

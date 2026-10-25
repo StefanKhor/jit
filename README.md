@@ -25,8 +25,8 @@ JIT stays quiet until it is called. MCP is pull-based, so JIT is built to be
 *invoked*, not to push: a small tool surface, sharp descriptions, and no
 background work in the agent's loop.
 
-During retrieval, nothing leaves the machine unless you enable the optional
-Nebius reranker.
+During retrieval, nothing leaves the machine unless you enable an optional
+remote OpenAI-compatible reranker.
 
 Recall is the part of a retriever that is easiest to claim and hardest to prove,
 so JIT ships a harness for it: `npm run eval` measures recall@1, recall@3, MRR,
@@ -52,8 +52,8 @@ npm run build
 npm start
 ```
 
-Open <http://localhost:3000>. The first-run panel lets you add an optional
-Nebius API key, install from the marketplace, or import skills you already
+Open <http://localhost:3000>. The first-run panel lets you install from the
+marketplace or import skills you already
 use. Nothing is read from your client configs automatically.
 
 For development:
@@ -222,7 +222,7 @@ A single-file React SPA served by the Node process.
   JIT-managed servers, add a server manually.
 - **Search** — live retrieval with the effective score, cosine, rerank, lexical
   and the threshold, plus a confidence slider and the retrieval log.
-- **Settings** — Nebius key and models, confidence threshold, dashboard auth,
+- **Settings** — optional OpenAI-compatible reranker, confidence threshold, dashboard auth,
   import/export, clear.
 
 The first-run panel is skippable. The dashboard listens on `127.0.0.1` by
@@ -258,12 +258,11 @@ Imports are explicit, read-only on the source side, and shown before they run.
 2. **Vector search** — cosine similarity over embeddings stored in SQLite.
 3. **Keyword search** — BM25 over names, descriptions, aliases, and bodies.
 4. **Fusion** — Reciprocal Rank Fusion merges both rankings.
-5. **Rerank (optional)** — NVIDIA Nemotron Nano via Nebius Token Factory
-   reorders the top candidates when an API key is configured.
+5. **Rerank (optional)** — any OpenAI-compatible chat-completions endpoint can
+   re-score the top vector candidates.
 6. **Two-stage threshold** — the decision uses one scale, never a mix. A reranked
-   candidate is judged on its rerank score; otherwise on cosine; otherwise — when
-   neither embeddings nor a reranker are available — on a lexical score. All
-   three are 0–1. The default threshold is `0.60`.
+    candidate is judged on its rerank score; otherwise on cosine similarity. The
+    default threshold is `0.60`.
 7. **Two-tier result** — a candidate above the threshold returns one body or
    tool descriptor. Below it, `JIT_FIND` returns `{"found": false}` with up to
    three `near_misses` (name and description), so the agent can retry once with
@@ -272,14 +271,10 @@ Imports are explicit, read-only on the source side, and shown before they run.
 The pipeline is deliberately single-pass. A miss costs one search and the agent
 continues; it never stalls on retrieval. There is no chunking.
 
-### The lexical fallback
-
-If the embedding model cannot load — offline, blocked download, or
-`JIT_DISABLE_EMBEDDINGS=1` — retrieval falls back to BM25 and marks the result
-`keyword_only: true` rather than returning nothing. The lexical score is
-normalized against the corpus's mean idf, so the same threshold means the same
-thing whether the index holds two entries or two thousand. A failed model load
-is remembered for five minutes instead of being retried on every query.
+Embeddings are mandatory for retrieval. Keyword scores contribute to fusion,
+but JIT never returns a keyword-only match. If the model or stored vectors are
+unavailable, Search and `JIT_FIND` return no match and explain why. A failed
+model load is remembered for five minutes instead of being retried on every query.
 
 ### Measuring retrieval
 
@@ -291,7 +286,7 @@ npm run eval -- --home ~/.jit --queries mine.jsonl  # your index + your labels
 `eval/queries.jsonl` is a JSONL file of `{"query": "...", "expected": "id"}`.
 The harness reports recall@1, recall@3, MRR, precision at the configured
 threshold, and a threshold sweep, so you can pick a threshold from data instead
-of taste. Run it with and without embeddings to see what the model is buying.
+of taste.
 
 ## Configuration
 
@@ -301,9 +296,9 @@ the file and are never written back.
 
 | Variable | Description | Default |
 |---|---|---|
-| `NEBIUS_API_KEY` | Enables Nemotron Nano reranking | unset |
-| `NEBIUS_API_BASE` | Nebius Token Factory base URL | `https://api.studio.nebius.ai/v1` |
-| `NEMOTRON_NANO_MODEL` | Reranker model | `nvidia/nemotron-nano-9b-v2` |
+| `JIT_RERANK_API_KEY` | API key for an OpenAI-compatible reranker | unset |
+| `JIT_RERANK_API_BASE` | OpenAI-compatible chat-completions base URL | unset |
+| `JIT_RERANK_MODEL` | Reranker model identifier | unset |
 | `JIT_API_KEY` | Requires a key for `/api/*` | unset |
 | `JIT_HOME` | Index and config directory | `~/.jit` |
 | `JIT_MODEL_CACHE` | Local embedding-model cache | `$JIT_HOME/models` |
@@ -311,7 +306,7 @@ the file and are never written back.
 | `JIT_PORT` | Dashboard port | `3000` |
 | `JIT_CONFIDENCE_THRESHOLD` | Minimum confidence to return a match (0–1) | `0.60` |
 | `JIT_TOP_K` | Candidates retrieved before fusion | `20` |
-| `JIT_DISABLE_EMBEDDINGS` | Run keyword-only, no model download | unset |
+| `JIT_DISABLE_EMBEDDINGS` | Disable model loading; retrieval returns an unavailable warning | unset |
 | `JIT_EMBEDDING_MODEL` | Transformers.js model | `Xenova/bge-small-en-v1.5` |
 | `JIT_EMBEDDING_DIM` | Expected vector size | `384` |
 | `JIT_MARKETPLACE_URL` | Catalog URLs, repositories, or skills.sh links, comma-separated | unset |
@@ -338,11 +333,10 @@ or pass them to Docker; the dashboard writes persistent settings to
 
 On first use JIT downloads the embedding model once into `JIT_MODEL_CACHE`
 (about 130 MB); after that, retrieval is fully local and needs no network. To
-run without it, either copy a populated `JIT_MODEL_CACHE` to the machine, or
-set `JIT_DISABLE_EMBEDDINGS=1` and run on the lexical fallback. Neither,
-notably, sends any indexed content off the machine — the only outbound calls
-JIT ever makes are the model download and, if you configure it, the Nebius
-reranker. Network access, if any, is your own: JIT reads no network
+run without network access, copy a populated `JIT_MODEL_CACHE` to the machine.
+If embeddings are unavailable, JIT returns no match rather than changing
+retrieval semantics. The only outbound calls JIT makes are the model download
+and, if configured, the OpenAI-compatible reranker. Network access, if any, is your own: JIT reads no network
 configuration of its own and leaves that to the environment you run it in.
 
 Auth is opt-in. When `JIT_API_KEY` is set (or a key is saved in Settings),
@@ -509,7 +503,7 @@ web/ (React + Vite, single-file build)
 src/server/dashboard.ts ──► src/retrieval/retriever.ts
         │                         │
         │                         ▼
-        │                  SQLite + BM25 + optional Nemotron
+        │                  embeddings + BM25 + optional OpenAI-compatible reranker
         ▼
 src/indexer.ts ──► src/storage/db.ts ──► ~/.jit
         ▲
@@ -547,8 +541,7 @@ systems this is a no-op.
 
 Built for the Nebius x NVIDIA Global AI Hackathon.
 
-- **NVIDIA model** — Nemotron Nano, used for reranking retrieval candidates.
-- **Nebius platform** — Token Factory for model access.
+- **Optional reranker** — any OpenAI-compatible chat-completions endpoint.
 - **Dashboard** — real measurements from the local index, not marketing copy.
 - **License** — MIT.
 

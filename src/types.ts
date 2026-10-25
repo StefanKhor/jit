@@ -40,6 +40,7 @@ export interface ListItem {
   tokens: number;
   /// What this entry's name and description cost in a plain catalog.
   catalog_tokens: number;
+  has_embedding: boolean;
   managed?: boolean;
 }
 
@@ -61,6 +62,12 @@ export interface Stats {
   largest: number;
   heaviest: HeaviestItem[];
   categories: Array<{ name: string; count: number }>;
+  embedding_coverage: {
+    skills_total: number;
+    skills_embedded: number;
+    tools_total: number;
+    tools_embedded: number;
+  };
   tokens?: {
     // What sits in context before any task runs, under each approach: JIT's
     // fixed tool schema against a plain catalog of every name and description.
@@ -84,9 +91,9 @@ export interface Counts {
 }
 
 export interface Config {
-  nebius_api_key: string;
-  nebius_api_base: string;
-  nemotron_nano_model: string;
+  rerank_api_key: string;
+  rerank_api_base: string;
+  rerank_model: string;
   api_key: string;
   rerank_enabled: boolean;
   confidence_threshold: number;
@@ -96,12 +103,14 @@ export interface Config {
 }
 
 export interface PublicConfig extends Config {
-  nebius_key_env: boolean;
   auth_env: boolean;
   auth_enabled: boolean;
   index_dir: string;
   embedding_model: string;
   skillspector_llm_env: boolean;
+  rerank_key_env: boolean;
+  rerank_base_env: boolean;
+  rerank_model_env: boolean;
 }
 
 export interface Health {
@@ -237,8 +246,7 @@ export interface SearchCandidate {
   rrf: number;
   rerank: number | null;
   lexical: number;
-  // The score the decision actually used: rerank when reranked, else cosine,
-  // else the lexical fallback.
+  // The score the decision actually used: rerank when reranked, otherwise cosine.
   score: number;
   passes_threshold: boolean;
 }
@@ -272,6 +280,7 @@ export interface SearchResponse {
   near_misses: NearMiss[];
   reranked: boolean;
   keyword_only: boolean;
+  warning?: string;
   threshold: number;
   elapsed_ms: number;
 }

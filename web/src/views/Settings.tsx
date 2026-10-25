@@ -13,9 +13,9 @@ import { Slider } from "../ui/Slider";
 export function Settings() {
   const ctx = useJit();
   const config = ctx.config;
-  const [nebiusKey, setNebiusKey] = useState("");
-  const [base, setBase] = useState("");
-  const [nano, setNano] = useState("");
+  const [rerankKey, setRerankKey] = useState("");
+  const [rerankBase, setRerankBase] = useState("");
+  const [rerankModel, setRerankModel] = useState("");
   const [rerank, setRerank] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState("");
@@ -27,8 +27,8 @@ export function Settings() {
 
   useEffect(() => {
     if (!config) return;
-    setBase(config.nebius_api_base || "");
-    setNano(config.nemotron_nano_model || "");
+    setRerankBase(config.rerank_api_base || "");
+    setRerankModel(config.rerank_model || "");
     setRerank(Boolean(config.rerank_enabled));
     setThreshold(Number(config.confidence_threshold ?? 0.6));
     setSkillspectorLlm(Boolean(config.skillspector_llm_enabled));
@@ -40,13 +40,13 @@ export function Settings() {
     setSaving("rerank");
     try {
       const updates: Record<string, unknown> = {
-        nebius_api_base: base.trim(),
-        nemotron_nano_model: nano.trim(),
+        rerank_api_base: rerankBase.trim(),
+        rerank_model: rerankModel.trim(),
         rerank_enabled: rerank,
       };
-      if (nebiusKey.trim()) updates.nebius_api_key = nebiusKey.trim();
+      if (rerankKey.trim()) updates.rerank_api_key = rerankKey.trim();
       await ctx.saveConfig(updates);
-      setNebiusKey("");
+      setRerankKey("");
       ctx.toast("Settings saved.");
     } catch (error) {
       ctx.toast(error instanceof Error ? error.message : String(error), "error");
@@ -117,14 +117,14 @@ export function Settings() {
 
   const removeKey = async () => {
     const ok = await ctx.confirmAction(
-      "Remove the API key?",
-      "Reranking will fall back to local hybrid search.",
+      "Remove the reranker API key?",
+      "The reranker will stop using authenticated remote endpoints. Local OpenAI-compatible endpoints may still work without a key.",
       "Remove",
     );
     if (!ok) return;
     try {
-      await ctx.saveConfig({ nebius_api_key: "" });
-      ctx.toast("API key removed.");
+      await ctx.saveConfig({ rerank_api_key: "" });
+      ctx.toast("Reranker API key removed.");
     } catch (error) {
       ctx.toast(error instanceof Error ? error.message : String(error), "error");
     }
@@ -236,21 +236,27 @@ export function Settings() {
     }
   };
 
-  const hasKey = Boolean(config?.nebius_api_key);
+  const hasKey = Boolean(config?.rerank_api_key);
   const authOn = Boolean(config?.auth_enabled);
   const indexDir = config?.index_dir || "~/.jit";
-  const keyHelp = config?.nebius_key_env
-    ? "Set by NEBIUS_API_KEY in the environment."
+  const keyHelp = config?.rerank_key_env
+    ? "Set by JIT_RERANK_API_KEY in the environment."
     : `Stored in ${indexDir}/config.json with mode 600.`;
   const authHelp = config?.auth_env
     ? "Set by JIT_API_KEY in the environment."
     : "Changes take effect immediately. This browser keeps the new key.";
 
-  const rerankState = !hasKey
-    ? "no key"
-    : config?.rerank_enabled
+  const localRerankEndpoint = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::|\/|$)/i.test(
+    rerankBase.trim(),
+  );
+  const rerankConfigured = Boolean(
+    rerankBase.trim() && rerankModel.trim() && (hasKey || localRerankEndpoint),
+  );
+  const rerankState = !rerank
+    ? "off"
+    : rerankConfigured
       ? "active"
-      : "key saved";
+      : "configuration needed";
 
   return (
     <div className="space-y-8">
@@ -264,12 +270,16 @@ export function Settings() {
         <div className="space-y-6">
           <Panel>
             <PanelHead
-              title="Reranking"
-              hint="Nebius Token Factory"
+              title="Optional reranker"
+              hint="OpenAI-compatible Chat Completions"
               actions={
                 <Badge
                   tone={
-                    !hasKey ? "neutral" : config?.rerank_enabled ? "accent" : "neutral"
+                    rerankState === "active"
+                      ? "accent"
+                      : rerankState === "configuration needed"
+                        ? "warn"
+                        : "neutral"
                   }
                 >
                   {rerankState}
@@ -278,43 +288,53 @@ export function Settings() {
             />
             <PanelBody className="space-y-5">
               <p className="text-xs leading-relaxed text-ink-3">
-                Nemotron Nano re-scores the top candidates before JIT returns
-                one. Optional — local hybrid search works without it.
+                Optionally re-score vector-retrieved candidates with any
+                OpenAI-compatible chat-completions endpoint. Reranking stays off
+                until you provide an endpoint and model. For local endpoints such
+                as Ollama, the API key can be blank.
               </p>
               <form className="space-y-5" onSubmit={saveRerank}>
-                <Field label="API key" hint={keyHelp}>
+                <Field label="Reranker API key" hint={keyHelp}>
                   <Input
                     type="password"
                     autoComplete="off"
                     placeholder={
-                      hasKey ? `saved · ${config?.nebius_api_key}` : "not set"
+                      hasKey ? `saved · ${config?.rerank_api_key}` : "optional for local endpoints"
                     }
-                    value={nebiusKey}
-                    disabled={Boolean(config?.nebius_key_env)}
-                    onChange={(event) => setNebiusKey(event.target.value)}
+                    value={rerankKey}
+                    disabled={Boolean(config?.rerank_key_env)}
+                    onChange={(event) => setRerankKey(event.target.value)}
                   />
                 </Field>
                 <div className="grid gap-5 md:grid-cols-2">
-                  <Field label="API base">
+                  <Field
+                    label="OpenAI-compatible API base"
+                    hint={config?.rerank_base_env ? "Set by JIT_RERANK_API_BASE in the environment." : undefined}
+                  >
                     <Input
                       type="text"
                       spellCheck={false}
-                      value={base}
-                      onChange={(event) => setBase(event.target.value)}
+                      value={rerankBase}
+                      disabled={Boolean(config?.rerank_base_env)}
+                      onChange={(event) => setRerankBase(event.target.value)}
                     />
                   </Field>
-                  <Field label="Nano model">
+                  <Field
+                    label="Reranker model"
+                    hint={config?.rerank_model_env ? "Set by JIT_RERANK_MODEL in the environment." : undefined}
+                  >
                     <Input
                       type="text"
                       spellCheck={false}
-                      value={nano}
-                      onChange={(event) => setNano(event.target.value)}
+                      value={rerankModel}
+                      disabled={Boolean(config?.rerank_model_env)}
+                      onChange={(event) => setRerankModel(event.target.value)}
                     />
                   </Field>
                 </div>
                 <ToggleRow
                   label="Enable reranking"
-                  hint="Re-score candidates with Nemotron Nano."
+                  hint="Re-score vector candidates with the configured OpenAI-compatible model."
                   checked={rerank}
                   onCheckedChange={setRerank}
                 />
@@ -328,7 +348,7 @@ export function Settings() {
                   </Button>
                   <Button
                     type="button"
-                    disabled={!hasKey || Boolean(config?.nebius_key_env)}
+                    disabled={!hasKey || Boolean(config?.rerank_key_env)}
                     onClick={() => void removeKey()}
                   >
                     Remove key

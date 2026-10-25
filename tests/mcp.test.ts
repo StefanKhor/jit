@@ -19,7 +19,10 @@ const home = mkdtempSync(path.join(tmpdir(), "jit-stdio-"));
 // starts empty so the first find must miss.
 writeFileSync(
   path.join(home, "config.json"),
-  JSON.stringify({ confidence_threshold: 0, first_run: false }),
+  JSON.stringify({
+    confidence_threshold: 0,
+    first_run: false,
+  }),
 );
 
 const env: Record<string, string> = {};
@@ -94,7 +97,7 @@ test("the stdio server advertises only the skill-first tools", async () => {
   assert.match(String(add?.description), /SkillSpector/);
 });
 
-test("a skill added over stdio is found and returned in full", async () => {
+test("JIT_FIND refuses lexical-only retrieval when embeddings are unavailable", async () => {
   const added = payload(
     await client.callTool({
       name: "JIT_ADD",
@@ -109,12 +112,9 @@ test("a skill added over stdio is found and returned in full", async () => {
       arguments: { intent: "do the stdio thing" },
     }),
   );
-  assert.equal(found.found, true);
-  assert.equal(found.id, "stdio-skill");
-  assert.equal(found.kind, "skill");
-  assert.match(String(found.content), /Do the stdio thing\./);
-  assert.equal(typeof found.confidence, "number");
-  assert.equal(found.keyword_only, true);
+  assert.equal(found.found, false);
+  assert.equal(found.error, "embeddings_required_but_unavailable");
+  assert.match(String(found.note), /Embedding retrieval is required/);
 });
 
 test("JIT_ADD refuses a skill SkillSpector flags, until it is forced", async () => {

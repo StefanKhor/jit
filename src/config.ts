@@ -85,12 +85,6 @@ export const EMBEDDING_MODEL =
   process.env.JIT_EMBEDDING_MODEL || "Xenova/bge-small-en-v1.5";
 export const EMBEDDING_DIM = envNumber("JIT_EMBEDDING_DIM", 384, 1, 16384, true);
 
-export const DEFAULT_NEBIUS_API_BASE =
-  process.env.NEBIUS_API_BASE || "https://api.studio.nebius.ai/v1";
-export const DEFAULT_NEBIUS_API_KEY = process.env.NEBIUS_API_KEY || "";
-export const DEFAULT_NEMOTRON_NANO_MODEL =
-  process.env.NEMOTRON_NANO_MODEL || "nvidia/nemotron-nano-9b-v2";
-
 export const DEFAULT_HOST = process.env.JIT_HOST || "127.0.0.1";
 export const DEFAULT_PORT = envNumber("JIT_PORT", 3000, 1, 65535, true);
 export const MAX_REQUEST_BYTES = envNumber(
@@ -109,11 +103,11 @@ export const MAX_SKILL_BYTES = envNumber(
 );
 
 export const DEFAULT_CONFIG: Config = {
-  nebius_api_key: DEFAULT_NEBIUS_API_KEY,
-  nebius_api_base: DEFAULT_NEBIUS_API_BASE,
-  nemotron_nano_model: DEFAULT_NEMOTRON_NANO_MODEL,
+  rerank_api_key: process.env.JIT_RERANK_API_KEY || "",
+  rerank_api_base: "",
+  rerank_model: "",
   api_key: "",
-  rerank_enabled: true,
+  rerank_enabled: false,
   confidence_threshold: CONFIDENCE_THRESHOLD,
   first_run: true,
   marketplace_urls: [],
@@ -121,9 +115,9 @@ export const DEFAULT_CONFIG: Config = {
 };
 
 const FILE_KEYS = new Set<keyof Config>([
-  "nebius_api_key",
-  "nebius_api_base",
-  "nemotron_nano_model",
+  "rerank_api_key",
+  "rerank_api_base",
+  "rerank_model",
   "api_key",
   "rerank_enabled",
   "confidence_threshold",
@@ -133,9 +127,9 @@ const FILE_KEYS = new Set<keyof Config>([
 ]);
 
 const ENV_KEYS: Partial<Record<keyof Config, string>> = {
-  nebius_api_key: "NEBIUS_API_KEY",
-  nebius_api_base: "NEBIUS_API_BASE",
-  nemotron_nano_model: "NEMOTRON_NANO_MODEL",
+  rerank_api_key: "JIT_RERANK_API_KEY",
+  rerank_api_base: "JIT_RERANK_API_BASE",
+  rerank_model: "JIT_RERANK_MODEL",
   api_key: "JIT_API_KEY",
 };
 
@@ -280,10 +274,6 @@ export function loadConfig(): Config {
   config.marketplace_urls = Array.isArray(config.marketplace_urls)
     ? config.marketplace_urls.map((value) => String(value).trim()).filter(Boolean)
     : [];
-  config.nebius_api_base =
-    config.nebius_api_base || DEFAULT_NEBIUS_API_BASE;
-  config.nemotron_nano_model =
-    config.nemotron_nano_model || DEFAULT_NEMOTRON_NANO_MODEL;
   return config;
 }
 
@@ -318,11 +308,10 @@ export function publicConfig(): PublicConfig {
   const config = loadConfig();
   const redacted: PublicConfig = {
     ...config,
-    nebius_api_key: config.nebius_api_key
-      ? `***${config.nebius_api_key.slice(-4)}`
+    rerank_api_key: config.rerank_api_key
+      ? `***${config.rerank_api_key.slice(-4)}`
       : "",
     api_key: config.api_key ? `***${config.api_key.slice(-4)}` : "",
-    nebius_key_env: Boolean(process.env.NEBIUS_API_KEY),
     auth_env: Boolean(process.env.JIT_API_KEY),
     auth_enabled: Boolean(config.api_key),
     index_dir: INDEX_DIR,
@@ -330,9 +319,11 @@ export function publicConfig(): PublicConfig {
     skillspector_llm_env:
       process.env.JIT_SKILLSPECTOR_LLM !== undefined &&
       process.env.JIT_SKILLSPECTOR_LLM.trim() !== "",
+    rerank_key_env: Boolean(process.env.JIT_RERANK_API_KEY),
+    rerank_base_env: Boolean(process.env.JIT_RERANK_API_BASE),
+    rerank_model_env: Boolean(process.env.JIT_RERANK_MODEL),
   };
-  redacted.rerank_enabled =
-    Boolean(config.nebius_api_key) && Boolean(config.rerank_enabled);
+  redacted.rerank_enabled = Boolean(config.rerank_enabled);
   return redacted;
 }
 

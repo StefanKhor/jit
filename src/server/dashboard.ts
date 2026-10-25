@@ -7,7 +7,6 @@ import { Hono, type Context } from "hono";
 
 import {
   DEFAULT_HOST,
-  DEFAULT_NEBIUS_API_BASE,
   DEFAULT_PORT,
   DEFAULT_SKILL_PATHS,
   DASHBOARD_HTML,
@@ -300,28 +299,18 @@ export function createApp(): Hono {
   app.post("/api/config", async (c) => {
     const body = await readJson(c);
     const updates: Record<string, unknown> = {};
-    for (const key of [
-      "nebius_api_key",
-      "nebius_api_base",
-      "nemotron_nano_model",
-    ]) {
+    for (const key of ["rerank_api_key", "rerank_api_base", "rerank_model"]) {
       if (key in body) updates[key] = String(body[key] || "").trim();
     }
-    const base = String(updates.nebius_api_base || "");
-    if (base && !isSecureApiBase(base)) {
+    const rerankBase = String(updates.rerank_api_base || "");
+    if (rerankBase && !isSecureApiBase(rerankBase)) {
       throw new HttpError(
         400,
-        "API base must use https:// (http:// is allowed only for localhost)",
+        "rerank API base must use https:// (http:// is allowed only for localhost)",
       );
     }
-    if ("nebius_api_base" in updates) {
-      updates.nebius_api_base = (base || DEFAULT_NEBIUS_API_BASE).replace(
-        /\/+$/,
-        "",
-      );
-    }
-    for (const key of ["nemotron_nano_model"]) {
-      if (key in updates && !updates[key]) delete updates[key];
+    if ("rerank_api_base" in updates) {
+      updates.rerank_api_base = rerankBase.replace(/\/+$/, "");
     }
     if ("rerank_enabled" in body) {
       updates.rerank_enabled = boolValue(body.rerank_enabled, false);
@@ -958,6 +947,7 @@ async function search(intent: string): Promise<Record<string, unknown>> {
     near_misses: evaluation.nearMisses,
     reranked: evaluation.reranked,
     keyword_only: evaluation.keywordOnly,
+    ...(evaluation.warning ? { warning: evaluation.warning } : {}),
     threshold: evaluation.threshold,
     elapsed_ms: Number((performance.now() - started).toFixed(1)),
   };

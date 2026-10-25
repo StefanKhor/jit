@@ -14,7 +14,7 @@ process.env.JIT_DISABLE_EMBEDDINGS = "1";
 // JSON contract so the gate is exercised without the real toolchain.
 process.env.JIT_SKILLSPECTOR = FAKE_SKILLSPECTOR;
 delete process.env.JIT_API_KEY;
-delete process.env.NEBIUS_API_KEY;
+delete process.env.JIT_RERANK_API_KEY;
 delete process.env.JIT_MARKETPLACE_URL;
 delete process.env.JIT_CONFIDENCE_THRESHOLD;
 
@@ -229,16 +229,16 @@ test("the dashboard is served with a restrictive CSP", async () => {
 });
 
 test("the public config is redacted and has no dead settings", async () => {
-  saveConfig({ nebius_api_key: "nb-secret-4321" });
+  saveConfig({ rerank_api_key: "rerank-secret-4321" });
   const response = await app.request("/api/config");
   const config = (await response.json()) as Record<string, unknown>;
-  assert.equal(config.nebius_api_key, "***4321");
+  assert.equal(config.rerank_api_key, "***4321");
   assert.equal(config.api_key, "");
   assert.equal("nemotron_ultra_model" in config, false);
   assert.ok(Array.isArray(config.marketplace_urls));
   assert.equal(config.skillspector_llm_enabled, false);
   assert.equal(config.skillspector_llm_env, false);
-  saveConfig({ nebius_api_key: "" });
+  saveConfig({ rerank_api_key: "" });
 });
 
 test("config writes are validated", async () => {
@@ -252,7 +252,7 @@ test("config writes are validated", async () => {
   );
   assert.equal((await post({ confidence_threshold: "abc" })).status, 400);
   assert.equal((await post({ marketplace_urls: "nope" })).status, 400);
-  assert.equal((await post({ nebius_api_base: "http://evil.test" })).status, 400);
+  assert.equal((await post({ rerank_api_base: "http://evil.test" })).status, 400);
   const scannerSetting = await post({ skillspector_llm_enabled: true });
   assert.equal(scannerSetting.status, 200);
   assert.equal(

@@ -116,6 +116,103 @@ function Figures({ stats }: { stats: Stats }) {
   );
 }
 
+function EmbeddingCoverage({ stats }: { stats: Stats }) {
+  const coverage = stats.embedding_coverage || {
+    skills_total: stats.skills || 0,
+    skills_embedded: 0,
+    tools_total: stats.tools || 0,
+    tools_embedded: 0,
+  };
+  const total = Number(coverage.skills_total || 0);
+  const embedded = Math.min(total, Number(coverage.skills_embedded || 0));
+  const missing = Math.max(0, total - embedded);
+  const ratio = total ? embedded / total : 0;
+  const percentage = Math.round(ratio * 100);
+  const radius = 38;
+  const circumference = 2 * Math.PI * radius;
+  const embeddedLength = circumference * ratio;
+
+  return (
+    <Panel>
+      <PanelHead
+        title="Embedding coverage"
+        hint="vectors available for semantic retrieval"
+      />
+      <PanelBody className="flex flex-wrap items-center gap-6">
+        <svg
+          viewBox="0 0 100 100"
+          role="img"
+          aria-label={`${embedded} of ${total} indexed skills have embedding vectors`}
+          className="size-28 shrink-0"
+        >
+          <circle
+            cx="50"
+            cy="50"
+            r={radius}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="9"
+            className="text-line-2"
+          />
+          <circle
+            cx="50"
+            cy="50"
+            r={radius}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="9"
+            strokeLinecap="round"
+            strokeDasharray={`${embeddedLength} ${circumference}`}
+            transform="rotate(-90 50 50)"
+            className="text-accent"
+          />
+          <text
+            x="50"
+            y="47"
+            textAnchor="middle"
+            className="num fill-ink text-[18px] font-semibold"
+          >
+            {percentage}%
+          </text>
+          <text
+            x="50"
+            y="62"
+            textAnchor="middle"
+            className="num fill-ink-3 text-[7px]"
+          >
+            {fmt(embedded)} / {fmt(total)} skills
+          </text>
+        </svg>
+
+        <div className="min-w-52 flex-1 space-y-3">
+          <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs">
+            <span className="inline-flex items-center gap-2 text-ink-2">
+              <span className="size-2 rounded-full bg-accent" />
+              {fmt(embedded)} embedded
+            </span>
+            <span className="inline-flex items-center gap-2 text-ink-2">
+              <span className="size-2 rounded-full bg-line-2" />
+              {fmt(missing)} missing
+            </span>
+          </div>
+          <p className="text-xs leading-relaxed text-ink-3">
+            {missing
+              ? `${fmt(missing)} skill${missing === 1 ? "" : "s"} ${missing === 1 ? "has" : "have"} no vector yet and cannot be returned by strict JIT_FIND until re-indexed with the embedding model available.`
+              : total
+                ? "Every indexed skill has a vector and is eligible for semantic retrieval."
+                : "Index skills while the embedding model is available to build semantic vectors."}
+          </p>
+          {coverage.tools_total ? (
+            <p className="num text-[10px] text-ink-3">
+              Tool vectors: {fmt(coverage.tools_embedded)} / {fmt(coverage.tools_total)}
+            </p>
+          ) : null}
+        </div>
+      </PanelBody>
+    </Panel>
+  );
+}
+
 /**
  * The comparison that carries the whole product: what each approach keeps in
  * the context window before any task runs. The body a task loads is identical
@@ -649,6 +746,7 @@ export function Overview() {
       <Hero />
 
       <Figures stats={stats} />
+      <EmbeddingCoverage stats={stats} />
 
       {total === 0 ? (
         <Panel className="border-dashed bg-panel/60">

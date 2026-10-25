@@ -16,9 +16,9 @@ export interface Health {
 }
 
 export interface PublicConfig {
-  nebius_api_key: string;
-  nebius_api_base: string;
-  nemotron_nano_model: string;
+  rerank_api_key: string;
+  rerank_api_base: string;
+  rerank_model: string;
   api_key: string;
   rerank_enabled: boolean;
   confidence_threshold: number;
@@ -26,7 +26,9 @@ export interface PublicConfig {
   marketplace_urls: string[];
   skillspector_llm_enabled: boolean;
   skillspector_llm_env: boolean;
-  nebius_key_env: boolean;
+  rerank_key_env: boolean;
+  rerank_base_env: boolean;
+  rerank_model_env: boolean;
   auth_env: boolean;
   auth_enabled: boolean;
   index_dir: string;
@@ -45,6 +47,12 @@ export interface Stats {
   largest: number;
   heaviest: Array<{ name: string; kind: ItemKind; tokens: number }>;
   categories: Array<{ name: string; count: number }>;
+  embedding_coverage: {
+    skills_total: number;
+    skills_embedded: number;
+    tools_total: number;
+    tools_embedded: number;
+  };
   tokens: {
     jit: number;
     catalog: number;
@@ -74,6 +82,7 @@ export interface SkillListItem {
   tokens: number;
   /** What this entry's name and description cost in a plain catalog. */
   catalog_tokens: number;
+  has_embedding: boolean;
   managed: boolean;
 }
 
@@ -260,6 +269,7 @@ export interface SearchResponse {
   near_misses: NearMiss[];
   reranked: boolean;
   keyword_only: boolean;
+  warning?: string;
   threshold: number;
   elapsed_ms: number;
 }

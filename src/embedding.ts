@@ -11,8 +11,8 @@ env.cacheDir = MODEL_CACHE_DIR;
 env.allowLocalModels = true;
 env.allowRemoteModels = true;
 
-// Air-gapped or locked-down installs can skip the model entirely and run on the
-// lexical fallback. Set JIT_DISABLE_EMBEDDINGS=1 to opt in.
+// JIT_DISABLE_EMBEDDINGS=1 skips model loading. Retrieval requires embeddings,
+// so queries return an explicit unavailable warning instead of a lexical result.
 const EMBEDDINGS_DISABLED = /^(1|true|yes|on)$/i.test(
   process.env.JIT_DISABLE_EMBEDDINGS || "",
 );
@@ -20,8 +20,8 @@ const EMBEDDINGS_DISABLED = /^(1|true|yes|on)$/i.test(
 let extractorPromise: Promise<FeatureExtractionPipeline> | null = null;
 // When the model cannot load (offline, missing runtime, first-run download
 // blocked) every call would otherwise pay the full load timeout again. Remember
-// the failure and refuse quickly for a cooldown so retrieval degrades to the
-// lexical fallback instead of hanging per query.
+// the failure and refuse quickly for a cooldown so strict retrieval fails fast
+// instead of hanging on every query.
 let lastFailureAt = 0;
 const RETRY_AFTER_MS = 300_000;
 

@@ -4,8 +4,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-// Isolate the index and force the offline path so retrieval runs on the lexical
-// fallback deterministically (no model download, no network).
+// Isolate the index and force the offline path so strict retrieval can be tested
+// without a model download or network access.
 process.env.JIT_HOME = mkdtempSync(path.join(tmpdir(), "jit-retrieval-"));
 process.env.JIT_DISABLE_EMBEDDINGS = "1";
 
@@ -72,18 +72,16 @@ test("an empty intent returns no result", async () => {
   assert.equal(evaluation.candidates.length, 0);
 });
 
-test("a strong lexical match is returned and flagged keyword-only", async () => {
+test("embedding failure refuses keyword-only matches", async () => {
   seed(CORPUS);
   const evaluation = await evaluate(
     "postgres query explain analyze slow",
     5,
   );
-  assert.ok(evaluation.result, "expected a hit");
-  assert.equal(evaluation.result?.id, "postgres-explain");
-  assert.equal(evaluation.keywordOnly, true);
-  assert.equal(evaluation.result?.keyword_only, true);
-  // No catalog provenance for a locally seeded item.
-  assert.equal(evaluation.result?.trust, "first-party");
+  assert.equal(evaluation.result, null);
+  assert.equal(evaluation.keywordOnly, false);
+  assert.equal(evaluation.candidates.length, 0);
+  assert.match(evaluation.warning || "", /Embedding retrieval is required/);
 });
 
 test("an unrelated intent returns no result", async () => {
@@ -91,18 +89,12 @@ test("an unrelated intent returns no result", async () => {
   assert.equal(evaluation.result, null);
 });
 
-test("a weak match stays below the threshold but appears as a near miss", async () => {
+test("keyword-only near misses are not returned when embeddings are unavailable", async () => {
   const evaluation = await evaluate("kubernetes", 5);
   const gibberish = await evaluate("kubernetes zzzz qqqq wwww vvvv yyyy", 5);
   assert.equal(gibberish.result, null);
-  // A single weak term should not clear the threshold but should be surfaced.
-  if (evaluation.result === null) {
-    assert.ok(
-      evaluation.nearMisses.length >= 1,
-      "expected at least one near miss",
-    );
-    assert.equal(evaluation.nearMisses[0]?.id, "k8s-deploy");
-  }
+  assert.equal(evaluation.nearMisses.length, 0);
+  assert.match(evaluation.warning || "", /Embedding retrieval is required/);
 });
 
 test("a disabled item is never returned", async () => {

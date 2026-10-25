@@ -157,6 +157,15 @@ export function Search() {
             nothing with a short list of what was close.
           </Empty>
         </Panel>
+      ) : data.warning ? (
+        <Panel className="border-warn/30 bg-warn/5">
+          <PanelHead title="Embedding search unavailable" hint="no keyword fallback used" />
+          <PanelBody>
+            <p className="max-w-3xl text-sm leading-relaxed text-ink-2">
+              {data.warning}
+            </p>
+          </PanelBody>
+        </Panel>
       ) : (data.candidates || []).length === 0 ? (
         <Panel className="border-dashed bg-panel/60">
           <Empty title="The index is empty.">
@@ -184,11 +193,6 @@ function TrustBadge({ result }: { result: NonNullable<SearchResponse["result"]> 
           <Badge tone="warn">third-party</Badge>
         </span>
       ) : null}
-      {result.keyword_only ? (
-        <span title="No embeddings or reranker available; ranked by keywords only.">
-          <Badge tone="neutral">keyword-only</Badge>
-        </span>
-      ) : null}
     </span>
   );
 }
@@ -200,11 +204,9 @@ function SearchOutput({ data }: { data: SearchResponse }) {
   const tick = Math.min(100, Math.max(0, Number(data.threshold || 0) * 100));
   const threshold = Number(data.threshold || 0);
   const closest = candidates[0] ?? null;
-  const mode = data.keyword_only
-    ? "keyword-only fallback"
-    : data.reranked
-      ? "reranked · Nemotron Nano"
-      : "local hybrid search";
+  const mode = data.reranked
+    ? "reranked · OpenAI-compatible model"
+    : "vector + keyword hybrid search";
 
   return (
     <div id="search-output" role="status" aria-live="polite" className="space-y-8">
