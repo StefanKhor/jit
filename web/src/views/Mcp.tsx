@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { fmt, summary } from "../format";
+import { fmt } from "../format";
 import { useJit } from "../state/store";
 import type { ConfigPath, McpImportServer } from "../types";
 import { StatusDot } from "../ui/Badge";
@@ -81,12 +81,12 @@ export function Mcp() {
 
   const act = async (
     server: string,
-    action: "connect" | "disconnect" | "index" | "remove",
+    action: "connect" | "disconnect" | "remove",
   ) => {
     if (action === "remove") {
       const ok = await ctx.confirmAction(
         "Remove from JIT?",
-        `"${server}" and its indexed tools will be removed from JIT. The external server and its own config are untouched.`,
+        `"${server}" will be removed from JIT. The external server and its own config are untouched.`,
         "Remove",
       );
       if (!ok) return;
@@ -94,38 +94,23 @@ export function Mcp() {
     setBusy(server);
     try {
       if (action === "remove") {
-        const result = await ctx.api<{ tools_removed?: number }>(
-          "/api/mcp/remove",
-          { method: "POST", body: JSON.stringify({ server }) },
-        );
-        ctx.toast(`Removed ${server} · ${fmt(result.tools_removed || 0)} tools.`);
+        await ctx.api("/api/mcp/remove", {
+          method: "POST",
+          body: JSON.stringify({ server }),
+        });
+        ctx.toast(`Removed ${server}.`);
       } else if (action === "connect") {
         const result = await ctx.api<{ tools: unknown[] }>("/api/mcp/connect", {
           method: "POST",
           body: JSON.stringify({ server }),
         });
         ctx.toast(`Connected to ${server} · ${result.tools.length} tools.`);
-      } else if (action === "disconnect") {
+      } else {
         await ctx.api("/api/mcp/disconnect", {
           method: "POST",
           body: JSON.stringify({ server }),
         });
         ctx.toast(`${server} disconnected.`);
-      } else {
-        const result = await ctx.api<{
-          found?: number;
-          added?: number;
-          updated?: number;
-          skipped?: number;
-          errors?: string[];
-        }>("/api/mcp/index", {
-          method: "POST",
-          body: JSON.stringify({ server }),
-        });
-        ctx.toast(
-          summary(result),
-          (result.errors || []).length ? "error" : "ok",
-        );
       }
       await ctx.refreshAll();
     } catch (error) {
@@ -233,31 +218,21 @@ export function Mcp() {
                       </Td>
                       <Td
                         className="num hidden text-right text-ink-2 sm:table-cell"
-                        title="Indexed tools"
+                        title="Tools the server exposes"
                       >
-                        {fmt(server.indexed_tool_count ?? server.tool_count)}
+                        {fmt(server.tool_count)}
                       </Td>
                       <Td className="text-right">
                         <div className="flex justify-end gap-1.5">
                           {server.status === "connected" ? (
-                            <>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled={busy === server.name}
-                                onClick={() => void act(server.name, "index")}
-                              >
-                                Index
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled={busy === server.name}
-                                onClick={() => void act(server.name, "disconnect")}
-                              >
-                                Disconnect
-                              </Button>
-                            </>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={busy === server.name}
+                              onClick={() => void act(server.name, "disconnect")}
+                            >
+                              Disconnect
+                            </Button>
                           ) : (
                             <Button
                               size="sm"

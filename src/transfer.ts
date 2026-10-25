@@ -68,7 +68,7 @@ async function indexParsed(
   if (items.length === 0) {
     return { added: 0, updated: 0, skipped: 0, errors };
   }
-  const result = await indexItems(items, "skill");
+  const result = await indexItems(items);
   return { ...result, errors: [...errors, ...result.errors] };
 }
 
@@ -199,10 +199,6 @@ export async function exportSkills(
     const item = getItem(db, itemId);
     if (!item) {
       errors.push(`${itemId}: not found`);
-      continue;
-    }
-    if (item.kind !== "skill") {
-      errors.push(`${itemId}: not a skill`);
       continue;
     }
     let dirName: string;

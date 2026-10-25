@@ -14,8 +14,8 @@ body, not a catalog. A multi-part task spans skills: a confident hit also lists
 up to two related skill names, and a second call loads the next body — one body
 per call, never a catalog. The MCP response carries only the skill name and its
 body — scores, ranking notes, and telemetry stay on the dashboard, where a
-human reads them. The whole shipped MCP surface is two
-tools, measured at about 400 tokens of standing context.
+human reads them. The whole shipped MCP surface is one
+tool: `JIT_FIND`.
 
 JIT stays quiet until it is called. MCP is pull-based, so JIT is built to be
 *invoked*, not to push: a small tool surface, sharp descriptions, and no
@@ -32,7 +32,7 @@ the measured miss rate, making misses visible instead of silent.
 The dashboard is the primary interface. Every index number in it is computed
 from the actual index: real body lengths, real entry counts, real cosine
 scores. Nothing about your data is hardcoded. The one fixed figure — the
-context cost of JIT's own MCP tool schemas — is measured from the live
+context cost of JIT's own MCP tool schema — is measured from the live
 `tools/list` payload at runtime, not written down by hand.
 
 ## Quick start
@@ -94,19 +94,15 @@ For OpenCode:
 If you ran `bun link` in the repo, `"command": "jit"` and
 `"args": ["serve"]` also work.
 
-Restart the client. The agent now sees two tools:
+Restart the client. The agent now sees one tool:
 
 | Tool | What it does |
 |---|---|
 | `JIT_FIND(intent)` | Load the one skill that fits a concrete multi-step task. Returns the skill body, or `{"found": false}` with `near_misses`. |
-| `JIT_ADD(source)` | Add a skill — a path, a SKILL.md URL, inline markdown, or an installed JIT MCP server. |
 
-That is the whole surface. `JIT_CALL` and `JIT_STATUS` exist in the code but are
-**not advertised** while JIT is skill-first: every tool name, description, and
-schema sits in the agent's context for the entire session, and the cheapest
-token is the one never sent. Restoring them is one line in
-`src/mcp-server.ts` (`SHIPPED_TOOLS`), which is also where the trade-off is
-documented.
+That is the whole surface. JIT is skills-only: every tool name, description, and
+schema sits in the agent's context for the entire session, so nothing else
+ships. Indexing happens on the dashboard, not through the agent.
 
 ### Triggering JIT
 
@@ -142,13 +138,13 @@ cheaper and more predictable.
 Being honest about the boundary is part of being production-ready.
 
 - **Small indexes are a net cost.** JIT adds a fixed per-task cost: the schema of
-  its two shipped tools (measured, ~400 tokens) plus one retrieved body. The
+  its one shipped tool plus one retrieved body. The
   alternative keeps the whole catalog — every name and description — in context
   plus the one body a task loads. The Overview page shows the **break-even
   count** where the two cross: the point at which the catalog outgrows JIT's
   fixed tool schema. Below a handful of entries, listing your skills is cheaper
   and simpler, and JIT says so on the page rather than pretending otherwise. JIT
-  earns its place when you have many skills, many MCP servers, or both.
+  earns its place when you have many skills.
 - **Attention is still the agent's job.** An MCP server cannot push context; the
   agent has to call `JIT_FIND`. The tool descriptions plus a one-line client
   instruction (above) are the lever. If a client ever offers a retrieval hook,
@@ -157,14 +153,12 @@ Being honest about the boundary is part of being production-ready.
 - **Cross-client, local, and offline is the durable part.** A single client can
   absorb "tool search" natively, but it will not index *other* clients' skills,
   run in an air-gapped environment, or keep your catalog on your machine. JIT
-  indexes skills and MCP tools together, from paths owned by Claude, Cursor,
+  indexes skills from paths owned by Claude, Cursor,
   OpenCode, and plain files, with no network dependency once the model is cached.
-- **JIT is not a transparent passthrough.** `JIT_CALL` (kept in the code, not
-  shipped by default) forwards a tool call and validates arguments against the
-  stored schema, because the client's own validation does not apply to a
-  forwarded call. It is not a pass-through for resources, prompts, or
-  notifications — connect those servers directly if you need them. JIT is a
-  retrieval index for skills and tools, and does that one thing.
+- **JIT is not a passthrough.** JIT is a retrieval index for skills — it returns
+  a skill body and nothing else. It does not forward tool calls, resources,
+  prompts, or notifications; connect those servers to your client directly if
+  you need them.
 
 ## The dashboard
 
@@ -174,8 +168,7 @@ A single-file React SPA served by the Node process.
   the break-even index size, index composition, heaviest entries, categories,
   and the measured retrieval miss rate.
 - **Skills** — list, read, enable/disable, index a path, transfer, and remove.
-- **MCP** — connect, disconnect, index tools, import a client config, add a
-  server manually.
+- **MCP** — connect, disconnect, import a client config, add a server manually.
 - **Search** — live retrieval with the effective score, cosine, rerank
   and the threshold, plus a confidence slider and the retrieval log.
 - **Settings** — local/cloud embeddings, the reranker, confidence threshold, dashboard auth,
@@ -191,8 +184,8 @@ default. Use `--host 0.0.0.0` only behind a trusted proxy.
 - **Uninstall** (a JIT-owned copy) deletes the
   copy at `~/.jit/skills/<id>/SKILL.md` and its index entry. Any original local
   file is untouched.
-- **Remove** (an MCP server) deletes JIT's own server definition and its
-  indexed tools. The external server and any client config are untouched.
+- **Remove** (an MCP server) deletes JIT's own server definition. The external
+  server and any client config are untouched.
 
 ### Transfer semantics
 
@@ -218,8 +211,8 @@ Imports are explicit, read-only on the source side, and shown before they run.
 4. **Two-stage threshold** — the decision uses one scale, never a mix. A reranked
     candidate is judged on its rerank score; otherwise on cosine similarity. The
     default threshold is `0.60`.
-5. **Two-tier result** — a candidate above the threshold returns one body or
-   tool descriptor. Below it, `JIT_FIND` returns `{"found": false}` with up to
+5. **Two-tier result** — a candidate above the threshold returns one skill body.
+   Below it, `JIT_FIND` returns `{"found": false}` with up to
    three `near_misses` (names), so the agent can retry once with a sharper
    intent instead of silently giving up.
 
@@ -306,7 +299,7 @@ scan paths, used only when you explicitly ask JIT to scan:
 `~/.skills`, `~/.claude/skills`, `~/.agents/skills`, `~/.codex/skills`,
 `~/.config/opencode/skills`, `./.opencode/skills`, `./skills`.
 
-## MCP tools
+## MCP servers
 
 JIT manages its own server definitions in `~/.jit/mcp.json`. It does not load
 servers from client configs at startup. On the MCP page you can:
@@ -314,10 +307,11 @@ servers from client configs at startup. On the MCP page you can:
 - **Import configs** from `~/.cursor/mcp.json`, `~/.claude.json`,
   `~/.config/opencode/opencode.json`, `./.mcp.json`, and `./mcp.json`.
 - **Add** a stdio or streamable HTTP/SSE server manually.
+- **Connect / disconnect** to verify a server and list the tools it exposes.
 
-Indexed tools are embedded alongside skills, so one `JIT_FIND` searches both.
-`JIT_CALL` — kept in the code, not shipped by default — forwards execution to the
-owning server, with arguments validated against the stored schema first.
+JIT's index is skills-only: it does not index or forward MCP tool calls, so
+nothing is stored that JIT cannot return. Use the MCP page to keep server
+definitions in one place; connect the servers your client needs directly.
 
 ## Deployment
 

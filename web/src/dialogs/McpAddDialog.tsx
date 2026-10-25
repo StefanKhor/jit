@@ -1,6 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
 
-import { fmt } from "../format";
 import { useJit } from "../state/store";
 import type { InstallResult } from "../types";
 import { Button } from "../ui/Button";
@@ -64,10 +63,8 @@ export function McpAddDialog({
           `Added, but not connected: ${result.error || "connection failed"}`,
           "error",
         );
-      } else if ((result.errors || []).length) {
-        ctx.toast(`Added · ${result.errors?.[0] || ""}`, "error");
       } else {
-        ctx.toast(`Added ${safeName} · ${fmt(result.added || 0)} tools indexed.`);
+        ctx.toast(`Added ${safeName}.`);
       }
       await ctx.refreshAll();
     } catch (caught) {

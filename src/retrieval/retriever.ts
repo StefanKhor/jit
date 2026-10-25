@@ -185,7 +185,6 @@ export async function evaluate(
       id: item.id,
       name: item.name,
       description: item.description,
-      kind: item.kind,
       cosine: Number((cosine.get(item.id) || 0).toFixed(4)),
       rerank:
         rerankScore === undefined ? null : Number(rerankScore.toFixed(4)),
@@ -202,7 +201,6 @@ export async function evaluate(
       id: candidate.id,
       name: candidate.name,
       description: candidate.description,
-      kind: candidate.kind,
       score: candidate.score,
     }));
 
@@ -231,22 +229,11 @@ export async function evaluate(
   const result: SearchResult = {
     id: best.id,
     name: best.name,
-    kind: best.kind,
     description: best.description,
     content: best.body,
     confidence: Number(confidence.toFixed(4)),
     reranked,
   };
-  if (best.source) {
-    result.source = best.source;
-    result.trust = "third-party";
-  } else {
-    result.trust = "first-party";
-  }
-  if (best.kind === "tool") {
-    result.server = best.server || best.id.split("__", 1)[0];
-    result.tool_id = best.id;
-  }
   // Multi-skill tasks are real: hand back the runners-up as one-liners so
   // the agent can load a second domain with another JIT_FIND call.
   const related = relatedSkills(debug, best.id);

@@ -5,8 +5,8 @@ import { Button } from "../ui/Button";
 import { Dialog, DialogBody, DialogFoot, DialogHead } from "../ui/Dialog";
 
 /**
- * Read-only view of one indexed skill or MCP tool: what it is, when it applies,
- * how it is addressed, and its full body (or tool parameters and schema).
+ * Read-only view of one indexed skill: what it is, when it applies, how it is
+ * addressed, and its full body.
  */
 export function SkillDialog({
   open,
@@ -25,7 +25,7 @@ export function SkillDialog({
       className="w-[min(38rem,calc(100vw-2rem))]"
     >
       <DialogHead
-        kicker={detail?.kind === "tool" ? "MCP tool" : "Skill"}
+        kicker="Skill"
         title={<span id="skill-dialog-title">{detail?.name || "—"}</span>}
         onClose={onClose}
       />
@@ -64,30 +64,6 @@ export function SkillDialog({
                 <p className="num text-xs leading-relaxed text-ink-2">
                   {detail.aliases.join(" · ")}
                 </p>
-              </section>
-            ) : null}
-
-            {detail.kind === "tool" &&
-            (detail.params?.length || detail.schema) ? (
-              <section className="space-y-4">
-                <h3 className="kicker">Parameters</h3>
-                {detail.params?.length ? (
-                  <ul className="space-y-1.5">
-                    {detail.params.map((param) => (
-                      <li key={param} className="flex items-center gap-2">
-                        <span className="num text-xs text-ink">{param}</span>
-                        {detail.required?.includes(param) ? (
-                          <Badge tone="accent">required</Badge>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-                {detail.schema ? (
-                  <pre className="overflow-x-auto rounded-xl border border-line bg-inset p-3.5 font-mono text-xs leading-relaxed text-ink-2">
-                    {JSON.stringify(detail.schema, null, 2)}
-                  </pre>
-                ) : null}
               </section>
             ) : null}
 

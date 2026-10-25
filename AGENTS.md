@@ -4,12 +4,12 @@ Use this file as the quick project map. Read `README.md` or `CONTRIBUTING.md` wh
 
 ## Project at a glance
 
-JIT is a local Node.js/TypeScript app with an MCP server and a React dashboard. It indexes skills and MCP tools in SQLite, retrieves items using embeddings, and can optionally rerank candidates through an OpenAI-compatible chat-completions endpoint.
+JIT is a local Node.js/TypeScript app with an MCP server and a React dashboard. It indexes skills in SQLite, retrieves items using embeddings, and can optionally rerank candidates through an OpenAI-compatible chat-completions endpoint.
 
 ## Start here
 
 - `src/cli.ts` — CLI entry points and command setup.
-- `src/mcp-server.ts` — MCP tool definitions and request handling.
+- `src/mcp-server.ts` — the shipped MCP tool (`JIT_FIND`) and its registration.
 - `src/retrieval/retriever.ts` — retrieval, confidence gating, and warnings.
 - `src/embedding.ts`, `src/retrieval/rerank.ts` — retrieval components.
 - `src/indexer.ts` — indexing orchestration and public index operations.

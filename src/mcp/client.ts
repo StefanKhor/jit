@@ -16,7 +16,6 @@ import {
 } from "../config.js";
 import { logger } from "../logger.js";
 import type {
-  IndexItem,
   McpImportServer,
   McpServerConfig,
   McpServerState,
@@ -27,7 +26,6 @@ import type {
 } from "../types.js";
 
 const CONNECT_TIMEOUT = 45_000;
-const CALL_TIMEOUT = 120_000;
 const SERVER_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const UNSAFE_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 
@@ -61,29 +59,6 @@ function withTimeout<T>(
       },
     );
   });
-}
-
-function resultPayload(result: Record<string, unknown>): Record<string, unknown> {
-  const isError = Boolean(result.isError);
-  const blocks = Array.isArray(result.content) ? result.content : [];
-  if (blocks.length === 0) {
-    return { content: result.structuredContent ?? null, is_error: isError };
-  }
-  const texts = blocks
-    .filter(
-      (block): block is { type: "text"; text: string } =>
-        Boolean(
-          block &&
-            typeof block === "object" &&
-            (block as { type?: unknown }).type === "text" &&
-            typeof (block as { text?: unknown }).text === "string",
-        ),
-    )
-    .map((block) => block.text);
-  if (texts.length === blocks.length) {
-    return { content: texts.join("\n"), is_error: isError };
-  }
-  return { content: blocks, is_error: isError };
 }
 
 export class MCPClientManager {
@@ -506,34 +481,6 @@ export class MCPClientManager {
     await Promise.all([...this.servers.keys()].map((name) => this.disconnect(name)));
   }
 
-  async callTool(
-    serverName: string,
-    toolName: string,
-    args: Record<string, unknown> = {},
-  ): Promise<Record<string, unknown>> {
-    if (!(await this.connect(serverName))) {
-      const state = this.servers.get(serverName);
-      return {
-        error: state?.error || "connection failed",
-        is_error: true,
-      };
-    }
-    const state = this.servers.get(serverName);
-    if (!state?.client) {
-      return { error: `server '${serverName}' is not connected`, is_error: true };
-    }
-    try {
-      const result = (await state.client.callTool(
-        { name: toolName, arguments: args },
-        undefined,
-        { timeout: CALL_TIMEOUT },
-      )) as unknown as Record<string, unknown>;
-      return resultPayload(result);
-    } catch (error) {
-      return { error: errorMessage(error), is_error: true };
-    }
-  }
-
   getTools(serverName?: string): Array<McpTool & { server: string }> {
     if (serverName !== undefined) {
       const state = this.servers.get(serverName);
@@ -564,51 +511,15 @@ export class MCPClientManager {
 
   async statusSummary(): Promise<McpServerSummary[]> {
     await this.loadConfigs();
-    const db = await import("../storage/db.js");
-    const indexed = db.indexedToolCounts(db.initDb());
     return Object.entries(this.getStatus())
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([name, status]) => ({
         name,
         status: status.status,
         tool_count: status.tool_count,
-        indexed_tool_count: indexed.get(name) || 0,
         error: status.error,
         source: status.source,
       }));
-  }
-
-  indexTools(serverName?: string): IndexItem[] {
-    return this.getTools(serverName).map((tool) =>
-      MCPClientManager.parseToolManifest(tool.server, tool),
-    );
-  }
-
-  static parseToolManifest(
-    serverName: string,
-    tool: McpTool & { server?: string },
-  ): IndexItem {
-    const schema = tool.inputSchema || {};
-    const properties = schema.properties || {};
-    const name = String(tool.name || "unknown");
-    return {
-      id: `${serverName}__${name}`,
-      name,
-      server: serverName,
-      kind: "tool",
-      description: String(tool.description || ""),
-      params: Object.keys(properties),
-      required: Array.isArray(schema.required) ? schema.required.map(String) : [],
-      schema,
-      categories: [serverName],
-      aliases: [],
-      when_to_use: String(tool.description || ""),
-      body: JSON.stringify(schema, null, 2),
-      path: "",
-      // Tools always come from an external MCP server, so they are never
-      // first-party. Used to label provenance in JIT_FIND results.
-      source: `mcp:${serverName}`,
-    };
   }
 }
 

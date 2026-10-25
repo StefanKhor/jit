@@ -1,7 +1,7 @@
 import { fmt, pct } from "../format";
 import { useJit } from "../state/store";
 import type { Stats } from "../types";
-import { Badge, Meta } from "../ui/Badge";
+import { Meta } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { AnimatedNumber, Empty, Spinner, Stat } from "../ui/Display";
 import { Panel, PanelBody, PanelHead } from "../ui/Panel";
@@ -45,7 +45,7 @@ function Figures({ stats }: { stats: Stats }) {
       label: "Indexed",
       value: <AnimatedNumber value={stats.total || 0} />,
       unit: "entries",
-      hint: `${fmt(stats.skills || 0)} skills · ${fmt(stats.tools || 0)} tools`,
+      hint: `${fmt(stats.enabled || 0)} enabled`,
     },
     {
       key: "rest",
@@ -118,13 +118,11 @@ function Figures({ stats }: { stats: Stats }) {
 
 function EmbeddingCoverage({ stats }: { stats: Stats }) {
   const coverage = stats.embedding_coverage || {
-    skills_total: stats.skills || 0,
-    skills_embedded: 0,
-    tools_total: stats.tools || 0,
-    tools_embedded: 0,
+    total: stats.total || 0,
+    embedded: 0,
   };
-  const total = Number(coverage.skills_total || 0);
-  const embedded = Math.min(total, Number(coverage.skills_embedded || 0));
+  const total = Number(coverage.total || 0);
+  const embedded = Math.min(total, Number(coverage.embedded || 0));
   const missing = Math.max(0, total - embedded);
   const ratio = total ? embedded / total : 0;
   const percentage = Math.round(ratio * 100);
@@ -202,11 +200,6 @@ function EmbeddingCoverage({ stats }: { stats: Stats }) {
                 ? "Every indexed skill has a vector and is eligible for semantic retrieval."
                 : "Index skills while the embedding model is available to build semantic vectors."}
           </p>
-          {coverage.tools_total ? (
-            <p className="num text-[10px] text-ink-3">
-              Tool vectors: {fmt(coverage.tools_embedded)} / {fmt(coverage.tools_total)}
-            </p>
-          ) : null}
         </div>
       </PanelBody>
     </Panel>
@@ -522,14 +515,6 @@ function Composition({ stats }: { stats: Stats }) {
   const total = stats.total || 0;
   const groups = [
     {
-      title: "By kind",
-      note: total ? `${Math.round(pct(stats.skills || 0, total))}% skills` : "empty",
-      items: [
-        { key: "skills", label: "Skills", count: stats.skills || 0, seg: "bg-accent" },
-        { key: "tools", label: "Tools", count: stats.tools || 0, seg: "bg-ink-2/60" },
-      ],
-    },
-    {
       title: "By state",
       note: total ? `${fmt(stats.enabled || 0)} of ${fmt(total)} enabled` : "empty",
       items: [
@@ -593,15 +578,12 @@ function Heaviest({ stats }: { stats: Stats }) {
       ) : (
         <div className="divide-y divide-line/60">
           {items.map((item, index) => (
-            <div key={`${item.kind}-${item.name}-${index}`} className="px-5 py-3.5">
+            <div key={`${item.name}-${index}`} className="px-5 py-3.5">
               <div className="flex items-baseline justify-between gap-4">
                 <span className="flex min-w-0 items-center gap-2">
                   <span className="truncate text-sm text-ink" title={item.name}>
                     {item.name}
                   </span>
-                  <Badge tone={item.kind === "skill" ? "accent" : "neutral"}>
-                    {item.kind}
-                  </Badge>
                 </span>
                 <span className="num shrink-0 text-xs text-ink-2">
                   {fmt(item.tokens)}
@@ -648,7 +630,7 @@ function Categories({ stats }: { stats: Stats }) {
             <code className="num rounded bg-raised px-1.5 py-0.5 text-[11px] text-ink-2">
               categories:
             </code>{" "}
-            to skill frontmatter, or index an MCP server.
+            to skill frontmatter.
           </p>
         </PanelBody>
       )}

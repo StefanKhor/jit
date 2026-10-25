@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 
 import { useJit } from "../state/store";
 import type { RetrievalStats, SearchResponse } from "../types";
-import { Badge, Meta, StatusDot } from "../ui/Badge";
+import { Meta, StatusDot } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { Empty, Spinner, Stat } from "../ui/Display";
 import { Input } from "../ui/Field";
@@ -169,7 +169,7 @@ export function Search() {
       ) : (data.candidates || []).length === 0 ? (
         <Panel className="border-dashed bg-panel/60">
           <Empty title="The index is empty.">
-            Add a skill or index an MCP server first.
+            Add a skill first.
           </Empty>
         </Panel>
       ) : (
@@ -184,19 +184,6 @@ export function Search() {
   );
 }
 
-function TrustBadge({ result }: { result: NonNullable<SearchResponse["result"]> }) {
-  return (
-    <span className="flex flex-wrap items-center gap-1.5">
-      <Badge tone="neutral">{result.kind}</Badge>
-      {result.trust === "third-party" ? (
-        <span title={result.source || ""}>
-          <Badge tone="warn">third-party</Badge>
-        </span>
-      ) : null}
-    </span>
-  );
-}
-
 function SearchOutput({ data }: { data: SearchResponse }) {
   const candidates = data.candidates || [];
   const result = data.result;
@@ -208,7 +195,7 @@ function SearchOutput({ data }: { data: SearchResponse }) {
     ? "reranked · OpenAI-compatible model"
     : data.ranking_warning
       ? "cosine only · rerank unavailable"
-      : "vector + keyword hybrid search";
+      : "vector search";
 
   return (
     <div id="search-output" role="status" aria-live="polite" className="space-y-8">
@@ -228,7 +215,6 @@ function SearchOutput({ data }: { data: SearchResponse }) {
           <PanelHead
             title="Best match"
             hint={mode}
-            actions={<TrustBadge result={result} />}
           />
           <PanelBody className="space-y-6">
             <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
@@ -270,18 +256,9 @@ function SearchOutput({ data }: { data: SearchResponse }) {
               </div>
             </div>
 
-            {result.kind === "tool" ? (
-              <p className="text-xs text-ink-2">
-                Call it with{" "}
-                <code className="num rounded border border-line-2 bg-raised px-1.5 py-0.5 text-[11px] text-ink">
-                  JIT_CALL("{result.tool_id}", {"{ … }"})
-                </code>
-              </p>
-            ) : null}
-
             <details className="border-t border-line pt-4">
               <summary className="cursor-pointer text-xs text-ink-3">
-                {result.kind === "tool" ? "Input schema" : "Skill body"}
+                Skill body
               </summary>
               <pre className="mt-3 max-h-96 overflow-auto rounded-lg border border-line bg-inset p-3 font-mono text-xs text-ink-2">
                 {result.content}
@@ -314,9 +291,6 @@ function SearchOutput({ data }: { data: SearchResponse }) {
               <ul className="divide-y divide-line/60 border-t border-line pt-1">
                 {nearMisses.map((miss) => (
                   <li key={miss.id} className="flex items-baseline gap-3 py-2.5">
-                    <Badge tone="neutral" className="shrink-0">
-                      {miss.kind}
-                    </Badge>
                     <span
                       className="min-w-0 truncate text-sm text-ink"
                       title={miss.name}
@@ -350,7 +324,6 @@ function SearchOutput({ data }: { data: SearchResponse }) {
             <thead>
               <tr>
                 <Th>Entry</Th>
-                <Th className="hidden w-20 sm:table-cell">Kind</Th>
                 <Th className="num w-20 text-right">Score</Th>
                 <Th className="num hidden w-20 text-right md:table-cell">
                   Cosine
@@ -373,9 +346,6 @@ function SearchOutput({ data }: { data: SearchResponse }) {
                         {candidate.name}
                       </span>
                     </div>
-                  </Td>
-                  <Td className="hidden sm:table-cell">
-                    <Badge tone="neutral">{candidate.kind}</Badge>
                   </Td>
                   <Td className="num text-right">
                     <span className="font-medium text-ink">

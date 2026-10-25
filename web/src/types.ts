@@ -5,8 +5,6 @@ export type View =
   | "search"
   | "settings";
 
-export type ItemKind = "skill" | "tool";
-
 export interface Health {
   status: string;
   version: string;
@@ -45,21 +43,17 @@ export interface PublicConfig {
 
 export interface Stats {
   total: number;
-  skills: number;
-  tools: number;
   enabled: number;
   disabled: number;
   body_tokens: number;
   catalog_tokens: number;
   average_body: number;
   largest: number;
-  heaviest: Array<{ name: string; kind: ItemKind; tokens: number }>;
+  heaviest: Array<{ name: string; tokens: number }>;
   categories: Array<{ name: string; count: number }>;
   embedding_coverage: {
-    skills_total: number;
-    skills_embedded: number;
-    tools_total: number;
-    tools_embedded: number;
+    total: number;
+    embedded: number;
   };
   tokens: {
     jit: number;
@@ -84,7 +78,6 @@ export interface SkillListItem {
   categories: string[];
   path: string;
   aliases: string[];
-  kind: ItemKind;
   enabled: boolean;
   /** Full body tokens, fetched on demand. */
   tokens: number;
@@ -103,12 +96,7 @@ export interface SkillDetail {
   aliases: string[];
   body: string;
   path: string;
-  kind: ItemKind;
   enabled: boolean;
-  server?: string;
-  params?: string[];
-  required?: string[];
-  schema?: Record<string, unknown>;
   tokens: number;
 }
 
@@ -118,7 +106,6 @@ export interface McpServerSummary {
   name: string;
   status: McpStatus;
   tool_count: number;
-  indexed_tool_count: number;
   error: string | null;
   source?: string;
 }
@@ -140,7 +127,6 @@ export interface NearMiss {
   id: string;
   name: string;
   description: string;
-  kind: ItemKind;
   score: number;
 }
 
@@ -148,7 +134,6 @@ export interface SearchCandidate {
   id: string;
   name: string;
   description: string;
-  kind: ItemKind;
   cosine: number;
   rerank: number | null;
   score: number;
@@ -158,16 +143,11 @@ export interface SearchCandidate {
 export interface SearchResult {
   id: string;
   name: string;
-  kind: ItemKind;
   description: string;
   content: string;
   confidence: number;
   reranked: boolean;
   related?: string[];
-  source?: string;
-  trust?: "first-party" | "third-party";
-  server?: string;
-  tool_id?: string;
 }
 
 export interface SearchResponse {
@@ -225,17 +205,11 @@ export interface ExportSkillsResult {
 }
 
 export interface InstallResult {
-  ok?: boolean;
-  id?: string;
-  kind?: "skill" | "mcp";
   installed?: boolean;
   connected?: boolean;
-  added?: number;
-  updated?: number;
-  skipped?: number;
+  tools?: number;
   errors?: string[];
   error?: string;
-  tools_removed?: number;
   removed?: boolean;
 }
 
@@ -245,7 +219,6 @@ export interface BulkResult {
   ok: string[];
   failed: Array<{ id?: string; server?: string; error: string }>;
   files_removed?: number;
-  tools?: Record<string, number>;
 }
 
 export interface IndexExport {

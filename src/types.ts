@@ -1,5 +1,3 @@
-export type ItemKind = "skill" | "tool";
-
 export interface IndexItem {
   id: string;
   name: string;
@@ -9,15 +7,7 @@ export interface IndexItem {
   aliases: string[];
   body: string;
   path: string;
-  kind: ItemKind;
   enabled?: boolean;
-  server?: string;
-  params?: string[];
-  required?: string[];
-  schema?: Record<string, unknown>;
-  // Where the entry came from (a catalog URL, "mcp:<server>", or undefined for
-  // first-party local files). Not part of the content hash.
-  source?: string;
 }
 
 export interface StoredItem extends IndexItem {
@@ -34,7 +24,6 @@ export interface ListItem {
   categories: string[];
   path: string;
   aliases: string[];
-  kind: ItemKind;
   enabled: boolean;
   /// Full body tokens, fetched on demand.
   tokens: number;
@@ -46,14 +35,11 @@ export interface ListItem {
 
 export interface HeaviestItem {
   name: string;
-  kind: ItemKind;
   tokens: number;
 }
 
 export interface Stats {
   total: number;
-  skills: number;
-  tools: number;
   enabled: number;
   disabled: number;
   body_tokens: number;
@@ -63,10 +49,8 @@ export interface Stats {
   heaviest: HeaviestItem[];
   categories: Array<{ name: string; count: number }>;
   embedding_coverage: {
-    skills_total: number;
-    skills_embedded: number;
-    tools_total: number;
-    tools_embedded: number;
+    total: number;
+    embedded: number;
   };
   tokens?: {
     // What sits in context before any task runs, under each approach: JIT's
@@ -82,12 +66,6 @@ export interface Stats {
     // (schema / average catalog entry). Below this the index is a net cost.
     break_even: number;
   };
-}
-
-export interface Counts {
-  total: number;
-  skills: number;
-  tools: number;
 }
 
 export interface Config {
@@ -181,7 +159,6 @@ export interface McpServerSummary {
   name: string;
   status: McpStatus;
   tool_count: number;
-  indexed_tool_count: number;
   error: string | null;
   source?: string;
 }
@@ -198,7 +175,6 @@ export interface SearchCandidate {
   id: string;
   name: string;
   description: string;
-  kind: ItemKind;
   cosine: number;
   rerank: number | null;
   // The score the decision actually used: rerank when reranked, otherwise cosine.
@@ -210,23 +186,17 @@ export interface NearMiss {
   id: string;
   name: string;
   description: string;
-  kind: ItemKind;
   score: number;
 }
 
 export interface SearchResult {
   id: string;
   name: string;
-  kind: ItemKind;
   description: string;
   content: string;
   confidence: number;
   reranked: boolean;
   related?: string[];
-  source?: string;
-  trust?: "first-party" | "third-party";
-  server?: string;
-  tool_id?: string;
 }
 
 export interface SearchResponse {

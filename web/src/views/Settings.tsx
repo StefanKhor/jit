@@ -240,7 +240,7 @@ export function Settings() {
   const clearIndex = async () => {
     const ok = await ctx.confirmAction(
       "Clear the index?",
-      "Every skill and tool will be removed from the JIT index. JIT-owned skill files and source files stay on disk.",
+      "Every skill will be removed from the JIT index. JIT-owned skill files and source files stay on disk.",
       "Clear index",
     );
     if (!ok) return;

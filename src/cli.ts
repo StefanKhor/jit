@@ -47,7 +47,7 @@ const program = new Command();
 
 program
   .name("jit")
-  .description("JIT — Just-In-Time Skill & MCP Tool Loader for AI Agents")
+  .description("JIT — Just-In-Time Skill Loader for AI Agents")
   .version(VERSION);
 
 program

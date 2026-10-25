@@ -43,7 +43,6 @@ Useful smoke checks:
 
 - `GET /api/health` returns `{"status":"healthy", ...}`.
 - The dashboard loads with no console errors and shows real index counts.
-- `JIT_STATUS` over MCP reports the same counts as the dashboard.
 - Adding, toggling, and removing a skill updates both views.
 - Import and export leave the external side untouched.
 - A query with no match returns `near_misses`, not a silent empty result.

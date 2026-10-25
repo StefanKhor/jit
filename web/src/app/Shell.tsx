@@ -29,8 +29,8 @@ export function Shell({ children }: { children: ReactNode }) {
   const version = ctx.health?.version || "1.0.0";
   // Live counts where they exist — the rail doubles as a readout.
   const counts: Partial<Record<View, number>> = {
-    skills: ctx.stats?.skills ?? ctx.stats?.total ?? 0,
-    mcp: ctx.stats?.tools ?? 0,
+    skills: ctx.stats?.total ?? 0,
+    mcp: ctx.mcpServers.length,
   };
 
   return (

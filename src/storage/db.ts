@@ -9,14 +9,7 @@ import {
   INDEX_DIR,
   META_DB,
 } from "../config.js";
-import type {
-  Counts,
-  IndexItem,
-  ItemKind,
-  ListItem,
-  Stats,
-  StoredItem,
-} from "../types.js";
+import type { IndexItem, ListItem, Stats, StoredItem } from "../types.js";
 
 type Row = Record<string, unknown>;
 
@@ -31,15 +24,9 @@ CREATE TABLE IF NOT EXISTS skills (
     path          TEXT,
     aliases       TEXT,
     embedding     BLOB,
-    kind          TEXT DEFAULT 'skill',
     enabled       INTEGER DEFAULT 1,
     content_hash  TEXT,
-    updated_at    TEXT,
-    server        TEXT,
-    params        TEXT,
-    required      TEXT,
-    schema        TEXT,
-    source        TEXT
+    updated_at    TEXT
 );
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS retrieval_log (
@@ -60,16 +47,10 @@ CREATE INDEX IF NOT EXISTS idx_retrieval_id ON retrieval_log(id DESC);
 `;
 
 const MIGRATIONS: Record<string, string> = {
-  kind: "TEXT DEFAULT 'skill'",
   enabled: "INTEGER DEFAULT 1",
   embedding: "BLOB",
   content_hash: "TEXT",
   updated_at: "TEXT",
-  server: "TEXT",
-  params: "TEXT",
-  required: "TEXT",
-  schema: "TEXT",
-  source: "TEXT",
 };
 
 export function openDb(): DatabaseSync {
@@ -97,8 +78,11 @@ function migrate(db: DatabaseSync): void {
       }
     }
   }
-  db.exec("CREATE INDEX IF NOT EXISTS idx_skills_kind ON skills(kind)");
-  db.exec("CREATE INDEX IF NOT EXISTS idx_skills_server ON skills(server)");
+  // JIT is skills-only. An index built by an older release could still hold rows
+  // from when MCP tools were indexed; drop them so retrieval only sees skills.
+  if (columns.has("kind")) {
+    db.exec("DELETE FROM skills WHERE kind = 'tool'");
+  }
 }
 
 // One connection per process. Migrations are idempotent but run once instead of
@@ -187,18 +171,6 @@ function parseJsonArray(value: unknown): string[] {
   }
 }
 
-function parseJsonObject(value: unknown): Record<string, unknown> | undefined {
-  if (typeof value !== "string" || !value) return undefined;
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 function embeddingFromBlob(value: unknown): Float32Array | null {
   if (value instanceof Uint8Array) {
     if (value.byteLength % 4 !== 0) return null;
@@ -213,7 +185,6 @@ function embeddingFromBlob(value: unknown): Float32Array | null {
 }
 
 export function rowToItem(row: Row, includeBody = true): StoredItem {
-  const kind = (row.kind === "tool" ? "tool" : "skill") as ItemKind;
   const id = String(row.id);
   const item: StoredItem = {
     id,
@@ -224,16 +195,10 @@ export function rowToItem(row: Row, includeBody = true): StoredItem {
     aliases: parseJsonArray(row.aliases),
     body: includeBody ? String(row.body || "") : "",
     path: String(row.path || ""),
-    kind,
     enabled: row.enabled === 0 ? false : true,
     content_hash: String(row.content_hash || ""),
     updated_at: String(row.updated_at || ""),
     embedding: embeddingFromBlob(row.embedding),
-    server: row.server ? String(row.server) : undefined,
-    params: parseJsonArray(row.params),
-    required: parseJsonArray(row.required),
-    schema: parseJsonObject(row.schema),
-    source: row.source ? String(row.source) : undefined,
   };
   return item;
 }
@@ -252,7 +217,7 @@ export function getAllItems(
   db: DatabaseSync,
   includeBody = true,
 ): StoredItem[] {
-  const rows = db.prepare("SELECT * FROM skills ORDER BY kind, name").all() as Row[];
+  const rows = db.prepare("SELECT * FROM skills ORDER BY name").all() as Row[];
   return rows.map((row) => rowToItem(row, includeBody));
 }
 
@@ -285,13 +250,13 @@ export function listItems(db: DatabaseSync): ListItem[] {
   const embeddingsCurrent = getMeta(db, EMBEDDING_SIGNATURE_KEY) === embeddingSignature();
   const rows = db
     .prepare(
-      `SELECT id, name, description, categories, path, aliases, kind, enabled,
+      `SELECT id, name, description, categories, path, aliases, enabled,
               CASE WHEN length(embedding) = ? THEN 1 ELSE 0 END AS has_embedding,
               (length(COALESCE(body, '')) + 3) / 4 AS tokens,
               (length(COALESCE(name, '')) + 3) / 4
                 + (length(COALESCE(description, '')) + 3) / 4 + 12 AS catalog_tokens
          FROM skills
-        ORDER BY kind, name`,
+        ORDER BY name`,
     )
     .all(dimensionBytes) as Row[];
   return rows.map((row) => ({
@@ -301,28 +266,11 @@ export function listItems(db: DatabaseSync): ListItem[] {
     categories: parseJsonArray(row.categories),
     path: String(row.path || ""),
     aliases: parseJsonArray(row.aliases),
-    kind: (row.kind === "tool" ? "tool" : "skill") as ItemKind,
     enabled: row.enabled !== 0,
     tokens: Number(row.tokens || 0),
     catalog_tokens: Number(row.catalog_tokens || 0),
     has_embedding: embeddingsCurrent && row.has_embedding === 1,
   }));
-}
-
-export function countItems(db: DatabaseSync): Counts {
-  const row = db
-    .prepare(
-      `SELECT COUNT(*) AS total,
-              SUM(CASE WHEN kind = 'skill' THEN 1 ELSE 0 END) AS skills,
-              SUM(CASE WHEN kind = 'tool' THEN 1 ELSE 0 END) AS tools
-         FROM skills`,
-    )
-    .get() as Row;
-  return {
-    total: Number(row.total || 0),
-    skills: Number(row.skills || 0),
-    tools: Number(row.tools || 0),
-  };
 }
 
 export function getStats(db: DatabaseSync): Stats {
@@ -331,23 +279,20 @@ export function getStats(db: DatabaseSync): Stats {
   const row = db
     .prepare(
       `SELECT COUNT(*) AS total,
-              COALESCE(SUM(kind = 'skill'), 0) AS skills,
-              COALESCE(SUM(kind = 'tool'), 0) AS tools,
-              COALESCE(SUM(CASE WHEN kind = 'skill' AND length(embedding) = ? THEN 1 ELSE 0 END), 0) AS skills_embedded,
-              COALESCE(SUM(CASE WHEN kind = 'tool' AND length(embedding) = ? THEN 1 ELSE 0 END), 0) AS tools_embedded,
               COALESCE(SUM(enabled = 1), 0) AS enabled,
               COALESCE(SUM(enabled = 0), 0) AS disabled,
               COALESCE(SUM((length(COALESCE(body, '')) + 3) / 4), 0) AS body_tokens,
               COALESCE(SUM((length(COALESCE(name, '')) + 3) / 4
                          + (length(COALESCE(description, '')) + 3) / 4 + 12), 0) AS catalog_tokens,
+              COALESCE(SUM(CASE WHEN length(embedding) = ? THEN 1 ELSE 0 END), 0) AS embedded,
               COALESCE(MAX((length(COALESCE(body, '')) + 3) / 4), 0) AS largest
          FROM skills`,
     )
-    .get(dimensionBytes, dimensionBytes) as Row;
+    .get(dimensionBytes) as Row;
 
   const heaviestRows = db
     .prepare(
-      `SELECT name, kind, (length(COALESCE(body, '')) + 3) / 4 AS tokens
+      `SELECT name, (length(COALESCE(body, '')) + 3) / 4 AS tokens
          FROM skills ORDER BY tokens DESC LIMIT 6`,
     )
     .all() as Row[];
@@ -364,8 +309,6 @@ export function getStats(db: DatabaseSync): Stats {
   const bodyTokens = Number(row.body_tokens || 0);
   return {
     total,
-    skills: Number(row.skills || 0),
-    tools: Number(row.tools || 0),
     enabled: Number(row.enabled || 0),
     disabled: Number(row.disabled || 0),
     body_tokens: bodyTokens,
@@ -374,17 +317,14 @@ export function getStats(db: DatabaseSync): Stats {
     largest: Number(row.largest || 0),
     heaviest: heaviestRows.map((item) => ({
       name: String(item.name || ""),
-      kind: (item.kind === "tool" ? "tool" : "skill") as ItemKind,
       tokens: Number(item.tokens || 0),
     })),
     categories: [...categoryCounts.entries()]
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .map(([name, count]) => ({ name, count })),
     embedding_coverage: {
-      skills_total: Number(row.skills || 0),
-      skills_embedded: embeddingsCurrent ? Number(row.skills_embedded || 0) : 0,
-      tools_total: Number(row.tools || 0),
-      tools_embedded: embeddingsCurrent ? Number(row.tools_embedded || 0) : 0,
+      total,
+      embedded: embeddingsCurrent ? Number(row.embedded || 0) : 0,
     },
   };
 }
@@ -401,9 +341,8 @@ export function upsertItem(db: DatabaseSync, row: UpsertRow): void {
   db.prepare(
     `INSERT INTO skills
        (id, name, description, when_to_use, categories, body, path,
-        aliases, embedding, kind, enabled, content_hash, updated_at,
-        server, params, required, schema, source)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        aliases, embedding, enabled, content_hash, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        name=excluded.name,
        description=excluded.description,
@@ -413,13 +352,8 @@ export function upsertItem(db: DatabaseSync, row: UpsertRow): void {
        path=excluded.path,
        aliases=excluded.aliases,
        embedding=excluded.embedding,
-       kind=excluded.kind,
        content_hash=excluded.content_hash,
-       updated_at=excluded.updated_at,
-       server=excluded.server,
-       params=excluded.params,
-       required=excluded.required,
-       schema=excluded.schema`,
+       updated_at=excluded.updated_at`,
   ).run(
     item.id,
     item.name,
@@ -430,15 +364,9 @@ export function upsertItem(db: DatabaseSync, row: UpsertRow): void {
     item.path || "",
     JSON.stringify(item.aliases || []),
     embedding ? new Uint8Array(embedding.buffer, embedding.byteOffset, embedding.byteLength) : null,
-    item.kind,
     1,
     contentHash,
     updatedAt,
-    item.server || null,
-    JSON.stringify(item.params || []),
-    JSON.stringify(item.required || []),
-    item.schema ? JSON.stringify(item.schema) : null,
-    item.source || null,
   );
 }
 
@@ -447,19 +375,6 @@ export function deleteItem(db: DatabaseSync, id: string): boolean {
   const changed = Number(result.changes) > 0;
   if (changed) bumpChangeSeq(db);
   return changed;
-}
-
-export function deleteToolsForServer(db: DatabaseSync, server: string): number {
-  const prefix = `${server}__`;
-  const result = db
-    .prepare(
-      "DELETE FROM skills WHERE kind = 'tool' " +
-        "AND (server = ? OR (server IS NULL AND substr(id, 1, ?) = ?))",
-    )
-    .run(server, prefix.length, prefix);
-  const removed = Number(result.changes);
-  if (removed > 0) bumpChangeSeq(db);
-  return removed;
 }
 
 export function setEnabled(
@@ -481,8 +396,6 @@ export function clearIndex(): void {
   bumpChangeSeq(db);
 }
 
-// Provenance travels with the item on insert. The upsert's conflict clause
-// deliberately leaves `source` untouched so a re-index never loses it.
 const RETRIEVAL_LOG_LIMIT = 500;
 
 export interface RetrievalRecord {
@@ -594,21 +507,6 @@ export function retrievalStats(
 export function clearRetrievals(db: DatabaseSync): number {
   const result = db.prepare("DELETE FROM retrieval_log").run();
   return Number(result.changes);
-}
-
-export function indexedToolCounts(db: DatabaseSync): Map<string, number> {
-  const rows = db
-    .prepare("SELECT id, server FROM skills WHERE kind = 'tool'")
-    .all() as Row[];
-  const counts = new Map<string, number>();
-  for (const row of rows) {
-    const server =
-      (row.server ? String(row.server) : "") ||
-      String(row.id).split("__", 1)[0] ||
-      "unknown";
-    counts.set(server, (counts.get(server) || 0) + 1);
-  }
-  return counts;
 }
 
 export function ensureIndexDir(): void {

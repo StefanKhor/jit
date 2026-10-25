@@ -22,10 +22,8 @@ import { embedTexts } from "./embedding.js";
 import { logger } from "./logger.js";
 import {
   clearIndex,
-  countItems,
   dataVersion,
   deleteItem as dbDeleteItem,
-  deleteToolsForServer as dbDeleteToolsForServer,
   getItem,
   getMeta,
   getStats,
@@ -37,15 +35,9 @@ import {
   upsertItem,
   getExisting,
 } from "./storage/db.js";
-import type {
-  Counts,
-  IndexItem,
-  ItemKind,
-  ListItem,
-  Stats,
-} from "./types.js";
+import type { IndexItem, ListItem, Stats } from "./types.js";
 
-export { clearIndex, countItems, dataVersion, getItem, getStats, listItems };
+export { clearIndex, dataVersion, getItem, getStats, listItems };
 
 const TOP_LEVEL_MARKDOWN = /\.md$/i;
 const SKIP_DIRS = new Set([
@@ -199,7 +191,6 @@ export function parseSkillText(
     aliases: asList(meta.aliases),
     body,
     path: sourcePath,
-    kind: "skill",
   };
 }
 
@@ -212,17 +203,6 @@ export function parseSkillFile(file: string): IndexItem {
 }
 
 export function buildEmbeddingText(item: IndexItem): string {
-  if (item.kind === "tool") {
-    return [
-      item.name,
-      item.description,
-      (item.params || []).join(" "),
-      (item.required || []).join(" "),
-      item.server || "",
-    ]
-      .filter(Boolean)
-      .join(" | ");
-  }
   return [
     item.name.replace(/[-_]/g, " "),
     item.when_to_use,
@@ -241,15 +221,10 @@ export function contentHash(item: IndexItem): string {
     categories: item.categories || [],
     aliases: item.aliases || [],
     body: item.body || "",
-    kind: item.kind,
     // Path is part of the identity: moving a skill between a local folder and
     // JIT's own storage must update the indexed location even when the text is
-    // identical. Tool manifests also need their callable surface in the hash.
+    // identical.
     path: item.path || "",
-    server: item.server || "",
-    params: item.params || [],
-    required: item.required || [],
-    schema: item.schema || null,
   };
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
@@ -263,7 +238,6 @@ export interface IndexResult {
 
 export async function indexItems(
   items: IndexItem[],
-  itemType: ItemKind = "skill",
 ): Promise<IndexResult> {
   const db = initDb();
   let added = 0;
@@ -284,7 +258,6 @@ export async function indexItems(
     for (const raw of items) {
       const item: IndexItem = {
         ...raw,
-        kind: itemType,
         categories: raw.categories || [],
         aliases: raw.aliases || [],
         body: raw.body || "",
@@ -385,10 +358,6 @@ export function deleteItem(id: string): boolean {
   return dbDeleteItem(initDb(), id);
 }
 
-export function deleteToolsForServer(server: string): number {
-  return dbDeleteToolsForServer(initDb(), server);
-}
-
 export function setEnabled(id: string, enabled: boolean): boolean {
   return dbSetEnabled(initDb(), id, enabled);
 }
@@ -417,7 +386,7 @@ export async function indexDefaultPaths(
   if (items.length === 0) {
     return { found: files.length, added: 0, updated: 0, skipped: 0, errors };
   }
-  const result = await indexItems(items, "skill");
+  const result = await indexItems(items);
   return {
     found: files.length,
     added: result.added,
@@ -425,10 +394,6 @@ export async function indexDefaultPaths(
     skipped: result.skipped,
     errors: [...errors, ...result.errors],
   };
-}
-
-export function totalIndexed(): Counts {
-  return countItems(initDb());
 }
 
 export function indexDirectory(): string {

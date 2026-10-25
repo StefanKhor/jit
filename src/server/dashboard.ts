@@ -22,7 +22,6 @@ import {
 import {
   clearIndex,
   deleteItem,
-  deleteToolsForServer,
   getItem,
   getStats,
   indexItems,
@@ -51,7 +50,7 @@ import {
   removeSkillCopy,
   transferSkills,
 } from "../transfer.js";
-import type { IndexItem, ItemKind } from "../types.js";
+import type { IndexItem } from "../types.js";
 
 const START_TIME = Date.now();
 
@@ -228,8 +227,6 @@ export function createApp(): Hono {
     const stats = getStats(initDb());
     return c.json({
       indexed: stats.total,
-      skills: stats.skills,
-      tools: stats.tools,
       enabled: stats.enabled,
     });
   });
@@ -368,32 +365,17 @@ export function createApp(): Hono {
 
   app.post("/api/embeddings/reindex", async (c) => {
     const items = getAllItems(initDb());
-    let added = 0;
-    let updated = 0;
-    let skipped = 0;
-    const errors: string[] = [];
-    for (const kind of ["skill", "tool"] as const) {
-      const group = items.filter((item) => item.kind === kind);
-      if (!group.length) continue;
-      const result = await indexItems(group, kind);
-      added += result.added;
-      updated += result.updated;
-      skipped += result.skipped;
-      errors.push(...result.errors);
-    }
-    return c.json({ added, updated, skipped, errors });
+    return c.json(await indexItems(items));
   });
 
   app.get("/api/skills", (c) => {
     const items = listItems(initDb());
     const root = path.resolve(JIT_SKILLS_DIR);
     return c.json({
-      skills: items
-        .filter((item) => item.kind === "skill")
-        .map((item) => ({
-          ...item,
-          managed: inside(root, path.resolve(item.path || "")),
-        })),
+      skills: items.map((item) => ({
+        ...item,
+        managed: inside(root, path.resolve(item.path || "")),
+      })),
     });
   });
 
@@ -573,21 +555,11 @@ export function createApp(): Hono {
       result.error = manager.getStatus()[name]?.error || "connection failed";
       return c.json(result);
     }
-    const manifests = manager.indexTools(name);
-    if (manifests.length === 0) {
-      deleteToolsForServer(name);
-      return c.json({
-        ...result,
-        connected: true,
-        added: 0,
-        updated: 0,
-        skipped: 0,
-        errors: [],
-      });
-    }
-    deleteToolsForServer(name);
-    const indexed = await indexItems(manifests, "tool");
-    return c.json({ ...result, connected: true, ...indexed });
+    return c.json({
+      ...result,
+      connected: true,
+      tools: manager.getTools(name).length,
+    });
   });
 
   app.post("/api/mcp/remove", async (c) => {
@@ -595,8 +567,7 @@ export function createApp(): Hono {
     const server = String(body.server || "").trim();
     if (!server) throw new HttpError(400, "server required");
     const removed = manager.removeServer(server);
-    const toolsRemoved = deleteToolsForServer(server);
-    return c.json({ removed, tools_removed: toolsRemoved });
+    return c.json({ removed });
   });
 
   app.post("/api/mcp/connect", async (c) => {
@@ -623,23 +594,6 @@ export function createApp(): Hono {
     if (!server) throw new HttpError(400, "server required");
     await manager.disconnect(server);
     return c.json({ disconnected: server });
-  });
-
-  app.post("/api/mcp/index", async (c) => {
-    const body = await readJson(c);
-    const server = String(body.server || "").trim();
-    if (!server) throw new HttpError(400, "server required");
-    await manager.loadConfigs();
-    if (!(await manager.connect(server))) {
-      throw new HttpError(502, manager.getStatus()[server]?.error || "connection failed");
-    }
-    const manifests = manager.indexTools(server);
-    if (manifests.length === 0) {
-      deleteToolsForServer(server);
-      throw new HttpError(400, "server exposes no tools");
-    }
-    deleteToolsForServer(server);
-    return c.json(await indexItems(manifests, "tool"));
   });
 
   app.get("/api/search", async (c) => {
@@ -684,7 +638,6 @@ export function createApp(): Hono {
     }
     if (rawItems.length > 50_000) throw new HttpError(413, "too many items");
     const skills: IndexItem[] = [];
-    const tools: IndexItem[] = [];
     const disabled: string[] = [];
     const errors: string[] = [];
     for (const raw of rawItems) {
@@ -692,11 +645,10 @@ export function createApp(): Hono {
       const source = raw as Record<string, unknown>;
       const id = String(source.id || source.name || "").trim();
       if (!id) continue;
-      const kind: ItemKind = source.kind === "tool" ? "tool" : "skill";
       if (source.enabled === false || source.enabled === 0 || source.enabled === "false") {
         disabled.push(id);
       }
-      const item: IndexItem = {
+      skills.push({
         id,
         name: String(source.name || id),
         description: String(source.description || ""),
@@ -707,35 +659,14 @@ export function createApp(): Hono {
         aliases: Array.isArray(source.aliases) ? source.aliases.map(String) : [],
         body: String(source.body || ""),
         path: String(source.path || ""),
-        kind,
-      };
-      if (kind === "tool") {
-        item.server = String(source.server || id.split("__", 1)[0] || "");
-        item.params = Array.isArray(source.params)
-          ? source.params.map(String)
-          : [];
-        item.required = Array.isArray(source.required)
-          ? source.required.map(String)
-          : [];
-        item.schema =
-          source.schema && typeof source.schema === "object"
-            ? (source.schema as Record<string, unknown>)
-            : undefined;
-        tools.push(item);
-      } else {
-        skills.push(item);
-      }
+      });
     }
     let added = 0;
     let updated = 0;
     let skipped = 0;
-    for (const [group, kind] of [
-      [skills, "skill"],
-      [tools, "tool"],
-    ] as const) {
-      if (group.length === 0) continue;
+    if (skills.length > 0) {
       try {
-        const result = await indexItems(group, kind);
+        const result = await indexItems(skills);
         added += result.added;
         updated += result.updated;
         skipped += result.skipped;
