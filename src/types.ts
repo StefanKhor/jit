@@ -36,7 +36,10 @@ export interface ListItem {
   aliases: string[];
   kind: ItemKind;
   enabled: boolean;
+  /// Full body tokens, fetched on demand.
   tokens: number;
+  /// What this entry's name and description cost in a plain catalog.
+  catalog_tokens: number;
   managed?: boolean;
 }
 

@@ -132,6 +132,33 @@ test("stats compare JIT against a catalog at rest", async () => {
   }
 });
 
+// A plain catalog is the sum of its entries: each skill's name-and-description
+// cost has to add up to the catalog total the Overview reports.
+test("per-skill catalog costs add up to the catalog total", async () => {
+  await call("/api/skills/add", { path: path.join(skillRoot, "SKILL.md") });
+  try {
+    const listed = (await (await app.request("/api/skills")).json()) as {
+      skills: Array<{ catalog_tokens: number }>;
+    };
+    const stats = (await (await app.request("/api/stats")).json()) as {
+      catalog_tokens: number;
+    };
+    const [first] = listed.skills;
+    assert.ok(first, "the seeded skill should be listed");
+    assert.equal(
+      listed.skills.reduce((sum, skill) => sum + skill.catalog_tokens, 0),
+      stats.catalog_tokens,
+    );
+    const expected =
+      Math.floor(("api-skill".length + 3) / 4) +
+      Math.floor(("a skill indexed through the HTTP API".length + 3) / 4) +
+      12;
+    assert.equal(first.catalog_tokens, expected);
+  } finally {
+    await app.request("/api/skills/api-skill", { method: "DELETE" });
+  }
+});
+
 test("every response carries the hardening headers", async () => {
   const response = await app.request("/api/health");
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");

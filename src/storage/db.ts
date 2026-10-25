@@ -280,7 +280,9 @@ export function listItems(db: DatabaseSync): ListItem[] {
   const rows = db
     .prepare(
       `SELECT id, name, description, categories, path, aliases, kind, enabled,
-              (length(COALESCE(body, '')) + 3) / 4 AS tokens
+              (length(COALESCE(body, '')) + 3) / 4 AS tokens,
+              (length(COALESCE(name, '')) + 3) / 4
+                + (length(COALESCE(description, '')) + 3) / 4 + 12 AS catalog_tokens
          FROM skills
         ORDER BY kind, name`,
     )
@@ -295,6 +297,7 @@ export function listItems(db: DatabaseSync): ListItem[] {
     kind: (row.kind === "tool" ? "tool" : "skill") as ItemKind,
     enabled: row.enabled !== 0,
     tokens: Number(row.tokens || 0),
+    catalog_tokens: Number(row.catalog_tokens || 0),
   }));
 }
 

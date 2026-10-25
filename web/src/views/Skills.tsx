@@ -247,7 +247,7 @@ export function Skills() {
             }
           />
           <TableWrap>
-            <Table className="w-full min-w-[600px] table-fixed">
+            <Table className="w-full min-w-[720px] table-fixed">
               <thead>
                 <tr>
                   <Th className="w-[44px]">
@@ -255,8 +255,17 @@ export function Skills() {
                   </Th>
                   <Th>Name</Th>
                   <Th className="hidden w-[130px] md:table-cell">Category</Th>
-                  <Th className="num hidden w-[80px] text-right sm:table-cell">
+                  <Th
+                    className="num hidden w-[84px] text-right sm:table-cell"
+                    title="Body tokens — the full skill text, fetched on demand"
+                  >
                     Tokens
+                  </Th>
+                  <Th
+                    className="num hidden w-[92px] text-right sm:table-cell"
+                    title="Name and description tokens a plain skill catalog carries"
+                  >
+                    Plain catalog
                   </Th>
                   <Th className="w-[110px]">State</Th>
                   <Th className="w-[190px] text-right">Actions</Th>
@@ -317,6 +326,12 @@ export function Skills() {
                         title="Body tokens"
                       >
                         {fmt(skill.tokens)}
+                      </Td>
+                      <Td
+                        className="num hidden text-right text-ink-2 sm:table-cell"
+                        title="Name and description tokens in a plain catalog"
+                      >
+                        {fmt(skill.catalog_tokens)}
                       </Td>
                       <Td>
                         <span className="inline-flex items-center gap-1.5 text-xs text-ink-2">
