@@ -330,7 +330,6 @@ export function Marketplace() {
                 options={[
                   { value: "all", label: "All", count: counts.all },
                   { value: "skill", label: "Skills", count: counts.skill },
-                  { value: "mcp", label: "MCP", count: counts.mcp },
                 ]}
               />
               <Input

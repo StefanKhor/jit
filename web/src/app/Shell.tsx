@@ -1,20 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
 
-import { fmt, viewLabels } from "../format";
+import { fmt, NAV_VIEWS, viewLabels } from "../format";
 import { useJit } from "../state/store";
 import type { View } from "../types";
 import { StatusDot } from "../ui/Badge";
 import { Kbd, Wordmark } from "../ui/Display";
 import { cx } from "../ui/cx";
 
-const NAV: View[] = [
-  "overview",
-  "skills",
-  "marketplace",
-  "mcp",
-  "search",
-  "settings",
-];
+const NAV: View[] = NAV_VIEWS;
 
 function clockText(): string {
   return new Date().toLocaleTimeString("en-GB", { hour12: false });

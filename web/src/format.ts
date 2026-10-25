@@ -9,6 +9,19 @@ export const viewLabels: Record<View, string> = {
   settings: "Settings",
 };
 
+/**
+ * The sections the console shows today. Every view still exists and is wired
+ * up — MCP included — but the product is skill-first for now, so mcp is kept
+ * out of the navigation. Move a name back in here to surface it again.
+ */
+export const NAV_VIEWS: View[] = [
+  "overview",
+  "skills",
+  "marketplace",
+  "search",
+  "settings",
+];
+
 export function fmt(value: unknown): string {
   return new Intl.NumberFormat("en-US").format(Math.round(Number(value) || 0));
 }
