@@ -159,16 +159,29 @@ export function BulkInstallDialog({
             };
           }
           const blocked = result.checksum_required && !result.checksum_present;
+          const doNotInstall = result.report.gate === "block";
+          const detail = blocked
+            ? "no sha256 checksum to pin it to"
+            : doNotInstall
+              ? `SkillSpector: ${result.report.recommendation || "DO_NOT_INSTALL"}${
+                  typeof result.report.risk_score === "number"
+                    ? ` · risk ${result.report.risk_score}/100`
+                    : ""
+                }`
+              : result.report.scanner_available === false
+                ? "not scanned — needs acknowledgement"
+                : "";
           return {
             id: result.id || item.id,
             item,
-            state: blocked
-              ? ("blocked" as RowState)
-              : result.report.requires_ack
-                ? ("flagged" as RowState)
-                : ("ready" as RowState),
+            state:
+              blocked || doNotInstall
+                ? ("blocked" as RowState)
+                : result.report.requires_ack
+                  ? ("flagged" as RowState)
+                  : ("ready" as RowState),
             findings: result.report.findings || [],
-            detail: blocked ? "no sha256 checksum to pin it to" : "",
+            detail,
           };
         }),
       );

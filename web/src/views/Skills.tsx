@@ -25,8 +25,8 @@ export function Skills() {
     const value = path.trim();
     if (!value) return;
     setBusy(true);
-    try {
-      const result = await ctx.api<{
+    const post = (extra: Record<string, unknown>) =>
+      ctx.api<{
         found?: number;
         added?: number;
         updated?: number;
@@ -34,8 +34,23 @@ export function Skills() {
         errors?: string[];
       }>("/api/skills/add", {
         method: "POST",
-        body: JSON.stringify({ path: value }),
+        body: JSON.stringify({ path: value, ...extra }),
       });
+    try {
+      let result = await post({});
+      const first = (result.errors || [])[0] || "";
+      // SkillSpector's caution — or an unavailable scanner — asks for a
+      // deliberate acknowledgement before the skill is indexed. A hard block
+      // does not offer a way through here; that one is refused.
+      if (/acknowledgement/i.test(first)) {
+        const proceed = await ctx.confirmAction(
+          "Index without a clean scan?",
+          `${first}\n\nAdd it to the index anyway?`,
+          "Add anyway",
+        );
+        if (!proceed) return;
+        result = await post({ acknowledge: true });
+      }
       ctx.toast(
         summary(result),
         (result.errors || []).length ? "error" : "ok",

@@ -165,15 +165,29 @@ export interface MarketplaceTopResponse extends MarketplaceDiscovery {
 }
 
 export interface ScanFinding {
-  level: "high" | "medium" | "low";
+  level: "critical" | "high" | "medium" | "low";
   rule: string;
   detail: string;
+  /** Which scanner produced the finding. */
+  scanner?: "builtin" | "skillspector";
 }
 
 export interface ScanReport {
   ok: boolean;
   requires_ack: boolean;
   findings: ScanFinding[];
+  /** The phase the install gate acts on. */
+  gate?: "allow" | "ack" | "block";
+  risk_score?: number;
+  severity?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  recommendation?: "SAFE" | "CAUTION" | "DO_NOT_INSTALL";
+  safe_to_install?: boolean;
+  llm_used?: boolean;
+  scanner_available?: boolean;
+  scanner_source?: "env" | "path" | "uvx" | "off" | "none";
+  scanners?: string[];
+  /** How to install the scanner, or why a full scan was not possible. */
+  note?: string;
 }
 
 export interface InspectResult {

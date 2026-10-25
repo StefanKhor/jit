@@ -47,6 +47,7 @@ export function MarketDialog({
   const [values, setValues] = useState<Record<string, string>>({});
   const [consent, setConsent] = useState(false);
   const [ack, setAck] = useState(false);
+  const [force, setForce] = useState(false);
   const [inspect, setInspect] = useState<InspectResult | null>(null);
   const [inspecting, setInspecting] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -61,6 +62,7 @@ export function MarketDialog({
     setValues(initial);
     setConsent(false);
     setAck(false);
+    setForce(false);
     setError("");
     setBusy(false);
     setInspect(null);
@@ -123,14 +125,20 @@ export function MarketDialog({
   const checksumMissing = Boolean(
     inspect && inspect.checksum_required && !inspect.checksum_present,
   );
-  const requiresAck = Boolean(inspect?.report.requires_ack);
+  const report = inspect?.report;
+  // A block is SkillSpector saying DO_NOT_INSTALL: an acknowledgement is not
+  // enough, it takes a deliberate override. A caution (or an unavailable
+  // scanner) is an acknowledgement.
+  const blocked = report?.gate === "block";
+  const requiresAck = Boolean(report?.requires_ack) && !blocked;
   const canInstall =
     !checksumMissing &&
     (item.inputs || [])
       .filter((input) => input.required)
       .every((input) => Boolean(values[input.key]?.trim())) &&
     (item.kind !== "mcp" || consent) &&
-    (!requiresAck || ack);
+    (!requiresAck || ack) &&
+    (!blocked || force);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -146,6 +154,7 @@ export function MarketDialog({
           id: inspect?.id || item.id,
           inputs: values,
           acknowledge: ack,
+          force,
           ...sourceHint(item),
         }),
       });
@@ -175,13 +184,28 @@ export function MarketDialog({
 
   const commandLabel =
     item.kind === "mcp" ? "Runs on this machine" : "Installs to";
+  const score =
+    typeof report?.risk_score === "number" && report.risk_score > 0
+      ? ` · risk ${report.risk_score}/100`
+      : "";
+  const scannerDown = Boolean(report) && report?.scanner_available === false;
   const reviewStatus = checksumMissing
     ? "Unpinned — installation blocked"
-    : inspect?.report.ok
-      ? "No risky patterns found"
-      : `${inspect?.report.findings.length || 0} pattern${
-          inspect?.report.findings.length === 1 ? "" : "s"
-        } to review`;
+    : scannerDown
+      ? "Not scanned — acknowledgement required"
+      : blocked
+        ? `${report?.recommendation}${score} — installation blocked`
+        : report?.recommendation === "CAUTION"
+          ? `CAUTION${score} — review required`
+          : `SAFE${score}`;
+  const reviewTone: "ok" | "warn" | "bad" | "neutral" =
+    checksumMissing || blocked
+      ? "bad"
+      : requiresAck
+        ? "warn"
+        : report?.ok
+          ? "ok"
+          : "neutral";
   const hasFindings = Boolean(inspect?.report.findings.length);
   const checksumPinned = Boolean(inspect?.checksum_required && inspect.checksum_present);
 
@@ -213,7 +237,7 @@ export function MarketDialog({
           {inspecting || inspect ? (
             <section className="space-y-3">
               <div className="flex items-center justify-between gap-3">
-                <h3 className="kicker">Review</h3>
+                <h3 className="kicker">Review · SkillSpector</h3>
                 {inspecting ? (
                   <span className="num text-[11px] text-ink-3">checking…</span>
                 ) : null}
@@ -225,26 +249,24 @@ export function MarketDialog({
                   <p
                     className={cx(
                       "flex items-center gap-2 text-sm font-medium",
-                      requiresAck || checksumMissing
-                        ? "text-warn"
-                        : inspect.report.ok
-                          ? "text-ok"
-                          : "text-ink",
+                      reviewTone === "bad"
+                        ? "text-bad"
+                        : reviewTone === "warn"
+                          ? "text-warn"
+                          : reviewTone === "ok"
+                            ? "text-ok"
+                            : "text-ink",
                     )}
                   >
-                    <StatusDot
-                      tone={
-                        checksumMissing
-                          ? "bad"
-                          : requiresAck
-                            ? "warn"
-                            : inspect.report.ok
-                              ? "ok"
-                              : "neutral"
-                      }
-                    />
+                    <StatusDot tone={reviewTone} />
                     {reviewStatus}
                   </p>
+
+                  {inspect.report.note ? (
+                    <p className="num text-[11px] leading-relaxed text-ink-3">
+                      {inspect.report.note}
+                    </p>
+                  ) : null}
 
                   {hasFindings || checksumMissing || checksumPinned ? (
                     <ul className="divide-y divide-line/60 overflow-hidden rounded-xl border border-line bg-inset/40">
@@ -267,6 +289,7 @@ export function MarketDialog({
                           <StatusDot
                             className="mt-1.5"
                             tone={
+                              finding.level === "critical" ||
                               finding.level === "high"
                                 ? "bad"
                                 : finding.level === "medium"
@@ -332,9 +355,19 @@ export function MarketDialog({
             />
           ) : null}
 
-          {requiresAck ? (
+          {blocked ? (
             <ToggleRow
-              label="I have read the review above and want to install this entry anyway. Its text will be injected into my agent's context."
+              label="SkillSpector recommends DO_NOT_INSTALL. I have read the findings above and accept the risk of installing it anyway."
+              checked={force}
+              onCheckedChange={setForce}
+            />
+          ) : requiresAck ? (
+            <ToggleRow
+              label={
+                scannerDown
+                  ? "This entry could not be scanned. Install it anyway; its text will be injected into my agent's context."
+                  : "I have read the review above and want to install this entry anyway. Its text will be injected into my agent's context."
+              }
               checked={ack}
               onCheckedChange={setAck}
             />
@@ -355,7 +388,9 @@ export function MarketDialog({
               ? "Installing…"
               : item.kind === "mcp"
                 ? "Install & connect"
-                : "Install"}
+                : blocked || requiresAck
+                  ? "Install anyway"
+                  : "Install"}
           </Button>
         </DialogFoot>
       </form>
