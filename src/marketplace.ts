@@ -478,7 +478,8 @@ async function installCliSkill(
   source: string,
   gate: Gate,
 ): Promise<Record<string, unknown>> {
-  const found = await materializeSource(source);
+  const skillName = String(item.install.skills_name || item.id).trim();
+  const found = await materializeSource(source, skillName);
   const skill = pickCliSkill(found.skills, item);
   if (!skill) throw new Error(`${source} no longer provides '${item.id}'`);
 
@@ -538,6 +539,7 @@ async function installCliSkill(
     installed: true,
     connected: true,
     warnings,
+    scan_report: report,
     ...indexed,
   };
 }
@@ -605,6 +607,7 @@ async function installSkill(
     installed: true,
     connected: true,
     warnings: report.findings,
+    scan_report: report,
     ...indexed,
   };
 }
@@ -673,7 +676,8 @@ export async function inspect(
     body = spec.body;
   } else if (cliSource) {
     try {
-      const found = await materializeSource(cliSource);
+      const skillName = String(spec.skills_name || item.id).trim();
+      const found = await materializeSource(cliSource, skillName);
       const skill = pickCliSkill(found.skills, item);
       if (!skill) throw new Error(`${cliSource} no longer provides '${item.id}'`);
       body = readFileSync(path.join(skill.path, "SKILL.md"), "utf8");

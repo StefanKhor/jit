@@ -236,6 +236,8 @@ test("the public config is redacted and has no dead settings", async () => {
   assert.equal(config.api_key, "");
   assert.equal("nemotron_ultra_model" in config, false);
   assert.ok(Array.isArray(config.marketplace_urls));
+  assert.equal(config.skillspector_llm_enabled, false);
+  assert.equal(config.skillspector_llm_env, false);
   saveConfig({ nebius_api_key: "" });
 });
 
@@ -251,6 +253,14 @@ test("config writes are validated", async () => {
   assert.equal((await post({ confidence_threshold: "abc" })).status, 400);
   assert.equal((await post({ marketplace_urls: "nope" })).status, 400);
   assert.equal((await post({ nebius_api_base: "http://evil.test" })).status, 400);
+  const scannerSetting = await post({ skillspector_llm_enabled: true });
+  assert.equal(scannerSetting.status, 200);
+  assert.equal(
+    ((await scannerSetting.json()) as { config: { skillspector_llm_enabled: boolean } })
+      .config.skillspector_llm_enabled,
+    true,
+  );
+  await post({ skillspector_llm_enabled: false });
 
   // A GitHub repository is a valid catalog source.
   for (const entry of [

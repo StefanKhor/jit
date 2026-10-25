@@ -1,7 +1,8 @@
 # JIT — a secure, just-in-time skills hub
 
-**JIT is a local skills hub: it scans every skill you add, indexes it, and gives
-an agent one skill at a time instead of every skill in context.**
+**JIT is a local skills hub: NVIDIA SkillSpector scans every skill you add for
+potential vulnerabilities before indexing it, then JIT gives an agent one skill
+at a time instead of every skill in context.**
 
 Two things make it worth running.
 
@@ -69,10 +70,12 @@ by the Node process. There is no CDN, telemetry, or runtime frontend build.
 ## The scanner
 
 JIT's security answer *is* [SkillSpector](https://github.com/NVIDIA/skillspector),
-NVIDIA's scanner for agent skills. JIT runs it the way it is normally used —
-`skillspector scan <target> --format json`, with the LLM pass on when a provider
-is configured and degraded to a static scan when it is not — and maps its
-recommendation onto the install gate:
+NVIDIA's scanner for agent skills. JIT runs static analysis by default with
+`skillspector scan <target> --format json --no-llm`, so no model provider or API
+key is needed. The Settings page has a **SkillSpector analysis** toggle for the
+semantic LLM pass; enable it only after configuring a provider in the dashboard
+process environment. `JIT_SKILLSPECTOR_LLM` can override the saved preference. JIT
+maps the scanner recommendation onto the install gate:
 
 | SkillSpector says | JIT does |
 |---|---|
@@ -94,9 +97,9 @@ Resolution order, first one that works wins:
 
 1. `JIT_SKILLSPECTOR` — a command line you provide.
 2. `skillspector` on `PATH`.
-3. `uvx --from git+https://github.com/NVIDIA/skillspector.git skillspector`, if
-   `uvx` is available (SkillSpector needs Python ≥3.12,<3.15; `uvx` provisions
-   its own).
+3. `uvx --python 3.12 --from git+https://github.com/NVIDIA/skillspector.git skillspector`,
+   if `uvx` is available. Pinning Python 3.12 avoids native dependency build
+   failures on newer Python versions; override it with `JIT_SKILLSPECTOR_PYTHON`.
 
 If a dependency has to compile and the build tools are missing, the install
 fails — on Windows `yara-python` is the usual culprit. SkillSpector's own README
@@ -318,6 +321,8 @@ the file and are never written back.
 | `JIT_SKILLS_SH_URL` | Base URL of the skills.sh directory API | `https://www.skills.sh` |
 | `JIT_SKILLSPECTOR` | Command line for the SkillSpector scanner | auto-detected |
 | `JIT_SKILLSPECTOR_ARGS` | Extra arguments appended to `scan` | unset |
+| `JIT_SKILLSPECTOR_LLM` | Override the Settings toggle (`1` enables semantic LLM analysis) | unset |
+| `JIT_SKILLSPECTOR_PYTHON` | Python version used by uvx | `3.12` |
 | `JIT_SKILLSPECTOR_TIMEOUT` | Per-scan timeout in milliseconds | `300000` |
 | `JIT_SKILLSPECTOR_OFF` | Disable SkillSpector entirely (`1`) | unset |
 | `JIT_SECURITY_GATE` | `block` (default), `warn` (never hard-block), or `off` | `block` |

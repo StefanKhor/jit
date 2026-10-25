@@ -326,6 +326,12 @@ export function createApp(): Hono {
     if ("rerank_enabled" in body) {
       updates.rerank_enabled = boolValue(body.rerank_enabled, false);
     }
+    if ("skillspector_llm_enabled" in body) {
+      updates.skillspector_llm_enabled = boolValue(
+        body.skillspector_llm_enabled,
+        false,
+      );
+    }
     if ("confidence_threshold" in body) {
       const parsed = Number(body.confidence_threshold);
       if (!Number.isFinite(parsed)) {

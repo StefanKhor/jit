@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { fmt } from "../format";
 import { useJit } from "../state/store";
@@ -15,9 +15,10 @@ import { Dialog, DialogBody, DialogFoot, DialogHead } from "../ui/Dialog";
 import { ToggleRow } from "../ui/Field";
 import { sourceHint } from "./MarketDialog";
 
-type Phase = "review" | "install" | "done";
+type Phase = "choose" | "review" | "install" | "done";
 
 type RowState =
+  | "queued"
   | "pending"
   | "ready"
   | "flagged"
@@ -25,6 +26,7 @@ type RowState =
   | "unavailable"
   | "working"
   | "done"
+  | "cancelled"
   | "failed";
 
 interface Row {
@@ -41,11 +43,13 @@ async function mapLimit<T, R>(
   items: T[],
   limit: number,
   fn: (item: T) => Promise<R>,
+  shouldStop: () => boolean = () => false,
 ): Promise<R[]> {
   const results: R[] = new Array(items.length);
   let next = 0;
   const worker = async () => {
     while (next < items.length) {
+      if (shouldStop()) return;
       const index = next;
       next += 1;
       const item = items[index];
@@ -60,6 +64,7 @@ async function mapLimit<T, R>(
 }
 
 const DOT: Record<RowState, "neutral" | "accent" | "ok" | "warn" | "bad"> = {
+  queued: "neutral",
   pending: "neutral",
   ready: "ok",
   flagged: "warn",
@@ -67,10 +72,12 @@ const DOT: Record<RowState, "neutral" | "accent" | "ok" | "warn" | "bad"> = {
   unavailable: "bad",
   working: "accent",
   done: "ok",
+  cancelled: "neutral",
   failed: "bad",
 };
 
 const LABEL: Record<RowState, string> = {
+  queued: "queued",
   pending: "checking",
   ready: "ready",
   flagged: "needs review",
@@ -78,15 +85,14 @@ const LABEL: Record<RowState, string> = {
   unavailable: "unavailable",
   working: "installing",
   done: "installed",
+  cancelled: "not started",
   failed: "failed",
 };
 
 /**
- * Install many directory entries in one pass. Every entry is reviewed the same
- * way a single install is — nothing is written until the scan comes back — and
- * entries that need acknowledgement are held back until the user says so. The
- * installs then run one at a time so progress is visible and the `skills` CLI is
- * never asked to do more than one thing at once.
+ * Install many directory entries in one pass. Users can review the full batch
+ * first or install while each skill is scanned. Work is bounded to four active
+ * requests, and a running batch can stop after its in-flight installs finish.
  */
 export function BulkInstallDialog({
   items,
@@ -97,16 +103,30 @@ export function BulkInstallDialog({
 }) {
   const ctx = useJit();
   const [rows, setRows] = useState<Row[]>([]);
-  const [phase, setPhase] = useState<Phase>("review");
+  const [phase, setPhase] = useState<Phase>("choose");
+  const [reviewRequested, setReviewRequested] = useState(false);
   const [reviewed, setReviewed] = useState(0);
   const [ack, setAck] = useState(false);
+  const [quickAck, setQuickAck] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [stopRequested, setStopRequested] = useState(false);
+  const stopRequestedRef = useRef(false);
   // The size of the run, frozen when it starts: the rows move out of `ready` as
   // they finish, so the live target list cannot be used to report on it.
   const [planned, setPlanned] = useState(0);
 
   useEffect(() => {
-    if (!items || items.length === 0) return;
+    if (items) return;
+    setPhase("choose");
+    setReviewRequested(false);
+    setAck(false);
+    setQuickAck(false);
+    stopRequestedRef.current = false;
+    setStopRequested(false);
+  }, [items]);
+
+  useEffect(() => {
+    if (!items || items.length === 0 || !reviewRequested) return;
     let cancelled = false;
     let done = 0;
     setPhase("review");
@@ -124,74 +144,84 @@ export function BulkInstallDialog({
     );
 
     void mapLimit(items, 4, async (item) => {
-      let outcome: {
-        item: MarketplaceItem;
-        result: InspectResult | null;
-        error: string;
-      };
+      let result: InspectResult | null = null;
+      let error = "";
       try {
-        const result = await ctx.api<InspectResult>("/api/marketplace/inspect", {
+        result = await ctx.api<InspectResult>("/api/marketplace/inspect", {
           method: "POST",
           body: JSON.stringify({ id: item.id, ...sourceHint(item) }),
         });
-        outcome = { item, result, error: "" };
-      } catch (error) {
-        outcome = {
+      } catch (caught) {
+        error = caught instanceof Error ? caught.message : String(caught);
+      }
+
+      let row: Row;
+      if (!result) {
+        row = {
+          id: item.id,
           item,
-          result: null,
-          error: error instanceof Error ? error.message : String(error),
+          state: "unavailable",
+          findings: [],
+          detail: error || "could not be reviewed",
+        };
+      } else {
+        const blocked = result.checksum_required && !result.checksum_present;
+        const doNotInstall = result.report.gate === "block";
+        const detail = blocked
+          ? "no sha256 checksum to pin it to"
+          : doNotInstall
+            ? `SkillSpector: ${result.report.recommendation || "DO_NOT_INSTALL"}${
+                typeof result.report.risk_score === "number"
+                  ? ` · risk ${result.report.risk_score}/100`
+                  : ""
+              }`
+            : result.report.scanner_available === false
+              ? "not scanned — needs acknowledgement"
+              : "";
+        row = {
+          id: result.id || item.id,
+          item,
+          state:
+            blocked || doNotInstall
+              ? "blocked"
+              : result.report.requires_ack
+                ? "flagged"
+                : "ready",
+          findings: result.report.findings || [],
+          detail,
         };
       }
+
       done += 1;
-      if (!cancelled) setReviewed(done);
-      return outcome;
-    }).then((outcomes) => {
+      if (!cancelled) {
+        setReviewed(done);
+        setRows((current) =>
+          current.map((existing) => (existing.id === row.id ? row : existing)),
+        );
+      }
+      return row;
+    }).then(() => {
       if (cancelled) return;
-      setRows(
-        outcomes.map(({ item, result, error }) => {
-          if (!result) {
-            return {
-              id: item.id,
-              item,
-              state: "unavailable" as RowState,
-              findings: [],
-              detail: error || "could not be reviewed",
-            };
-          }
-          const blocked = result.checksum_required && !result.checksum_present;
-          const doNotInstall = result.report.gate === "block";
-          const detail = blocked
-            ? "no sha256 checksum to pin it to"
-            : doNotInstall
-              ? `SkillSpector: ${result.report.recommendation || "DO_NOT_INSTALL"}${
-                  typeof result.report.risk_score === "number"
-                    ? ` · risk ${result.report.risk_score}/100`
-                    : ""
-                }`
-              : result.report.scanner_available === false
-                ? "not scanned — needs acknowledgement"
-                : "";
-          return {
-            id: result.id || item.id,
-            item,
-            state:
-              blocked || doNotInstall
-                ? ("blocked" as RowState)
-                : result.report.requires_ack
-                  ? ("flagged" as RowState)
-                  : ("ready" as RowState),
-            findings: result.report.findings || [],
-            detail,
-          };
-        }),
-      );
-      setReviewed(outcomes.length);
+      setReviewed(items.length);
     });
 
     return () => {
       cancelled = true;
     };
-  }, [items]);
+  }, [items, reviewRequested]);
+
+  useEffect(() => {
+    if (!items || items.length === 0 || reviewRequested) return;
+    setRows(
+      items.map((item) => ({
+        id: item.id,
+        item,
+        state: "queued" as RowState,
+        findings: [],
+        detail: "",
+      })),
+    );
+  }, [items, reviewRequested]);
 
   if (!items || items.length === 0) return null;
 
@@ -213,19 +243,37 @@ export function BulkInstallDialog({
     .filter(Boolean)
     .join(" · ");
 
-  const install = async () => {
-    if (installing || targets.length === 0) return;
+  const runInstall = async (
+    installTargets: Row[],
+    acknowledge: boolean,
+    skippedCount = 0,
+  ) => {
+    if (installing || installTargets.length === 0) return;
     setPhase("install");
     setProgress(0);
-    setPlanned(targets.length);
+    setPlanned(installTargets.length);
+    stopRequestedRef.current = false;
+    setStopRequested(false);
     let ok = 0;
     let failed = 0;
-    const mark = (id: string, state: RowState, detail = "") =>
+    const started = new Set<string>();
+    const mark = (
+      id: string,
+      state: RowState,
+      detail = "",
+      findings?: ScanFinding[],
+    ) =>
       setRows((current) =>
-        current.map((row) => (row.id === id ? { ...row, state, detail } : row)),
+        current.map((row) =>
+          row.id === id
+            ? { ...row, state, detail, ...(findings ? { findings } : {}) }
+            : row,
+        ),
       );
 
-    for (const row of targets) {
+    await mapLimit(installTargets, 4, async (row) => {
+      if (stopRequestedRef.current) return;
+      started.add(row.id);
       mark(row.id, "working");
       try {
         const result = await ctx.api<InstallResult>("/api/marketplace/install", {
@@ -233,7 +281,7 @@ export function BulkInstallDialog({
           body: JSON.stringify({
             id: row.id,
             inputs: {},
-            acknowledge: ack,
+            acknowledge,
             ...sourceHint(row.item),
           }),
         });
@@ -243,22 +291,60 @@ export function BulkInstallDialog({
           mark(row.id, "failed", problem || "install failed");
         } else {
           ok += 1;
-          mark(row.id, "done");
+          const findings = result.warnings || [];
+          mark(
+            row.id,
+            "done",
+            findings.length ? `Installed with ${findings.length} scan finding(s).` : "",
+            findings,
+          );
         }
       } catch (error) {
         failed += 1;
         mark(row.id, "failed", error instanceof Error ? error.message : String(error));
       }
       setProgress((current) => current + 1);
+    }, () => stopRequestedRef.current);
+
+    const cancelled = stopRequestedRef.current;
+    if (cancelled) {
+      const targetIds = new Set(installTargets.map((row) => row.id));
+      setRows((current) =>
+        current.map((row) =>
+          targetIds.has(row.id) && !started.has(row.id)
+            ? { ...row, state: "cancelled", detail: "Stopped before this skill started." }
+            : row,
+        ),
+      );
     }
 
     setPhase("done");
     const parts = [`Installed ${ok}`];
-    if (skipped) parts.push(`${skipped} skipped`);
+    if (skippedCount) parts.push(`${skippedCount} skipped`);
     if (failed) parts.push(`${failed} failed`);
+    if (cancelled) parts.push("stopped by you");
     ctx.toast(parts.join(" · "), failed || !ok ? "error" : "ok");
     await ctx.refreshAll();
     await ctx.loadMarketplace(true);
+  };
+
+  const installReviewed = () =>
+    void runInstall(targets, ack, skipped);
+
+  const installWithoutReview = () => {
+    const installTargets = items.map((item) => ({
+      id: item.id,
+      item,
+      state: "queued" as RowState,
+      findings: [],
+      detail: "",
+    }));
+    void runInstall(installTargets, quickAck);
+  };
+
+  const stopAfterCurrent = () => {
+    stopRequestedRef.current = true;
+    setStopRequested(true);
   };
 
   return (
@@ -280,15 +366,44 @@ export function BulkInstallDialog({
         onClose={installing ? () => {} : onClose}
       >
         {phase === "done"
-          ? `Installed ${fmt(progress)} of ${fmt(planned)}${
+          ? `${stopRequested ? "Stopped after" : "Installed"} ${fmt(progress)} of ${fmt(planned)}${
               skipped ? ` · ${fmt(skipped)} left alone` : ""
             }.`
-          : reviewing
+          : phase === "choose"
+            ? `${fmt(count)} selected. Choose whether to review all first or scan as each one installs.`
+          : phase === "install"
+              ? stopRequested
+                ? `Stopping after current installs · ${fmt(progress)} of ${fmt(planned)} complete…`
+                : `Installing ${fmt(progress)} of ${fmt(planned)}…`
+              : reviewing
             ? `Reviewing ${fmt(reviewed)} of ${fmt(count)}…`
             : summary}
       </DialogHead>
 
       <DialogBody className="space-y-4">
+        {phase === "choose" ? (
+          <div className="space-y-3 rounded-xl border border-line bg-inset/40 p-4">
+            <p className="text-xs leading-relaxed text-ink-2">
+              Quick install skips the all-at-once review. JIT still scans each
+              skill immediately before installing it; flagged or unscanned
+              entries remain gated unless you explicitly acknowledge them.
+            </p>
+            <p className="text-xs leading-relaxed text-ink-3">
+              Installed skills are copied only into{" "}
+              <code className="num rounded border border-line-2 bg-raised px-1 py-0.5 text-[11px] text-ink-2">
+                {ctx.config?.index_dir || "~/.jit"}/skills
+              </code>
+              . Source staging stays inside the JIT cache; it does not install to
+              your project’s or global <code className="num">.agents/skills</code>.
+            </p>
+            <ToggleRow
+              label="Allow entries when the scan is unavailable or returns CAUTION. DO_NOT_INSTALL results remain blocked."
+              checked={quickAck}
+              onCheckedChange={setQuickAck}
+            />
+          </div>
+        ) : null}
+
         <ul className="divide-y divide-line/60 overflow-hidden rounded-xl border border-line">
           {rows.map((row) => (
             <li key={row.id} className="flex items-start gap-3 px-3.5 py-2.5">
@@ -347,22 +462,54 @@ export function BulkInstallDialog({
       </DialogBody>
 
       <DialogFoot>
-        <Button variant="ghost" onClick={installing ? undefined : onClose} disabled={installing}>
-          {phase === "done" ? "Close" : "Cancel"}
-        </Button>
-        {phase !== "done" ? (
-          <Button
-            variant="primary"
-            onClick={() => void install()}
-            disabled={installing || reviewing || targets.length === 0}
-          >
-            {installing
-              ? `Installing ${fmt(progress)} of ${fmt(planned)}…`
-              : reviewing
-                ? "Install"
-                : `Install ${fmt(targets.length)}`}
+        {phase === "choose" ? (
+          <>
+            <Button variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setReviewRequested(true);
+                setPhase("review");
+              }}
+            >
+              Review all first
+            </Button>
+            <Button variant="primary" onClick={installWithoutReview}>
+              Install without pre-review
+            </Button>
+          </>
+        ) : phase === "done" ? (
+          <Button variant="ghost" onClick={onClose}>
+            Close
           </Button>
-        ) : null}
+        ) : phase === "install" ? (
+          <Button
+            variant="ghost"
+            onClick={stopAfterCurrent}
+            disabled={stopRequested}
+          >
+            {stopRequested ? "Stopping…" : "Stop after current skills"}
+          </Button>
+        ) : (
+          <>
+            <Button variant="ghost" onClick={installing ? undefined : onClose} disabled={installing}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={installReviewed}
+              disabled={installing || reviewing || targets.length === 0}
+            >
+              {installing
+                ? `Installing ${fmt(progress)} of ${fmt(planned)}…`
+                : reviewing
+                  ? "Reviewing…"
+                  : `Install ${fmt(targets.length)}`}
+            </Button>
+          </>
+        )}
       </DialogFoot>
     </Dialog>
   );

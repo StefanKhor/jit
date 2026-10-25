@@ -276,8 +276,9 @@ export function Marketplace() {
             straight from there; or point JIT at a source of your own — a catalog
             JSON URL, a GitHub repository (<code className="num">owner/repo</code>
             , or a repo link), or a skills.sh link. Every entry is marked
-            third-party and scanned for risky patterns before it installs, and
-            nothing installs until you choose it.
+            third-party and scanned by NVIDIA SkillSpector for potential
+            vulnerabilities before it installs, and nothing installs until you
+            choose it.
           </>
         }
         actions={
@@ -697,6 +698,14 @@ function WeeklyActivity({ values }: { values: number[] }) {
   );
 }
 
+function skillsShHref(item: MarketplaceItem): string | null {
+  const source = String(item.install.skills_source || "").trim();
+  const skill = String(item.install.skills_name || "").trim();
+  if (!source || !skill) return null;
+  const segments = [...source.split("/"), skill].filter(Boolean);
+  return `https://skills.sh/${segments.map(encodeURIComponent).join("/")}`;
+}
+
 function DiscoverRow({
   item,
   rank,
@@ -734,9 +743,25 @@ function DiscoverRow({
         </span>
       ) : null}
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm text-ink" title={item.name}>
-          {item.name}
-        </div>
+        {skillsShHref(item) ? (
+          <a
+            className="inline-flex max-w-full items-center gap-1 truncate text-sm text-ink underline decoration-line-2 underline-offset-2 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
+            href={skillsShHref(item) || undefined}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={`${item.name} on skills.sh`}
+          >
+            <span className="truncate">{item.name}</span>
+            <span aria-hidden="true" className="shrink-0 text-[10px] text-ink-3">
+              ↗
+            </span>
+            <span className="sr-only"> (opens skills.sh in a new tab)</span>
+          </a>
+        ) : (
+          <div className="truncate text-sm text-ink" title={item.name}>
+            {item.name}
+          </div>
+        )}
         <Meta>{item.origin}</Meta>
         <span className="num mt-1 block text-[10px] text-ink-3 sm:hidden">
           {fmt(item.installs || 0)} installs

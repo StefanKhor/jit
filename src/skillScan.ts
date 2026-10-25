@@ -193,6 +193,7 @@ export function securityReport(scanner: SkillspectorReport | null): ScanReport {
     scanners: scanner.available ? ["skillspector"] : [],
     scanner_available: scanner.available,
     scanner_source: scanner.source,
+    scanner_version: scanner.scanner_version ?? undefined,
     safe_to_install: scanner.available && gate === "allow",
     ...(scanner.risk_score !== null ? { risk_score: scanner.risk_score } : {}),
     ...(scanner.severity ? { severity: scanner.severity } : {}),
@@ -208,9 +209,11 @@ export function securityReport(scanner: SkillspectorReport | null): ScanReport {
 
 export function ackMessage(report: ScanReport): string {
   const first = report.findings.find((finding) => finding.level !== "low");
+  const scannerNote =
+    report.scanner_available === false && report.note ? `: ${report.note}` : "";
   return (
     "this entry needs explicit acknowledgement before install" +
-    (first ? `: ${first.detail}` : "")
+    (first ? `: ${first.detail}` : scannerNote)
   );
 }
 

@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
@@ -60,7 +60,13 @@ function quote(part: string): string {
   return /\s/.test(part) ? `"${part}"` : part;
 }
 
-function execute(args: string[], cwd: string) {
+interface ExecuteResult {
+  stdout: string;
+  stderr: string;
+  error?: Error;
+}
+
+function execute(args: string[], cwd: string): Promise<ExecuteResult> {
   const parts = command();
   const env = {
     ...process.env,
@@ -71,24 +77,68 @@ function execute(args: string[], cwd: string) {
       ? {}
       : { GITHUB_TOKEN: process.env.JIT_GITHUB_TOKEN }),
   };
-  const options = {
-    cwd,
-    env,
-    encoding: "utf8" as const,
-    timeout: TIMEOUT_MS,
-    windowsHide: true,
-    maxBuffer: MAX_OUTPUT_BYTES,
-  };
-  if (process.platform === "win32") {
-    // cmd.exe is what resolves `npx` to `npx.cmd`. A source reaches this call
-    // only after it has been validated, so no argument can carry a shell
-    // metacharacter.
-    return spawnSync([...parts, ...args].map(quote).join(" "), {
-      ...options,
-      shell: true,
+  return new Promise((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    let outputBytes = 0;
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const child =
+      process.platform === "win32"
+        ? // cmd.exe resolves npx to npx.cmd. Sources and skill names have been
+          // validated before reaching this call; quote arguments for cmd.exe.
+          spawn([...parts, ...args].map(quote).join(" "), {
+            cwd,
+            env,
+            windowsHide: true,
+            shell: true,
+          })
+        : spawn(parts[0] as string, [...parts.slice(1), ...args], {
+            cwd,
+            env,
+            windowsHide: true,
+          });
+
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ stdout, stderr, ...(error ? { error } : {}) });
+    };
+
+    timer = setTimeout(() => {
+      child.kill();
+      finish(new Error(`skills CLI timed out after ${Math.round(TIMEOUT_MS / 1000)}s`));
+    }, TIMEOUT_MS);
+
+    child.stdout?.on("data", (chunk: Buffer) => {
+      outputBytes += chunk.byteLength;
+      if (outputBytes > MAX_OUTPUT_BYTES) {
+        child.kill();
+        finish(new Error("skills CLI output exceeded the size limit"));
+        return;
+      }
+      stdout += chunk.toString("utf8");
     });
-  }
-  return spawnSync(parts[0] as string, [...parts.slice(1), ...args], options);
+    child.stderr?.on("data", (chunk: Buffer) => {
+      if (stderr.length < 64 * 1024) stderr += chunk.toString("utf8");
+    });
+    child.on("error", finish);
+    child.on("close", (code, signal) => {
+      if (code === 0) {
+        finish();
+      } else {
+        finish(
+          new Error(
+            signal
+              ? `skills CLI was terminated by ${signal}`
+              : `skills CLI exited with code ${String(code)}`,
+          ),
+        );
+      }
+    });
+  });
 }
 
 function readJson(stdout: string): Array<Record<string, unknown>> | null {
@@ -161,7 +211,7 @@ export async function materializeSource(
     );
   }
   mkdirSync(useDir, { recursive: true });
-  const result = execute(
+  const result = await execute(
     [
       "add",
       source,

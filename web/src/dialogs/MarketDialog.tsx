@@ -7,8 +7,10 @@ import type {
   InstallResult,
   MarketplaceInput,
   MarketplaceItem,
+  ScanFinding,
+  ScanReport,
 } from "../types";
-import { StatusDot } from "../ui/Badge";
+import { Badge, StatusDot } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { cx } from "../ui/cx";
 import { Dialog, DialogBody, DialogFoot, DialogHead } from "../ui/Dialog";
@@ -30,6 +32,184 @@ export function sourceHint(item: MarketplaceItem): Record<string, string> {
   const source = String(install.skills_source || "").trim();
   const skill = String(install.skills_name || "").trim();
   return source ? { source, skill } : {};
+}
+
+function RiskSummary({ report }: { report: ScanReport }) {
+  const score = typeof report.risk_score === "number" ? report.risk_score : null;
+  const recommendation = report.recommendation || "UNKNOWN";
+  const tone =
+    recommendation === "SAFE"
+      ? "ok"
+      : recommendation === "CAUTION"
+        ? "warn"
+        : recommendation === "DO_NOT_INSTALL"
+          ? "bad"
+          : "neutral";
+  const barTone =
+    score === null || score <= 20
+      ? "bg-ok"
+      : score <= 50
+        ? "bg-warn"
+        : "bg-bad";
+  const counts = {
+    critical: report.findings.filter((finding) => finding.level === "critical").length,
+    high: report.findings.filter((finding) => finding.level === "high").length,
+    medium: report.findings.filter((finding) => finding.level === "medium").length,
+    low: report.findings.filter((finding) => finding.level === "low").length,
+  };
+
+  return (
+    <div className="space-y-4 rounded-xl border border-line bg-inset/40 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="kicker">Overall assessment</div>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="num text-3xl font-semibold text-ink">
+              {score === null ? "—" : score}
+            </span>
+            <span className="num text-xs text-ink-3">/ 100 risk</span>
+          </div>
+        </div>
+        <Badge tone={tone}>{recommendation.replaceAll("_", " ")}</Badge>
+      </div>
+
+      <div className="space-y-1.5">
+        {score !== null ? (
+          <div
+            role="meter"
+            aria-label="SkillSpector risk score"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={score}
+            className="h-2 overflow-hidden rounded-full bg-raised"
+          >
+            <div
+              className={`h-full rounded-full transition-[width] ${barTone}`}
+              style={{ width: `${score}%` }}
+            />
+          </div>
+        ) : (
+          <p className="text-[10px] text-ink-3">Risk score not provided.</p>
+        )}
+        <div className="flex justify-between text-[9px] text-ink-3">
+          <span>LOW · 0–20</span>
+          <span>MEDIUM · 21–50</span>
+          <span>HIGH · 51–80</span>
+          <span>CRITICAL · 81–100</span>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-ink-2">
+          {fmt(report.findings.length)} potential finding(s)
+        </span>
+        {counts.critical ? <Badge tone="bad">{counts.critical} critical</Badge> : null}
+        {counts.high ? <Badge tone="bad">{counts.high} high</Badge> : null}
+        {counts.medium ? <Badge tone="warn">{counts.medium} medium</Badge> : null}
+        {counts.low ? <Badge tone="neutral">{counts.low} low</Badge> : null}
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3 text-[10px] text-ink-3">
+        <span>
+          {report.llm_used
+            ? "Static + semantic LLM analysis"
+            : "Static analysis · LLM not used"}
+        </span>
+        {report.scanner_version ? (
+          <span className="num">NVIDIA SkillSpector v{report.scanner_version}</span>
+        ) : null}
+      </div>
+      {report.findings.length ? (
+        <p className="text-[10px] leading-relaxed text-ink-3">
+          Findings are potential indicators; the recommendation is the scanner’s
+          aggregate assessment. Review the evidence and remediation below.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function FindingCard({ finding }: { finding: ScanFinding }) {
+  const tone =
+    finding.level === "critical" || finding.level === "high"
+      ? "bad"
+      : finding.level === "medium"
+        ? "warn"
+        : "neutral";
+  const location = finding.location
+    ? `${finding.location.file}${
+        finding.location.start_line
+          ? `:${finding.location.start_line}${
+              finding.location.end_line &&
+              finding.location.end_line !== finding.location.start_line
+                ? `–${finding.location.end_line}`
+                : ""
+            }`
+          : ""
+      }`
+    : "";
+
+  return (
+    <li className="space-y-3 p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge tone={tone}>{finding.level}</Badge>
+        <span className="num text-xs font-semibold text-ink">{finding.rule}</span>
+        {finding.category ? (
+          <span className="text-xs text-ink-2">{finding.category}</span>
+        ) : null}
+        {finding.confidence !== undefined ? (
+          <span className="num ml-auto text-[10px] text-ink-3">
+            {Math.round(finding.confidence * 100)}% confidence
+          </span>
+        ) : null}
+      </div>
+
+      {location ? (
+        <p className="num text-[10px] text-ink-3">{location}</p>
+      ) : null}
+      <p className="text-sm leading-relaxed text-ink-2">
+        {finding.explanation || finding.detail}
+      </p>
+      {finding.snippet ? (
+        <div className="rounded-lg border border-line bg-panel p-3">
+          <div className="kicker mb-1.5">Matched content</div>
+          <p className="num whitespace-pre-wrap break-words text-xs leading-relaxed text-ink-2">
+            {finding.snippet}
+          </p>
+        </div>
+      ) : null}
+      {finding.code_snippet ? (
+        <pre className="max-h-48 overflow-auto rounded-lg border border-line bg-panel p-3 text-[11px] leading-relaxed text-ink-2">
+          {finding.code_snippet}
+        </pre>
+      ) : null}
+      {finding.remediation ? (
+        <div className="rounded-lg border border-info/20 bg-info/5 p-3">
+          <div className="kicker mb-1.5 text-info">Suggested remediation</div>
+          <p className="text-xs leading-relaxed text-ink-2">
+            {finding.remediation}
+          </p>
+        </div>
+      ) : null}
+      {finding.tags?.length ? (
+        <div className="flex flex-wrap gap-1.5">
+          {finding.tags.map((tag, index) => (
+            <Badge key={`${tag}-${index}`} tone="neutral">{tag}</Badge>
+          ))}
+        </div>
+      ) : null}
+      {finding.evidence && Object.keys(finding.evidence).length ? (
+        <details className="text-xs text-ink-2">
+          <summary className="cursor-pointer text-ink-3 hover:text-ink-2">
+            Evidence details
+          </summary>
+          <pre className="mt-2 max-h-40 overflow-auto rounded-lg border border-line bg-panel p-3 text-[10px] leading-relaxed">
+            {JSON.stringify(finding.evidence, null, 2)}
+          </pre>
+        </details>
+      ) : null}
+    </li>
+  );
 }
 
 /**
@@ -237,7 +417,7 @@ export function MarketDialog({
           {inspecting || inspect ? (
             <section className="space-y-3">
               <div className="flex items-center justify-between gap-3">
-                <h3 className="kicker">Review · SkillSpector</h3>
+                <h3 className="kicker">Review · NVIDIA SkillSpector</h3>
                 {inspecting ? (
                   <span className="num text-[11px] text-ink-3">checking…</span>
                 ) : null}
@@ -246,21 +426,25 @@ export function MarketDialog({
                 <p className="text-sm text-ink-2">Reviewing this entry…</p>
               ) : inspect ? (
                 <>
-                  <p
-                    className={cx(
-                      "flex items-center gap-2 text-sm font-medium",
-                      reviewTone === "bad"
-                        ? "text-bad"
-                        : reviewTone === "warn"
-                          ? "text-warn"
-                          : reviewTone === "ok"
-                            ? "text-ok"
-                            : "text-ink",
-                    )}
-                  >
-                    <StatusDot tone={reviewTone} />
-                    {reviewStatus}
-                  </p>
+                  {inspect.report.scanner_available ? (
+                    <RiskSummary report={inspect.report} />
+                  ) : (
+                    <p
+                      className={cx(
+                        "flex items-center gap-2 text-sm font-medium",
+                        reviewTone === "bad"
+                          ? "text-bad"
+                          : reviewTone === "warn"
+                            ? "text-warn"
+                            : reviewTone === "ok"
+                              ? "text-ok"
+                              : "text-ink",
+                      )}
+                    >
+                      <StatusDot tone={reviewTone} />
+                      {reviewStatus}
+                    </p>
+                  )}
 
                   {inspect.report.note ? (
                     <p className="num text-[11px] leading-relaxed text-ink-3">
@@ -282,26 +466,10 @@ export function MarketDialog({
                         </li>
                       ) : null}
                       {inspect.report.findings.map((finding, index) => (
-                        <li
-                          className="flex items-start gap-2.5 px-3.5 py-3 text-sm"
+                        <FindingCard
                           key={`${finding.rule}-${index}`}
-                        >
-                          <StatusDot
-                            className="mt-1.5"
-                            tone={
-                              finding.level === "critical" ||
-                              finding.level === "high"
-                                ? "bad"
-                                : finding.level === "medium"
-                                  ? "warn"
-                                  : "neutral"
-                            }
-                          />
-                          <span className="min-w-0 leading-relaxed text-ink-2">
-                            <span className="num text-ink">{finding.rule}</span> —{" "}
-                            {finding.detail}
-                          </span>
-                        </li>
+                          finding={finding}
+                        />
                       ))}
                       {checksumPinned ? (
                         <li className="flex items-start gap-2.5 px-3.5 py-3 text-sm">

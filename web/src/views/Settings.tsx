@@ -22,6 +22,7 @@ export function Settings() {
   const [marketUrls, setMarketUrls] = useState<string[]>([]);
   const [newMarketUrl, setNewMarketUrl] = useState("");
   const [threshold, setThreshold] = useState(0.6);
+  const [skillspectorLlm, setSkillspectorLlm] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -30,6 +31,7 @@ export function Settings() {
     setNano(config.nemotron_nano_model || "");
     setRerank(Boolean(config.rerank_enabled));
     setThreshold(Number(config.confidence_threshold ?? 0.6));
+    setSkillspectorLlm(Boolean(config.skillspector_llm_enabled));
     setMarketUrls(Array.isArray(config.marketplace_urls) ? config.marketplace_urls : []);
   }, [config]);
 
@@ -60,6 +62,24 @@ export function Settings() {
       await ctx.saveConfig({ confidence_threshold: threshold });
       ctx.toast(`Confidence threshold set to ${threshold.toFixed(2)}.`);
     } catch (error) {
+      ctx.toast(error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      setSaving("");
+    }
+  };
+
+  const saveSkillspectorLlm = async (enabled: boolean) => {
+    setSkillspectorLlm(enabled);
+    setSaving("skillspector-llm");
+    try {
+      await ctx.saveConfig({ skillspector_llm_enabled: enabled });
+      ctx.toast(
+        enabled
+          ? "SkillSpector semantic LLM analysis enabled."
+          : "SkillSpector static-only analysis enabled.",
+      );
+    } catch (error) {
+      setSkillspectorLlm(Boolean(config?.skillspector_llm_enabled));
       ctx.toast(error instanceof Error ? error.message : String(error), "error");
     } finally {
       setSaving("");
@@ -315,6 +335,37 @@ export function Settings() {
                   </Button>
                 </div>
               </form>
+            </PanelBody>
+          </Panel>
+
+          <Panel>
+            <PanelHead
+              title="SkillSpector analysis"
+              hint={skillspectorLlm ? "static + semantic" : "static only"}
+              actions={
+                <Badge tone={skillspectorLlm ? "accent" : "neutral"}>
+                  {skillspectorLlm ? "LLM on" : "LLM off"}
+                </Badge>
+              }
+            />
+            <PanelBody className="space-y-5">
+              <p className="text-xs leading-relaxed text-ink-3">
+                Static checks always run. Semantic analysis sends skill content
+                to SkillSpector’s configured model provider and may add latency
+                or provider costs. Configure provider credentials in the JIT
+                process environment before enabling it.
+              </p>
+              <ToggleRow
+                label="Enable semantic LLM analysis"
+                hint={
+                  config?.skillspector_llm_env
+                    ? "Controlled by JIT_SKILLSPECTOR_LLM in the environment."
+                    : "Off by default; static SkillSpector scanning needs no model credentials."
+                }
+                checked={skillspectorLlm}
+                disabled={Boolean(config?.skillspector_llm_env) || saving === "skillspector-llm"}
+                onCheckedChange={(enabled) => void saveSkillspectorLlm(enabled)}
+              />
             </PanelBody>
           </Panel>
 

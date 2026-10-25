@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { getConfigValue } from "./config.js";
 import { logger } from "./logger.js";
 import { securityReport } from "./skillScan.js";
 import type { ScanFinding, ScanReport, SkillspectorReport } from "./types.js";
@@ -28,6 +29,7 @@ interface Scanner {
 
 const PROBE_TIMEOUT_MS = 20_000;
 const MAX_STDOUT_BYTES = 16 * 1024 * 1024;
+const UVX_PYTHON = process.env.JIT_SKILLSPECTOR_PYTHON || "3.12";
 
 function truthy(value: string | undefined): boolean {
   return ["1", "true", "yes", "on"].includes(
@@ -96,7 +98,7 @@ export function resolveScanner(): Scanner {
   if (probe(["uvx"])) {
     return (scannerMemo = {
       source: "uvx",
-      command: ["uvx", "--from", SPEC, "skillspector"],
+      command: ["uvx", "--python", UVX_PYTHON, "--from", SPEC, "skillspector"],
       hint: "",
     });
   }
@@ -187,11 +189,23 @@ function unavailable(
 interface RawIssue {
   id?: unknown;
   category?: unknown;
+  pattern?: unknown;
   severity?: unknown;
   message?: unknown;
   description?: unknown;
   confidence?: unknown;
-  location?: { file?: unknown; start_line?: unknown } | null;
+  explanation?: unknown;
+  remediation?: unknown;
+  finding?: unknown;
+  code_snippet?: unknown;
+  intent?: unknown;
+  tags?: unknown;
+  evidence?: unknown;
+  location?: {
+    file?: unknown;
+    start_line?: unknown;
+    end_line?: unknown;
+  } | null;
 }
 
 interface RawReport {
@@ -217,6 +231,24 @@ function parseJson(stdout: string): RawReport | null {
   }
 }
 
+function processFailureDetail(result: ExecResult): string {
+  const output = result.stderr || result.stdout;
+  const excerpt = output
+    .replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(-3)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .replace(
+      /\b(?:sk-[A-Za-z0-9_-]{12,}|nvapi-[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9]{20,})\b/g,
+      "[redacted]",
+    )
+    .slice(-500);
+  return result.error || excerpt || "no output from scanner";
+}
+
 const LEVELS = new Set(["critical", "high", "medium", "low"]);
 
 function normalizeIssues(issues: RawIssue[] | undefined): ScanFinding[] {
@@ -224,19 +256,60 @@ function normalizeIssues(issues: RawIssue[] | undefined): ScanFinding[] {
   for (const issue of issues || []) {
     const raw = String(issue.severity || "").trim().toLowerCase();
     const level = (LEVELS.has(raw) ? raw : "medium") as ScanFinding["level"];
-    const where = issue.location?.file
-      ? `${String(issue.location.file)}${
-          issue.location.start_line ? `:${String(issue.location.start_line)}` : ""
+    const file = String(issue.location?.file || "").trim();
+    const startLine = Number(issue.location?.start_line);
+    const endLine = Number(issue.location?.end_line);
+    const where = file
+      ? `${file}${
+          Number.isFinite(startLine) && startLine > 0 ? `:${startLine}` : ""
         } — `
       : "";
-    const what =
-      issue.message || issue.description || issue.category || "security finding";
-    findings.push({
+    const explanation = String(
+      issue.explanation ||
+        issue.message ||
+        issue.description ||
+        issue.category ||
+        "security finding",
+    ).trim();
+    const confidence = Number(issue.confidence);
+    const finding: ScanFinding = {
       level,
       rule: String(issue.id || issue.category || "skillspector"),
-      detail: `${where}${String(what)}`,
+      detail: `${where}${explanation}`,
+      ...(issue.category ? { category: String(issue.category) } : {}),
+      ...(issue.pattern ? { pattern: String(issue.pattern) } : {}),
+      ...(Number.isFinite(confidence)
+        ? { confidence: Math.max(0, Math.min(1, confidence)) }
+        : {}),
+      ...(explanation ? { explanation } : {}),
+      ...(issue.remediation ? { remediation: String(issue.remediation) } : {}),
+      ...(issue.finding ? { snippet: String(issue.finding) } : {}),
+      ...(issue.code_snippet ? { code_snippet: String(issue.code_snippet) } : {}),
+      ...(issue.intent ? { intent: String(issue.intent) } : {}),
+      ...(Array.isArray(issue.tags)
+        ? { tags: issue.tags.map((tag) => String(tag)).slice(0, 12) }
+        : {}),
+      ...(file
+        ? {
+            location: {
+              file,
+              ...(Number.isFinite(startLine) && startLine > 0
+                ? { start_line: startLine }
+                : {}),
+              ...(Number.isFinite(endLine) && endLine > 0
+                ? { end_line: endLine }
+                : {}),
+            },
+          }
+        : {}),
+      ...(issue.evidence &&
+      typeof issue.evidence === "object" &&
+      !Array.isArray(issue.evidence)
+        ? { evidence: issue.evidence as Record<string, unknown> }
+        : {}),
       scanner: "skillspector",
-    });
+    };
+    findings.push(finding);
     if (findings.length >= 25) break;
   }
   return findings;
@@ -270,13 +343,17 @@ export async function skillspectorScan(target: string): Promise<SkillspectorRepo
     return unavailable(scannerFailed.source, scannerFailed.error);
   }
   const extra = splitCommand(process.env.JIT_SKILLSPECTOR_ARGS || "");
+  const llmEnabled = getConfigValue("skillspector_llm_enabled");
+  const scanOptions = llmEnabled
+    ? extra.filter((argument) => argument !== "--no-llm")
+    : ["--no-llm", ...extra];
   const command = [
     ...scanner.command,
     "scan",
     target,
     "--format",
     "json",
-    ...extra,
+    ...scanOptions,
   ];
   const result = await exec(command, scanTimeoutMs());
   if (result.error) {
@@ -286,11 +363,10 @@ export async function skillspectorScan(target: string): Promise<SkillspectorRepo
   }
   const raw = parseJson(result.stdout);
   if (!raw) {
-    const detail =
-      result.status === 2
-        ? "SkillSpector could not scan the target"
-        : "SkillSpector returned no readable JSON report";
-    logger.warn("SkillSpector: %s (exit %s)", detail, result.status);
+    const detail = `SkillSpector returned no readable JSON report (exit ${String(
+      result.status,
+    )}): ${processFailureDetail(result)}`;
+    logger.warn("SkillSpector: %s", detail);
     scannerFailed = { source: scanner.source, error: detail };
     return unavailable(scanner.source, detail);
   }

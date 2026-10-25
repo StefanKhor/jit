@@ -117,6 +117,7 @@ export const DEFAULT_CONFIG: Config = {
   confidence_threshold: CONFIDENCE_THRESHOLD,
   first_run: true,
   marketplace_urls: [],
+  skillspector_llm_enabled: false,
 };
 
 const FILE_KEYS = new Set<keyof Config>([
@@ -128,6 +129,7 @@ const FILE_KEYS = new Set<keyof Config>([
   "confidence_threshold",
   "first_run",
   "marketplace_urls",
+  "skillspector_llm_enabled",
 ]);
 
 const ENV_KEYS: Partial<Record<keyof Config, string>> = {
@@ -185,7 +187,11 @@ function readStoredConfig(): Partial<Config> {
   for (const key of FILE_KEYS) {
     if (!(key in raw)) continue;
     const value = raw[key];
-    if (key === "rerank_enabled" || key === "first_run") {
+    if (
+      key === "rerank_enabled" ||
+      key === "first_run" ||
+      key === "skillspector_llm_enabled"
+    ) {
       if (typeof value === "boolean") {
         (stored as Record<string, unknown>)[key] = value;
       }
@@ -251,6 +257,12 @@ export function loadConfig(): Config {
   }
   config.first_run = Boolean(config.first_run);
   config.rerank_enabled = Boolean(config.rerank_enabled);
+  const scannerLlmEnv = process.env.JIT_SKILLSPECTOR_LLM;
+  if (scannerLlmEnv !== undefined && scannerLlmEnv.trim() !== "") {
+    config.skillspector_llm_enabled = ["1", "true", "yes", "on"].includes(
+      scannerLlmEnv.trim().toLowerCase(),
+    );
+  }
   const envThreshold = Number(process.env.JIT_CONFIDENCE_THRESHOLD);
   if (process.env.JIT_CONFIDENCE_THRESHOLD && Number.isFinite(envThreshold)) {
     config.confidence_threshold = envThreshold;
@@ -315,6 +327,9 @@ export function publicConfig(): PublicConfig {
     auth_enabled: Boolean(config.api_key),
     index_dir: INDEX_DIR,
     embedding_model: EMBEDDING_MODEL,
+    skillspector_llm_env:
+      process.env.JIT_SKILLSPECTOR_LLM !== undefined &&
+      process.env.JIT_SKILLSPECTOR_LLM.trim() !== "",
   };
   redacted.rerank_enabled =
     Boolean(config.nebius_api_key) && Boolean(config.rerank_enabled);

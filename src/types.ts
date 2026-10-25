@@ -92,6 +92,7 @@ export interface Config {
   confidence_threshold: number;
   first_run: boolean;
   marketplace_urls: string[];
+  skillspector_llm_enabled: boolean;
 }
 
 export interface PublicConfig extends Config {
@@ -100,6 +101,7 @@ export interface PublicConfig extends Config {
   auth_enabled: boolean;
   index_dir: string;
   embedding_model: string;
+  skillspector_llm_env: boolean;
 }
 
 export interface Health {
@@ -309,6 +311,21 @@ export interface ScanFinding {
   level: "critical" | "high" | "medium" | "low";
   rule: string;
   detail: string;
+  category?: string;
+  pattern?: string;
+  confidence?: number;
+  explanation?: string;
+  remediation?: string;
+  snippet?: string;
+  code_snippet?: string;
+  intent?: string;
+  tags?: string[];
+  location?: {
+    file: string;
+    start_line?: number;
+    end_line?: number;
+  };
+  evidence?: Record<string, unknown>;
   /** Which scanner produced the finding. */
   scanner?: "builtin" | "skillspector";
 }
@@ -343,6 +360,7 @@ export interface ScanReport {
   llm_used?: boolean;
   scanner_available?: boolean;
   scanner_source?: SkillspectorReport["source"];
+  scanner_version?: string;
   scanners?: string[];
   /** Human note: how to install the scanner, or why a pass was skipped. */
   note?: string;

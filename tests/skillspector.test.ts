@@ -58,6 +58,7 @@ function verdict(
 }
 
 test("a clean skill is allowed and runs the scanner", async () => {
+  delete process.env.JIT_SKILLSPECTOR_LLM;
   const report = await scanSkillPayload({ body: CLEAN });
   assert.equal(report.scanner_available, true);
   assert.equal(report.scanner_source, "env");
@@ -65,10 +66,21 @@ test("a clean skill is allowed and runs the scanner", async () => {
   assert.equal(report.recommendation, "SAFE");
   assert.equal(report.risk_score, 0);
   assert.equal(report.severity, "LOW");
-  assert.equal(report.llm_used, false); // requested, but no provider was available
+  assert.equal(report.llm_used, false); // JIT defaults to static-only scanning.
   assert.equal(report.findings.length, 0);
   assert.equal(report.gate, "allow");
   assert.doesNotThrow(() => enforceGate(report));
+});
+
+test("semantic scanner analysis can be explicitly enabled in JIT", async () => {
+  process.env.JIT_SKILLSPECTOR_LLM = "1";
+  try {
+    const report = await scanSkillPayload({ body: CLEAN });
+    assert.equal(report.scanner_available, true);
+    assert.equal(report.llm_used, true);
+  } finally {
+    delete process.env.JIT_SKILLSPECTOR_LLM;
+  }
 });
 
 test("a directory payload is scanned through its SKILL.md", async () => {
@@ -92,6 +104,12 @@ test("a DO_NOT_INSTALL verdict blocks, and only an explicit force clears it", as
   assert.equal(finding.level, "high");
   assert.equal(finding.scanner, "skillspector");
   assert.match(finding.detail, /SKILL\.md:3/);
+  assert.match(finding.explanation || "", /untrusted server/);
+  assert.equal(finding.confidence, 0.94);
+  assert.equal(finding.snippet, "process.env.API_KEY");
+  assert.match(finding.remediation || "", /Remove the credential access/);
+  assert.deepEqual(finding.tags, ["credential-access", "network-egress"]);
+  assert.equal(finding.evidence?.destination, "https://example.invalid");
 
   assert.throws(() => enforceGate(report), /blocked by the security scan/);
   // An acknowledgement is not enough for a hard block.
