@@ -29,17 +29,16 @@ import { closeDb, getItem, initDb } from "./storage/db.js";
 import { defaultManager } from "./mcp/client.js";
 import { validateToolArguments } from "./mcp/validate.js";
 import { evaluate, recordRetrieval } from "./retrieval/retriever.js";
-import type { IndexItem } from "./types.js";
+import { enforceGate } from "./skillScan.js";
+import { scanSkillPayload } from "./skillspector.js";
+import type { IndexItem, ScanReport } from "./types.js";
 
 const INSTRUCTIONS =
-  "JIT is a just-in-time index of skills and MCP tools. Call JIT_FIND " +
-  "before a multi-step task that might have a specialized workflow, with " +
-  "a concrete intent. Skip it for trivial tasks. If it returns " +
-  '{"found": true, ...}, follow the skill content or call the tool with ' +
-  "JIT_CALL. If it returns \"found\": false with a near_misses list, none " +
-  "cleared the confidence threshold but those are the closest entries — " +
-  "retry with a more specific intent if one fits, otherwise continue with " +
-  "your built-in tools.";
+  "JIT is a just-in-time index of agent skills. Call JIT_FIND before a " +
+  "multi-step task that may have a specialized workflow, with a concrete " +
+  "intent; skip it for trivial tasks. It returns one skill body at a time, so " +
+  "you carry only what the task needs. JIT_ADD installs a skill and scans it " +
+  "with NVIDIA SkillSpector first: a skill that fails the scan is refused.";
 
 function textResult(payload: unknown, isError = false) {
   return {
@@ -57,21 +56,33 @@ function createServer(): McpServer {
     { name: "JIT", version: VERSION },
     { instructions: INSTRUCTIONS },
   );
+  for (const register of SHIPPED_TOOLS) register(server);
+  return server;
+}
 
+/**
+ * The tools JIT advertises to agents, kept deliberately minimal: every tool
+ * name, description, and schema sits in the agent's context for the whole
+ * session. JIT_CALL and JIT_STATUS stay implemented below — restoring them is
+ * one line here — but only what a skill-first workflow needs ships.
+ */
+const SHIPPED_TOOLS: Array<(server: McpServer) => void> = [
+  registerFind,
+  registerAdd,
+];
+
+export function registerFind(server: McpServer): void {
   server.registerTool(
     "JIT_FIND",
     {
-      title: "Find a skill or MCP tool",
+      title: "Find a skill",
       description:
-        "Find one skill or MCP tool for a concrete task. Call this before " +
-        "a multi-step task that may have a specialized workflow. Write a " +
-        "specific intent: the action, the object, and the outcome (for " +
-        'example "create a Linear issue for the login bug"). Skip it for ' +
-        "trivial or self-contained tasks. Returns the full skill body or a " +
-        "tool descriptor with its tool_id and JSON schema. When nothing " +
-        "clears the threshold it returns {\"found\": false} plus a " +
-        "near_misses list of the closest entries; retry with a sharper " +
-        "intent if one fits, otherwise proceed with your own tools.",
+        "Load the one skill that fits a concrete multi-step task, so you " +
+        "carry only that body instead of every skill. Give a specific intent: " +
+        "action, object, outcome. Skip it for trivial tasks. Returns the skill " +
+        'body (or a tool descriptor), or {"found": false} plus near_misses ' +
+        "when nothing clears the threshold; retry once with a sharper intent " +
+        "if one fits.",
       inputSchema: {
         intent: z
           .string()
@@ -103,29 +114,58 @@ function createServer(): McpServer {
       return textResult({ found: false });
     },
   );
+}
 
+export function registerAdd(server: McpServer): void {
   server.registerTool(
     "JIT_ADD",
     {
-      title: "Add skills or MCP tools",
+      title: "Add a skill",
       description:
-        "Add skills or MCP tools to the index. Source can be a filesystem " +
-        "path, an http(s) URL to a markdown skill, inline markdown, or the " +
-        "name of an MCP server already installed in JIT. Format is one of " +
-        'auto, dir, url, inline, mcp. Kind is "skill" or "tool".',
+        "Add a skill to the index. Source: a filesystem path, an http(s) URL " +
+        "to a SKILL.md, inline markdown, or an installed MCP server name. " +
+        "NVIDIA SkillSpector scans it first — DO_NOT_INSTALL is refused, and " +
+        "CAUTION is refused unless acknowledged.",
       inputSchema: {
         source: z.string().describe("Path, URL, inline markdown, or MCP server name."),
         format: z
           .enum(["auto", "dir", "url", "inline", "mcp"])
           .optional()
-          .describe("Input format; auto-detected by default."),
+          .describe("Input format; auto by default."),
         kind: z
           .enum(["skill", "tool"])
           .optional()
-          .describe("Item kind; defaults to skill."),
+          .describe("Entry kind; skill by default."),
+        acknowledge: z.boolean().optional().describe("Accept a CAUTION verdict."),
+        force: z
+          .boolean()
+          .optional()
+          .describe("Install despite DO_NOT_INSTALL."),
       },
     },
-    async ({ source, format: requestedFormat, kind }) => {
+    async ({ source, format: requestedFormat, kind, acknowledge, force }) => {
+      const gate = { acknowledge: Boolean(acknowledge), force: Boolean(force) };
+      // Run SkillSpector before anything reaches the index. A refused skill
+      // comes back as an error result carrying the report, so the caller sees
+      // exactly why and can retry with acknowledge or force.
+      const check = async (report: ScanReport) => {
+        try {
+          enforceGate(report, gate);
+          return null;
+        } catch (error) {
+          return textResult(
+            {
+              added: 0,
+              updated: 0,
+              skipped: 0,
+              errors: [error instanceof Error ? error.message : String(error)],
+              security: report,
+              total_indexed: totalIndexed(),
+            },
+            true,
+          );
+        }
+      };
       let format = requestedFormat || "auto";
       if (format === "auto") {
         if (/^https?:\/\//.test(source)) format = "url";
@@ -147,6 +187,8 @@ function createServer(): McpServer {
         if (Buffer.byteLength(source, "utf8") > MAX_SKILL_BYTES) {
           errors.push("inline skill exceeds the size limit");
         } else {
+          const refused = await check(await scanSkillPayload({ body: source }));
+          if (refused) return refused;
           try {
             const item = parseSkillText(source, "", "inline-skill");
             const result = await indexItems([item], "skill");
@@ -171,6 +213,8 @@ function createServer(): McpServer {
             total_indexed: totalIndexed(),
           });
         }
+        const refused = await check(await scanSkillPayload({ path: target }));
+        if (refused) return refused;
         const files = statSync(target).isFile()
           ? [target]
           : discoverSkills([target]);
@@ -195,6 +239,8 @@ function createServer(): McpServer {
           if (!/^\s*---\s*\r?\n/.test(text)) {
             errors.push("URL did not return a skill file with frontmatter");
           } else {
+            const refused = await check(await scanSkillPayload({ body: text }));
+            if (refused) return refused;
             const item = parseSkillText(text, "", "remote-skill");
             const result = await indexItems([item], "skill");
             added = result.added;
@@ -246,7 +292,10 @@ function createServer(): McpServer {
       });
     },
   );
+}
 
+// Implemented but not shipped while JIT is skill-first (see SHIPPED_TOOLS).
+export function registerCall(server: McpServer): void {
   server.registerTool(
     "JIT_CALL",
     {
@@ -298,7 +347,10 @@ function createServer(): McpServer {
       return textResult(payload, Boolean(payload.is_error));
     },
   );
+}
 
+// Implemented but not shipped while JIT is skill-first (see SHIPPED_TOOLS).
+export function registerStatus(server: McpServer): void {
   server.registerTool(
     "JIT_STATUS",
     {
@@ -320,15 +372,13 @@ function createServer(): McpServer {
       });
     },
   );
-
-  return server;
 }
 
 // The dashboard reports the fixed context cost of JIT's own MCP tool schemas.
 // Measure the real tools/list payload once over an in-memory transport so the
 // number tracks the code instead of being hand-maintained. The fallback is the
 // last measured value.
-const FALLBACK_SCHEMA_TOKENS = 617;
+const FALLBACK_SCHEMA_TOKENS = 396;
 
 let schemaTokensPromise: Promise<number> | null = null;
 
