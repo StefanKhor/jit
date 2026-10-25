@@ -1,13 +1,31 @@
-# JIT — Just-In-Time Skill & MCP Tool Loader
+# JIT — a secure, just-in-time skills hub
 
-**JIT is a local MCP server and web dashboard that gives an agent one skill or
-tool at a time, instead of every skill and tool schema at startup.**
+**JIT is a local skills hub: it scans every skill you add, indexes it, and gives
+an agent one skill at a time instead of every skill in context.**
 
-The agent calls `JIT_FIND("create a Linear issue for the login bug")`. JIT
-searches a local index and returns the single best match, or — when nothing
-clears the confidence threshold — `{"found": false}` plus a short `near_misses`
-list of the closest entries instead of a silent empty result. During retrieval,
-nothing leaves the machine unless you enable the optional Nebius reranker.
+Two things make it worth running.
+
+**Security.** Every skill added to JIT is scanned by
+[NVIDIA SkillSpector](https://github.com/NVIDIA/skillspector) before it is
+indexed — from the marketplace, the dashboard, or `JIT_ADD`. A skill SkillSpector
+scores `DO_NOT_INSTALL` is refused; a `CAUTION` needs an explicit
+acknowledgement. JIT does not implement security checks of its own: SkillSpector
+is the authority, and its patterns, LLM pass, and 0–100 risk score are what you
+get.
+
+**Context.** At task time the agent calls
+`JIT_FIND("create a Linear issue for the login bug")` and gets the single best
+skill, or — when nothing clears the confidence threshold — `{"found": false}`
+plus a short `near_misses` list instead of a silent empty result. You carry one
+body, not a catalog. The whole shipped MCP surface is two tools, measured at
+about 400 tokens of standing context.
+
+JIT stays quiet until it is called. MCP is pull-based, so JIT is built to be
+*invoked*, not to push: a small tool surface, sharp descriptions, and no
+background work in the agent's loop.
+
+During retrieval, nothing leaves the machine unless you enable the optional
+Nebius reranker.
 
 Recall is the part of a retriever that is easiest to claim and hardest to prove,
 so JIT ships a harness for it: `npm run eval` measures recall@1, recall@3, MRR,
@@ -18,7 +36,7 @@ instead of silent.
 The dashboard is the primary interface. Every index number in it is computed
 from the actual index: real body lengths, real entry counts, real cosine
 scores. Nothing about your data is hardcoded. The one fixed figure — the
-context cost of JIT's own four MCP tool schemas — is measured from the live
+context cost of JIT's own MCP tool schemas — is measured from the live
 `tools/list` payload at runtime, not written down by hand.
 
 ## Quick start
@@ -47,6 +65,43 @@ npm run dev
 
 The production build is a single self-contained `static/dashboard.html` served
 by the Node process. There is no CDN, telemetry, or runtime frontend build.
+
+## The scanner
+
+JIT's security answer *is* [SkillSpector](https://github.com/NVIDIA/skillspector),
+NVIDIA's scanner for agent skills. JIT runs it the way it is normally used —
+`skillspector scan <target> --format json`, with the LLM pass on when a provider
+is configured and degraded to a static scan when it is not — and maps its
+recommendation onto the install gate:
+
+| SkillSpector says | JIT does |
+|---|---|
+| `SAFE` | installs |
+| `CAUTION` | refuses unless the caller acknowledges |
+| `DO_NOT_INSTALL` | refuses; only an explicit `force` overrides |
+
+There are no findings without SkillSpector. If the scanner cannot run, JIT does
+not guess and does not silently pass: it asks for an explicit acknowledgement and
+tells you how to install the scanner.
+
+Install it once; JIT finds it:
+
+```bash
+uv tool install git+https://github.com/NVIDIA/skillspector.git
+```
+
+Resolution order, first one that works wins:
+
+1. `JIT_SKILLSPECTOR` — a command line you provide.
+2. `skillspector` on `PATH`.
+3. `uvx --from git+https://github.com/NVIDIA/skillspector.git skillspector`, if
+   `uvx` is available (SkillSpector needs Python ≥3.12,<3.15; `uvx` provisions
+   its own).
+
+If a dependency has to compile and the build tools are missing, the install
+fails — on Windows `yara-python` is the usual culprit. SkillSpector's own README
+covers the requirements; JIT will keep asking for an acknowledgement until the
+scanner is reachable, and says so rather than guessing.
 
 ## Connect your agent
 
@@ -81,14 +136,19 @@ For OpenCode:
 If you ran `npm link` in the repo, `"command": "jit"` and
 `"args": ["serve"]` also work.
 
-Restart the client. The agent now sees four tools:
+Restart the client. The agent now sees two tools:
 
 | Tool | What it does |
 |---|---|
-| `JIT_FIND(intent)` | Search skills and MCP tools. Returns the best match, or `{"found": false}` with `near_misses`. |
-| `JIT_ADD(source)` | Add a skill file, folder, URL, inline markdown, or an installed JIT MCP server. |
-| `JIT_CALL(tool_id, arguments)` | Execute an indexed MCP tool through its server. Arguments are validated against the stored schema first. |
-| `JIT_STATUS()` | Index counts, connected servers, and retrieval settings. |
+| `JIT_FIND(intent)` | Load the one skill that fits a concrete multi-step task. Returns the skill body, or `{"found": false}` with `near_misses`. |
+| `JIT_ADD(source, acknowledge?, force?)` | Add a skill — a path, a SKILL.md URL, inline markdown, or an installed JIT MCP server. Scanned by SkillSpector first. |
+
+That is the whole surface. `JIT_CALL` and `JIT_STATUS` exist in the code but are
+**not advertised** while JIT is skill-first: every tool name, description, and
+schema sits in the agent's context for the entire session, and the cheapest
+token is the one never sent. Restoring them is one line in
+`src/mcp-server.ts` (`SHIPPED_TOOLS`), which is also where the trade-off is
+documented.
 
 ### Triggering JIT
 
@@ -120,13 +180,13 @@ cheaper and more predictable.
 Being honest about the boundary is part of being production-ready.
 
 - **Small indexes are a net cost.** JIT adds a fixed per-task cost: the schema of
-  its four tools (measured, ~630 tokens) plus one retrieved body. The alternative
-  keeps the whole catalog — every name and description — in context plus the one
-  body a task loads. The Overview page shows the **break-even count** where the
-  two cross: the point at which the catalog outgrows JIT's fixed tool schema.
-  Below roughly a dozen entries, listing your skills is cheaper and simpler, and
-  JIT says so on the page rather than pretending otherwise. JIT earns its place
-  when you have many skills, many MCP servers, or both.
+  its two shipped tools (measured, ~400 tokens) plus one retrieved body. The
+  alternative keeps the whole catalog — every name and description — in context
+  plus the one body a task loads. The Overview page shows the **break-even
+  count** where the two cross: the point at which the catalog outgrows JIT's
+  fixed tool schema. Below a handful of entries, listing your skills is cheaper
+  and simpler, and JIT says so on the page rather than pretending otherwise. JIT
+  earns its place when you have many skills, many MCP servers, or both.
 - **Attention is still the agent's job.** An MCP server cannot push context; the
   agent has to call `JIT_FIND`. The tool descriptions plus a one-line client
   instruction (above) are the lever. If a client ever offers a retrieval hook,
@@ -137,12 +197,12 @@ Being honest about the boundary is part of being production-ready.
   run in an air-gapped environment, or keep your catalog on your machine. JIT
   indexes skills and MCP tools together, from paths owned by Claude, Cursor,
   OpenCode, and plain files, with no network dependency once the model is cached.
-- **JIT is not a transparent passthrough.** `JIT_CALL` forwards a tool call and
-  validates arguments against the stored schema, because the client's own
-  validation does not apply to a forwarded call. It is not a pass-through for
-  resources, prompts, or notifications — connect those servers directly if you
-  need them. JIT is a retrieval index for skills and tools, and does that one
-  thing.
+- **JIT is not a transparent passthrough.** `JIT_CALL` (kept in the code, not
+  shipped by default) forwards a tool call and validates arguments against the
+  stored schema, because the client's own validation does not apply to a
+  forwarded call. It is not a pass-through for resources, prompts, or
+  notifications — connect those servers directly if you need them. JIT is a
+  retrieval index for skills and tools, and does that one thing.
 
 ## The dashboard
 
@@ -256,6 +316,11 @@ the file and are never written back.
 | `JIT_SKILLS_CLI` | Command that resolves repository sources | `npx --yes skills@1.7.4` |
 | `JIT_SKILLS_CLI_VERSION` | Version of the skills CLI to run | `1.7.4` |
 | `JIT_SKILLS_SH_URL` | Base URL of the skills.sh directory API | `https://www.skills.sh` |
+| `JIT_SKILLSPECTOR` | Command line for the SkillSpector scanner | auto-detected |
+| `JIT_SKILLSPECTOR_ARGS` | Extra arguments appended to `scan` | unset |
+| `JIT_SKILLSPECTOR_TIMEOUT` | Per-scan timeout in milliseconds | `300000` |
+| `JIT_SKILLSPECTOR_OFF` | Disable SkillSpector entirely (`1`) | unset |
+| `JIT_SECURITY_GATE` | `block` (default), `warn` (never hard-block), or `off` | `block` |
 | `JIT_MAX_REQUEST_BYTES` | Dashboard API body limit | `16777216` |
 | `JIT_MAX_SKILL_BYTES` | Skill file limit | `2097152` |
 | `JIT_LOG_LEVEL` | `DEBUG`, `INFO`, `WARN`, `ERROR` | `INFO` |
@@ -315,13 +380,15 @@ servers from client configs at startup. On the MCP page you can:
 - **Add** a stdio or streamable HTTP/SSE server manually.
 
 Indexed tools are embedded alongside skills, so one `JIT_FIND` searches both.
-`JIT_CALL` proxies execution to the owning server.
+`JIT_CALL` — kept in the code, not shipped by default — forwards execution to the
+owning server, with arguments validated against the stored schema first.
 
 ## Marketplace
 
 Installing a skill injects its text into an agent's context, and installing an
 MCP server runs a process — both are trust decisions, so they are treated as
-such.
+such. A skill is scanned by SkillSpector before JIT will index it, and the
+marketplace shows the verdict in the install dialog rather than burying it.
 
 JIT ships **no catalog of its own**, but it does read the public
 [skills.sh](https://skills.sh) directory, so a fresh install opens on a browser
@@ -360,13 +427,16 @@ Supply-chain guardrails:
   carry a `sha256` in the catalog, because an unpinned body can change between
   review and install. Repository skills carry the content hash the `skills` CLI
   reports, which is compared again at install to flag a change under you.
-- **Every entry is scanned before install.** The scanner looks for prompt
-  injection ("ignore previous instructions"), credential-store access
-  (`~/.ssh`, `.aws/credentials`), exfiltration (`curl … | sh`), and for MCP
-  entries, download-and-run commands. Findings are shown in the install dialog.
-  Anything rated high or medium requires an explicit acknowledgement, and the
-  server enforces that too — an unacknowledged install is rejected, not just
-  discouraged.
+- **Every skill is scanned by SkillSpector before it is indexed.** This applies
+  wherever a skill enters JIT — marketplace install, transfer, dashboard add, or
+  `JIT_ADD`. A `DO_NOT_INSTALL` verdict blocks the install and only an explicit
+  `force` overrides it; a `CAUTION` verdict requires an acknowledgement. The
+  server enforces the gate, so an unacknowledged install is rejected, not just
+  discouraged, and the dashboard shows the findings behind the verdict.
+- **MCP servers are checked for shell tricks.** SkillSpector scans skills, and a
+  local server command is not a skill, so JIT inspects the command and arguments
+  for download-and-run patterns (`curl … | sh`) and flags them. Starting a
+  process still requires the dashboard's explicit confirmation.
 - **Provenance is kept.** Skills installed from a catalog are recorded with their
   origin and reported as `trust: "third-party"` by `JIT_FIND`; tools are always
   third-party. Locally indexed files are first-party.
