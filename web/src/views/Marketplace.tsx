@@ -30,6 +30,26 @@ type Filter = "all" | "skill" | "mcp";
 type TopView = "all-time" | "trending";
 type Section = "catalog" | "discover";
 
+// A batch stays bounded on purpose: every entry is reviewed and then installed
+// one at a time through the `skills` CLI, so even a few dozen is a long run.
+const MAX_BULK = 25;
+
+/**
+ * The directory can list the same skill id twice — two repositories can ship a
+ * skill of the same name, and JIT keys an install by that name — so a selection
+ * is built from one row per id.
+ */
+function unique(items: MarketplaceItem[]): MarketplaceItem[] {
+  const seen = new Set<string>();
+  const out: MarketplaceItem[] = [];
+  for (const item of items) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    out.push(item);
+  }
+  return out;
+}
+
 export function Marketplace() {
   const ctx = useJit();
   const [section, setSection] = useState<Section>("catalog");
@@ -107,11 +127,11 @@ export function Marketplace() {
   // Manage instead, and a directory entry takes no configuration, so a whole
   // selection can be installed from one button.
   const searchable = useMemo(
-    () => (found?.items || []).filter((item) => !item.installed),
+    () => unique((found?.items || []).filter((item) => !item.installed)),
     [found],
   );
   const ranked = useMemo(
-    () => (top?.items || []).filter((item) => !item.installed),
+    () => unique((top?.items || []).filter((item) => !item.installed)),
     [top],
   );
   const foundSel = useSelection(searchable.map((item) => item.id));
@@ -124,6 +144,10 @@ export function Marketplace() {
       if (!selection.has(item.id) || seen.has(item.id)) continue;
       seen.add(item.id);
       chosen.push(item);
+    }
+    if (chosen.length > MAX_BULK) {
+      ctx.toast(`Install at most ${MAX_BULK} at a time.`, "error");
+      return;
     }
     if (chosen.length) ctx.openMarketBulk(chosen);
   };
@@ -392,32 +416,12 @@ export function Marketplace() {
                 found.items.length ? (
                   <>
                     {searchable.length ? (
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <label className="flex cursor-pointer items-center gap-2 text-xs text-ink-2">
-                          <SelectAll
-                            selection={foundSel}
-                            label="Select every search result"
-                          />
-                          Select all
-                          <span className="num text-ink-3">
-                            {fmt(searchable.length)} to install
-                          </span>
-                        </label>
-                        {foundSel.count ? (
-                          <SelectionBar
-                            count={foundSel.count}
-                            onClear={foundSel.clear}
-                          >
-                            <Button
-                              size="sm"
-                              variant="accent"
-                              onClick={() => openBulk(foundSel, searchable)}
-                            >
-                              Install
-                            </Button>
-                          </SelectionBar>
-                        ) : null}
-                      </div>
+                      <DiscoveryBar
+                        selection={foundSel}
+                        items={searchable}
+                        label="Select every search result"
+                        onInstall={openBulk}
+                      />
                     ) : null}
                     <div className="divide-y divide-line/60 overflow-hidden rounded-xl border border-line">
                       {found.items.map((item) => (
@@ -463,32 +467,13 @@ export function Marketplace() {
             </div>
 
             {ranked.length ? (
-              <div className="flex flex-wrap items-center justify-between gap-3 bg-inset/30 px-5 py-2">
-                <label className="flex cursor-pointer items-center gap-2 text-xs text-ink-2">
-                  <SelectAll
-                    selection={topSel}
-                    label="Select every listed skill"
-                  />
-                  Select all
-                  <span className="num text-ink-3">
-                    {fmt(ranked.length)} to install
-                  </span>
-                </label>
-                {topSel.count ? (
-                  <SelectionBar count={topSel.count} onClear={topSel.clear}>
-                    <Button
-                      size="sm"
-                      variant="accent"
-                      onClick={() => openBulk(topSel, ranked)}
-                    >
-                      Install
-                    </Button>
-                  </SelectionBar>
-                ) : (
-                  <span className="hidden text-xs text-ink-3 sm:block">
-                    Tick entries to install them together
-                  </span>
-                )}
+              <div className="bg-inset/30 px-5 py-2">
+                <DiscoveryBar
+                  selection={topSel}
+                  items={ranked}
+                  label="Select every listed skill"
+                  onInstall={openBulk}
+                />
               </div>
             ) : null}
 
@@ -539,6 +524,68 @@ export function Marketplace() {
           </Panel>
         </TabPanel>
       </Tabs>
+    </div>
+  );
+}
+
+/**
+ * The selection strip above a list of directory entries. A list longer than the
+ * batch cap cannot be taken whole — each entry is installed one at a time — so
+ * the shortcut becomes "Select top N" rather than a button that cannot run.
+ */
+function DiscoveryBar({
+  selection,
+  items,
+  label,
+  onInstall,
+}: {
+  selection: Selection;
+  items: MarketplaceItem[];
+  label: string;
+  onInstall: (selection: Selection, items: MarketplaceItem[]) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center gap-3 text-xs text-ink-2">
+        {items.length > MAX_BULK ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() =>
+              selection.select(items.slice(0, MAX_BULK).map((item) => item.id))
+            }
+          >
+            Select top {MAX_BULK}
+          </Button>
+        ) : (
+          <label className="flex cursor-pointer items-center gap-2">
+            <SelectAll selection={selection} label={label} />
+            Select all
+          </label>
+        )}
+        <span className="num text-ink-3">{fmt(items.length)} to install</span>
+      </div>
+      {selection.count ? (
+        <SelectionBar count={selection.count} onClear={selection.clear}>
+          {selection.count > MAX_BULK ? (
+            <span className="text-[11px] text-warn">
+              install at most {MAX_BULK} at a time
+            </span>
+          ) : (
+            <Button
+              size="sm"
+              variant="accent"
+              onClick={() => onInstall(selection, items)}
+            >
+              Install
+            </Button>
+          )}
+        </SelectionBar>
+      ) : (
+        <span className="hidden text-xs text-ink-3 sm:block">
+          Tick entries to install them together
+        </span>
+      )}
     </div>
   );
 }

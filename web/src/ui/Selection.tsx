@@ -10,6 +10,8 @@ export interface Selection {
   has: (key: string) => boolean;
   toggle: (key: string, on?: boolean) => void;
   toggleAll: (on?: boolean) => void;
+  /** Replace the selection with exactly these keys. */
+  select: (keys: string[]) => void;
   clear: () => void;
   /** Every available key is selected (and there is at least one). */
   all: boolean;
@@ -53,6 +55,7 @@ export function useSelection(keys: string[]): Selection {
     toggle,
     toggleAll: (on) =>
       setPicked(on ?? picked.size !== keys.length ? new Set(keys) : new Set()),
+    select: (next) => setPicked(new Set(next)),
     clear: () => setPicked(new Set()),
     all: keys.length > 0 && picked.size === keys.length,
     some: picked.size > 0 && picked.size < keys.length,

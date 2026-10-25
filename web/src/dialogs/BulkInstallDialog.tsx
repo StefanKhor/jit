@@ -101,10 +101,14 @@ export function BulkInstallDialog({
   const [reviewed, setReviewed] = useState(0);
   const [ack, setAck] = useState(false);
   const [progress, setProgress] = useState(0);
+  // The size of the run, frozen when it starts: the rows move out of `ready` as
+  // they finish, so the live target list cannot be used to report on it.
+  const [planned, setPlanned] = useState(0);
 
   useEffect(() => {
     if (!items || items.length === 0) return;
     let cancelled = false;
+    let done = 0;
     setPhase("review");
     setReviewed(0);
     setAck(false);
@@ -120,19 +124,27 @@ export function BulkInstallDialog({
     );
 
     void mapLimit(items, 4, async (item) => {
+      let outcome: {
+        item: MarketplaceItem;
+        result: InspectResult | null;
+        error: string;
+      };
       try {
         const result = await ctx.api<InspectResult>("/api/marketplace/inspect", {
           method: "POST",
           body: JSON.stringify({ id: item.id, ...sourceHint(item) }),
         });
-        return { item, result, error: "" };
+        outcome = { item, result, error: "" };
       } catch (error) {
-        return {
+        outcome = {
           item,
           result: null,
           error: error instanceof Error ? error.message : String(error),
         };
       }
+      done += 1;
+      if (!cancelled) setReviewed(done);
+      return outcome;
     }).then((outcomes) => {
       if (cancelled) return;
       setRows(
@@ -192,6 +204,7 @@ export function BulkInstallDialog({
     if (installing || targets.length === 0) return;
     setPhase("install");
     setProgress(0);
+    setPlanned(targets.length);
     let ok = 0;
     let failed = 0;
     const mark = (id: string, state: RowState, detail = "") =>
@@ -254,7 +267,7 @@ export function BulkInstallDialog({
         onClose={installing ? () => {} : onClose}
       >
         {phase === "done"
-          ? `Installed ${fmt(progress)} of ${fmt(targets.length)}${
+          ? `Installed ${fmt(progress)} of ${fmt(planned)}${
               skipped ? ` · ${fmt(skipped)} left alone` : ""
             }.`
           : reviewing
@@ -331,8 +344,10 @@ export function BulkInstallDialog({
             disabled={installing || reviewing || targets.length === 0}
           >
             {installing
-              ? `Installing ${fmt(progress)} of ${fmt(targets.length)}…`
-              : `Install ${fmt(targets.length)}`}
+              ? `Installing ${fmt(progress)} of ${fmt(planned)}…`
+              : reviewing
+                ? "Install"
+                : `Install ${fmt(targets.length)}`}
           </Button>
         ) : null}
       </DialogFoot>
