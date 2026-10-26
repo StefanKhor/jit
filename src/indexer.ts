@@ -277,20 +277,41 @@ export async function indexItems(
       current: { content_hash: string; embedding: Float32Array | null } | undefined;
     }> = [];
 
+    // One id, one row. Two scan roots can hold the same skill id, and without
+    // this both copies are embedded and written in the same pass, so the row
+    // that survives flips between them on every reindex: the indexed body and
+    // vector for that id then depend on when the scan last ran.
+    //
+    // The last occurrence in the order given wins. That is deterministic but
+    // arbitrary — a scan reaches skills sorted by path, so the rule is really
+    // "the lexically last path" — which is why the clash is reported instead of
+    // resolved quietly: it is for the user to say which copy should stand.
+    const unique = new Map<string, IndexItem>();
     for (const raw of items) {
-      const item: IndexItem = {
-        ...raw,
-        body: raw.body || "",
-        path: raw.path || "",
-      };
-      const id = String(item.id || item.name || "").trim();
+      const id = String(raw.id || raw.name || "").trim();
       if (!id) {
         errors.push("item without id/name skipped");
         continue;
       }
-      item.id = id;
+      const previous = unique.get(id);
+      if (previous) {
+        errors.push(
+          `duplicate skill id "${id}": ${previous.path || "(no path)"} and ${
+            raw.path || "(no path)"
+          }`,
+        );
+      }
+      unique.set(id, {
+        ...raw,
+        id,
+        body: raw.body || "",
+        path: raw.path || "",
+      });
+    }
+
+    for (const item of unique.values()) {
       const digest = contentHash(item);
-      const current = existing.get(id);
+      const current = existing.get(item.id);
       if (
         !modelChanged &&
         current &&
