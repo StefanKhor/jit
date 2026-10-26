@@ -6,7 +6,7 @@ import type { BulkResult } from "../types";
 import { Badge, StatusDot } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { cx } from "../ui/cx";
-import { Empty } from "../ui/Display";
+import { Empty, Stat } from "../ui/Display";
 import { Checkbox, Input } from "../ui/Field";
 import { PageHead, Panel, PanelBody, PanelHead } from "../ui/Panel";
 import { SelectAll, SelectionBar, useSelection } from "../ui/Selection";
@@ -156,6 +156,25 @@ export function Skills() {
           <Button onClick={() => ctx.openTransfer("in")}>Transfer</Button>
         }
       />
+
+      {ctx.skillSources ? (
+        <div className="flex flex-wrap items-center gap-x-8 gap-y-2 rounded-xl border border-line bg-inset/50 px-5 py-3.5">
+          <Stat
+            label="Local"
+            value={fmt(ctx.skillSources.local)}
+            hint="in your own folders"
+          />
+          <Stat
+            label="JIT"
+            value={fmt(ctx.skillSources.jit)}
+            hint="in JIT's store"
+          />
+          <p className="max-w-md text-xs leading-relaxed text-ink-3">
+            Counted where the files are found, so a skill that lives in both
+            places appears in both numbers.
+          </p>
+        </div>
+      ) : null}
 
       <Panel>
         <PanelHead

@@ -16,6 +16,7 @@ import type {
   PublicConfig,
   SkillDetail,
   SkillListItem,
+  SkillSources,
   Stats,
   ToastKind,
   ToastMessage,
@@ -64,6 +65,7 @@ export interface AppContextValue {
 
   /* index contents */
   skills: SkillListItem[];
+  skillSources: SkillSources | null;
   mcpServers: McpServerSummary[];
   loadSkills: () => Promise<SkillListItem[]>;
   loadMcp: () => Promise<McpServerSummary[]>;
@@ -114,6 +116,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [config, setConfig] = useState<PublicConfig | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [skills, setSkills] = useState<SkillListItem[]>([]);
+  const [skillSources, setSkillSources] = useState<SkillSources | null>(null);
   const [mcpServers, setMcpServers] = useState<McpServerSummary[]>([]);
   const [view, setViewState] = useState<View>("overview");
   const [toastMessage, setToastMessage] = useState<ToastMessage | null>(null);
@@ -173,8 +176,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const loadSkills = useCallback(async (): Promise<SkillListItem[]> => {
     try {
-      const data = await api<{ skills: SkillListItem[] }>("/api/skills");
+      const data = await api<{ skills: SkillListItem[]; sources?: SkillSources }>(
+        "/api/skills",
+      );
       setSkills(data.skills || []);
+      setSkillSources(data.sources ?? null);
       return data.skills || [];
     } catch (error) {
       reportError(error);
@@ -354,6 +360,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setConfig,
     loadConfig,
     skills,
+    skillSources,
     mcpServers,
     loadSkills,
     loadMcp,

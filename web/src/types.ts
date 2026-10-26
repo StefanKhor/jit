@@ -79,6 +79,15 @@ export interface SkillListItem {
   managed: boolean;
 }
 
+/**
+ * Where skills live on disk. Counted independently, so a skill that sits in a
+ * local folder and in JIT's store appears in both numbers.
+ */
+export interface SkillSources {
+  local: number;
+  jit: number;
+}
+
 export interface SkillDetail {
   id: string;
   name: string;

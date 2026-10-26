@@ -22,6 +22,7 @@ import {
 import {
   clearIndex,
   deleteItem,
+  discoverSkills,
   getItem,
   getStats,
   indexItems,
@@ -68,6 +69,21 @@ function safeEqual(a: string, b: string): boolean {
 function inside(parent: string, child: string): boolean {
   const relative = path.relative(parent, child);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+/**
+ * How skills split between the user's own folders and JIT's store. Both numbers
+ * come from the same scan the indexer uses, so they describe what is actually
+ * on disk; a skill present in both places is counted in both.
+ */
+function countSources(jitRoot: string): { local: number; jit: number } {
+  let local = 0;
+  let jit = 0;
+  for (const file of discoverSkills()) {
+    if (inside(jitRoot, path.resolve(file))) jit += 1;
+    else local += 1;
+  }
+  return { local, jit };
 }
 
 function isSecureApiBase(value: string): boolean {
@@ -361,6 +377,11 @@ export function createApp(): Hono {
         ...item,
         managed: inside(root, path.resolve(item.path || "")),
       })),
+      // Where skills live, counted from disk rather than from the index: the
+      // index holds one row per id, so a skill that sits in a local folder and
+      // in JIT's store has already lost one of those places by the time it is
+      // read. Counting the scan instead lets both places be reported.
+      sources: countSources(root),
     });
   });
 
