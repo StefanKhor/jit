@@ -9,11 +9,15 @@ import { logger } from "./logger.js";
 import { warmupEmbeddingModel } from "./embedding.js";
 import { evaluate } from "./retrieval/retriever.js";
 
+// The rule that gets the agent to call JIT. It is deliberately a recurring
+// condition, not a one-time "start of task" cue: a trigger the agent meets once
+// decays as the session grows, while one it re-meets on every domain shift keeps
+// firing. Keep it short — a long block is diluted the further back it sits.
 const INSTRUCTIONS = `JIT is a just-in-time skill index: it loads the one skill you need, when you need it, instead of keeping every skill in context.
 
-At the start of every new task — not just the first of the session — call JIT_FIND before working. A hit hands you a tested procedure for that exact kind of work; improvising a multi-step workflow is slower and more error-prone. Skip it only for quick actions you can do directly — a single edit, a lookup, a short answer — or when a skill for this exact kind of work is already in context. The index is broader than any summary of it: a domain you do not see named may still have a skill. Checking is the default; skipping is the exception. A lookup costs seconds, while improvising a procedure that already exists is the expensive mistake — if you are unsure whether a skill exists, that uncertainty is a reason to check, not a reason to skip.
+Call JIT_FIND at the start of any multi-step task — and again whenever the work shifts to a new kind of task: a new platform, domain, or unfamiliar tool. Not only the first task of a session; the mid-session switch is the one that is easy to miss. Skip it only for a single-step action you can do directly, or a task whose skill is already in context. One cheap lookup beats improvising a procedure that already exists; if you are unsure a skill exists, that is the reason to check.
 
-Phrase the intent like a search query, not a task brief: one sentence, concrete action, platform or domain named — e.g. "automate posting a twitter thread", "deploy a node app to azure". Leave out file paths, quotes, and task details; they dilute the match. On {"found": false} with near_misses, retry once with different phrasing — sharper if the intent was vague, broader if it was over-specified — then proceed without a skill. A miss is a normal outcome, not an error. A multi-part task spans skills: a hit lists related candidates, so call again to load the next domain.`;
+Phrase the intent as a search query, not a task brief: one sentence, concrete action plus platform or domain — "deploy a node app to azure", "automate posting a twitter thread". Leave out file paths and task details; they dilute the match. Returns the skill body, or {"found": false} with near_misses; retry once with different phrasing, then proceed — a miss is normal, not an error. A hit may list related skills for multi-part work: call again to load the next one.`;
 
 function textResult(payload: unknown, isError = false) {
   return {
@@ -33,17 +37,15 @@ function createServer(): McpServer {
 
 export function findDescription(): string {
   return (
-    "Load the one skill that fits the task you are starting, so you " +
-    "carry only that body instead of improvising. Call it at the start " +
-    "of every new task — not just the first of the session. Phrase the " +
-    "intent like a search query: concrete action plus platform or " +
-    'domain, e.g. "automate posting a twitter thread". Returns the skill ' +
-    'body, or {"found": false} plus near_misses; retry once with a ' +
-    "different phrasing, then proceed without a skill. A hit may list " +
-    "related skills — for a multi-part task, call again to load the " +
-    "next domain. When unsure " +
-    "whether a skill exists, check anyway: a miss costs seconds, while " +
-    "a missed skill is the expensive mistake."
+    "Load the one skill that fits the work you are about to start. Call " +
+    "it before any multi-step task, and again whenever the work shifts " +
+    "to a new domain or an unfamiliar tool — not only the first task of " +
+    "a session. Phrase the intent as a search query: one sentence, " +
+    'concrete action plus platform or domain, e.g. "deploy a node app ' +
+    'to azure". Returns the skill body, or {"found": false} plus ' +
+    "near_misses; retry once with different phrasing, then proceed. A " +
+    "hit may list related skills — call again for the next domain. " +
+    "Cheap to call, expensive to skip."
   );
 }
 
@@ -59,6 +61,14 @@ export function registerFind(server: McpServer): void {
           .describe(
             "One-sentence search query: concrete action plus platform or domain.",
           ),
+      },
+      // Read-only, idempotent, local. Clients that gate on these hints can
+      // auto-approve the call, so no approval prompt sits between the agent and
+      // a lookup — the friction that teaches an agent to stop calling.
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
       },
     },
     async ({ intent }) => {

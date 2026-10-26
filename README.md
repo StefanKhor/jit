@@ -109,16 +109,23 @@ and skip it for trivial ones. A short client instruction removes the
 remaining ambiguity. Add this to your system prompt or `AGENTS.md`:
 
 ```text
-At the start of every new task — not just the first of the session — call
-JIT_FIND before working. Phrase the intent like a search query: one sentence,
-concrete action, platform or domain named, e.g. "automate posting a twitter
-thread". Leave out file paths and task details. Skip it for quick actions you
-can do directly, or when a skill for this exact kind of work is already in
+Before any multi-step task — and again whenever the work shifts to a new kind
+of task (a new platform, domain, or unfamiliar tool), not just the first task
+of the session — call JIT_FIND. Phrase the intent like a search query: one
+sentence, concrete action plus platform or domain, e.g. "deploy a node app to
+azure". Leave out file paths and task details. Skip it for single-step actions
+you can do directly, or when a skill for this kind of work is already in
 context. On {"found": false} with near_misses, retry once with different
-phrasing, then proceed normally. The index is broader than any summary of it —
-checking is the default, skipping is the exception: a lookup is cheap, a
-missed skill is expensive.
+phrasing, then proceed normally. A hit may list related skills — call again for
+the next domain. Checking is the default, skipping is the exception: a lookup is
+cheap, a missed skill is expensive.
 ```
+
+The rule is written as a **recurring condition**, not a one-time "start of task"
+cue: a trigger an agent meets once decays as the session grows, while one it
+re-meets on every domain shift keeps firing. `JIT_FIND` is also declared
+`readOnlyHint` and `idempotentHint`, so clients that gate tool calls on those
+hints can auto-approve it — no approval prompt between the agent and a lookup.
 
 Do not call JIT on every message. A needless retrieval adds latency and can
 inject an irrelevant skill; the agent's own judgment is the filter. If the
