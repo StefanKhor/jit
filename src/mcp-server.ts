@@ -24,6 +24,8 @@ const INSTRUCTIONS = `JIT is a just-in-time skill index: it loads the one skill 
 
 Call JIT_FIND at the start of any multi-step task — and again whenever the work shifts to a new kind of task: a new platform, domain, or unfamiliar tool. Not only the first task of a session; the mid-session switch is the one that is easy to miss. Skip it only for a single-step action you can do directly, or a task whose skill is already in context. One cheap lookup beats improvising a procedure that already exists; if you are unsure a skill exists, that is the reason to check.
 
+One intent per call. Work that spans several domains is several lookups, not one: call JIT_FIND separately for each intent, and JIT retrieves and returns that one skill. Packing multiple intents into a single query blurs the match and returns the wrong skill.
+
 Phrase the intent as a search query, not a task brief: one sentence, concrete action plus platform or domain — "deploy a node app to azure", "automate posting a twitter thread". Leave out file paths and task details; they dilute the match. Returns the skill body, or {"found": false} with near_misses; retry once with different phrasing, then proceed — a miss is normal, not an error. A hit may list related skills for multi-part work: call again to load the next one.`;
 
 function textResult(payload: unknown, isError = false) {
@@ -47,7 +49,9 @@ export function findDescription(): string {
     "Load the one skill that fits the work you are about to start. Call " +
     "it before any multi-step task, and again whenever the work shifts " +
     "to a new domain or an unfamiliar tool — not only the first task of " +
-    "a session. Phrase the intent as a search query: one sentence, " +
+    "a session. One intent per call: work spanning several domains is " +
+    "several calls, each returning that one skill. Phrase the intent as " +
+    "a search query: one sentence, " +
     'concrete action plus platform or domain, e.g. "deploy a node app ' +
     'to azure". Returns the skill body, or {"found": false} plus ' +
     "near_misses; retry once with different phrasing, then proceed. A " +
