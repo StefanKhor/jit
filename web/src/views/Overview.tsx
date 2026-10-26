@@ -1,9 +1,10 @@
+import { useId, type ReactNode } from "react";
+
 import { fmt, pct } from "../format";
 import { useJit } from "../state/store";
 import type { Stats } from "../types";
 import { Meta } from "../ui/Badge";
 import { Button } from "../ui/Button";
-import { cx } from "../ui/cx";
 import { AnimatedNumber, Empty, Ring, Spinner } from "../ui/Display";
 import { Panel, PanelBody, PanelHead } from "../ui/Panel";
 
@@ -29,6 +30,77 @@ function Hero() {
 }
 
 /**
+ * The comparison itself, drawn as one figure: the full circle is the plain
+ * catalog's footprint and JIT is the thin arc carved out of it. A 40× ratio
+ * renders as a near-empty ring — the emptiness is the argument.
+ */
+function HeroRing({
+  share,
+  lighter,
+  label,
+  children,
+}: {
+  /** JIT's share of the catalog, 0–1+ (values above 1 clamp to full). */
+  share: number;
+  lighter: boolean;
+  label: string;
+  children: ReactNode;
+}) {
+  const id = useId();
+  const SIZE = 288;
+  const THICKNESS = 11;
+  const radius = 50 - THICKNESS / 2;
+  const circumference = 2 * Math.PI * radius;
+  const filled = circumference * Math.max(0, Math.min(1, share));
+
+  return (
+    <div className="relative shrink-0" style={{ width: SIZE, height: SIZE }}>
+      <svg
+        viewBox="0 0 100 100"
+        className="size-full -rotate-90"
+        role="img"
+        aria-label={label}
+      >
+        <defs>
+          <linearGradient id={id} x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="var(--color-accent-2)" />
+            <stop offset="100%" stopColor="var(--color-accent)" />
+          </linearGradient>
+        </defs>
+        <circle
+          cx="50"
+          cy="50"
+          r={radius}
+          fill="none"
+          stroke="var(--color-info)"
+          strokeOpacity={0.4}
+          strokeWidth={THICKNESS}
+        />
+        <circle
+          cx="50"
+          cy="50"
+          r={radius}
+          fill="none"
+          stroke={lighter ? `url(#${id})` : "var(--color-warn)"}
+          strokeWidth={THICKNESS}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={circumference - filled}
+          style={{
+            ["--draw-from" as string]: `${circumference}`,
+            ["--draw-to" as string]: `${circumference - filled}`,
+          }}
+          className="motion-safe:animate-draw"
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/**
  * The headline band: the one number the product is arguing for, at the scale it
  * deserves, next to the two quantities it is the ratio of.
  *
@@ -49,30 +121,7 @@ function Savings({ stats }: { stats: Stats }) {
   const lighter = multiple >= 1;
   const overhead = Math.max(0, jit - catalog);
   const share = catalog > 0 ? Math.min(1, jit / catalog) : 0;
-  // The ring shows the share of the resting context that JIT takes out.
-  const reclaimed = lighter ? 1 - share : share;
   const headline = lighter ? multiple : multiple ? 1 / multiple : 0;
-
-  const rows = [
-    {
-      key: "catalog",
-      label: "Plain skills",
-      note: "every name + description",
-      value: catalog,
-      width: 100,
-      bar: "bg-gradient-to-r from-info/70 to-info",
-      min: 0,
-    },
-    {
-      key: "jit",
-      label: "JIT",
-      note: "one fixed tool schema",
-      value: jit,
-      width: pct(jit, catalog || 1),
-      bar: "bg-gradient-to-r from-accent-2 via-accent to-accent",
-      min: 4,
-    },
-  ];
 
   return (
     <Panel className="motion-safe:animate-rise">
@@ -89,12 +138,10 @@ function Savings({ stats }: { stats: Stats }) {
       />
 
       <PanelBody className="relative flex flex-col gap-9 py-8 lg:flex-row lg:items-center lg:gap-14 lg:py-11">
-        <div className="flex shrink-0 justify-center lg:justify-start">
-          <Ring
-            value={reclaimed}
-            size={288}
-            thickness={10}
-            tone={lighter ? "accent" : "warn"}
+        <div className="flex shrink-0 flex-col items-center gap-6">
+          <HeroRing
+            share={share}
+            lighter={lighter}
             label={
               lighter
                 ? `JIT uses ${Math.round(share * 1000) / 10}% of the tokens a plain catalog would`
@@ -114,7 +161,25 @@ function Savings({ stats }: { stats: Stats }) {
             <span className="kicker mt-2 !text-accent/70">
               {lighter ? "smaller" : "larger"}
             </span>
-          </Ring>
+          </HeroRing>
+          <div className="flex items-center gap-5">
+            <span className="flex items-center gap-2 text-xs text-ink-2">
+              <span
+                aria-hidden="true"
+                className="size-2 rounded-full bg-info"
+              />
+              Plain skills
+              <span className="num text-ink">{fmt(catalog)}</span>
+            </span>
+            <span className="flex items-center gap-2 text-xs text-ink-2">
+              <span
+                aria-hidden="true"
+                className="size-2 rounded-full bg-accent"
+              />
+              JIT
+              <span className="num text-ink">{fmt(jit)}</span>
+            </span>
+          </div>
         </div>
 
         <div className="min-w-0 flex-1">
@@ -128,34 +193,6 @@ function Savings({ stats }: { stats: Stats }) {
             {total === 1 ? "entry" : "entries"} holds{" "}
             <span className="num text-ink">{fmt(catalog)}</span>.
           </p>
-
-          <div className="mt-7 space-y-5">
-            {rows.map((row) => (
-              <div key={row.key}>
-                <div className="flex items-baseline justify-between gap-4">
-                  <span className="flex min-w-0 items-baseline gap-2">
-                    <span className="text-sm text-ink">{row.label}</span>
-                    <span className="hidden truncate text-xs text-ink-3 sm:inline">
-                      {row.note}
-                    </span>
-                  </span>
-                  <span className="num shrink-0 text-sm text-ink">
-                    {fmt(row.value)}
-                    <span className="ml-1 text-[11px] text-ink-3">tok</span>
-                  </span>
-                </div>
-                <div className="mt-2.5 h-2.5 overflow-hidden rounded-full bg-line/70">
-                  <div
-                    className={cx("h-full rounded-full", row.bar)}
-                    style={{
-                      width: `${row.width}%`,
-                      minWidth: row.min ? `${row.min}px` : undefined,
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
 
           <p className="mt-7 border-t border-line pt-5 text-sm leading-relaxed">
             {lighter ? (

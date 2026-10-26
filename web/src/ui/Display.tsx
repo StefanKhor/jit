@@ -19,13 +19,7 @@ const ASCII_LOGO_STYLE =
   "absolute inset-0 m-0 select-none whitespace-pre font-mono text-[0.56em] leading-[1.05]";
 
 /** JIT's compact block-letter ASCII logo. */
-export function Wordmark({
-  className,
-  dot = true,
-}: {
-  className?: string;
-  dot?: boolean;
-}) {
+export function Wordmark({ className }: { className?: string }) {
   return (
     <span
       role="img"
@@ -46,9 +40,6 @@ export function Wordmark({
           {JIT_ASCII}
         </pre>
       </span>
-      {dot ? (
-        <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-accent" />
-      ) : null}
     </span>
   );
 }
