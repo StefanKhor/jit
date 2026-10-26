@@ -64,7 +64,7 @@ export function Search() {
       <PageHead
         kicker="05 — Retrieval"
         title="Ask the index."
-        description="Describe a task in plain language. JIT returns the single best entry, or nothing at all — never a guess — with a quiet table of what it weighed."
+        description="Describe a task in plain language. JIT returns the entry that fits — or several when more than one does — and nothing at all rather than a guess, with a quiet table of what it weighed."
       />
 
       <Panel>
@@ -84,7 +84,8 @@ export function Search() {
           />
           <p className="text-xs leading-relaxed text-ink-3">
             Below this, JIT returns nothing rather than guessing. Lower it for
-            recall, raise it for precision.
+            recall, raise it for precision. A configured reranker makes this
+            decision itself, so the threshold no longer applies.
           </p>
         </PanelBody>
       </Panel>
@@ -120,8 +121,8 @@ export function Search() {
       ) : !data ? (
         <Panel className="border-dashed bg-panel/60">
           <Empty title="Nothing asked yet.">
-            Describe a task in plain language. JIT returns the best entry, or
-            nothing with a short list of what was close.
+            Describe a task in plain language. JIT returns the entry that fits,
+            or nothing with a short list of what was close.
           </Empty>
         </Panel>
       ) : data.warning ? (
@@ -148,7 +149,7 @@ export function Search() {
 
 function SearchOutput({ data }: { data: SearchResponse }) {
   const candidates = data.candidates || [];
-  const result = data.result;
+  const results = data.results || [];
   const nearMisses = data.near_misses || [];
   const tick = Math.min(100, Math.max(0, Number(data.threshold || 0) * 100));
   const threshold = Number(data.threshold || 0);
@@ -172,62 +173,85 @@ function SearchOutput({ data }: { data: SearchResponse }) {
         <span>{mode}</span>
       </div>
 
-      {result ? (
-        <Panel className="border-line-2">
-          <PanelHead
-            title="Best match"
-            hint={mode}
-          />
-          <PanelBody className="space-y-6">
-            <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
-              <div className="min-w-0">
-                <h2
-                  className="display truncate text-2xl text-ink md:text-3xl"
-                  title={result.name}
-                >
-                  {result.name}
-                </h2>
-                <Meta className="mt-2.5">{result.id}</Meta>
-              </div>
-              <Stat
-                label="Confidence"
-                value={Number(result.confidence).toFixed(2)}
-                hint={`threshold ${threshold.toFixed(2)}`}
+      {results.length > 0 ? (
+        <div className="space-y-6">
+          {results.map((result, index) => (
+            <Panel key={result.id} className="border-line-2">
+              <PanelHead
+                title={
+                  results.length > 1
+                    ? `Selected ${index + 1} of ${results.length}`
+                    : "Best match"
+                }
+                hint={mode}
               />
-            </div>
+              <PanelBody className="space-y-6">
+                <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
+                  <div className="min-w-0">
+                    <h2
+                      className="display truncate text-2xl text-ink md:text-3xl"
+                      title={result.name}
+                    >
+                      {result.name}
+                    </h2>
+                    <Meta className="mt-2.5">{result.id}</Meta>
+                  </div>
+                  {result.confidence == null ? null : (
+                    <Stat
+                      label="Confidence"
+                      value={Number(result.confidence).toFixed(2)}
+                      hint={`threshold ${threshold.toFixed(2)}`}
+                    />
+                  )}
+                </div>
 
-            <p className="max-w-3xl text-sm leading-relaxed text-ink-2">
-              {result.description}
-            </p>
+                <p className="max-w-3xl text-sm leading-relaxed text-ink-2">
+                  {result.description}
+                </p>
 
-            <div>
-              <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-line">
-                <div
-                  className="h-full rounded-full bg-accent"
-                  style={{ width: `${(Number(result.confidence) || 0) * 100}%` }}
-                />
-                <span
-                  aria-hidden="true"
-                  className="absolute top-0 h-full w-px bg-ink-2"
-                  style={{ left: `${tick}%` }}
-                />
-              </div>
-              <div className="num mt-2 flex justify-between text-[10px] text-ink-3">
-                <span>0</span>
-                <span>1</span>
-              </div>
-            </div>
+                {result.confidence == null ? null : (
+                  <div>
+                    <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-line">
+                      <div
+                        className="h-full rounded-full bg-accent"
+                        style={{
+                          width: `${(Number(result.confidence) || 0) * 100}%`,
+                        }}
+                      />
+                      <span
+                        aria-hidden="true"
+                        className="absolute top-0 h-full w-px bg-ink-2"
+                        style={{ left: `${tick}%` }}
+                      />
+                    </div>
+                    <div className="num mt-2 flex justify-between text-[10px] text-ink-3">
+                      <span>0</span>
+                      <span>1</span>
+                    </div>
+                  </div>
+                )}
 
-            <details className="border-t border-line pt-4">
-              <summary className="cursor-pointer text-xs text-ink-3">
-                Skill body
-              </summary>
-              <pre className="mt-3 max-h-96 overflow-auto rounded-lg border border-line bg-inset p-3 font-mono text-xs text-ink-2">
-                {result.content}
-              </pre>
-            </details>
-          </PanelBody>
-        </Panel>
+                {result.related?.length ? (
+                  <p className="text-xs text-ink-3">
+                    Related:{" "}
+                    <span className="text-ink-2">
+                      {result.related.join(", ")}
+                    </span>
+                  </p>
+                ) : null}
+
+                <details className="border-t border-line pt-4">
+                  <summary className="cursor-pointer text-xs text-ink-3">
+                    Skill body
+                  </summary>
+                  <pre className="mt-3 max-h-96 overflow-auto rounded-lg border border-line bg-inset p-3 font-mono text-xs text-ink-2">
+                    {result.content}
+                  </pre>
+                </details>
+              </PanelBody>
+            </Panel>
+          ))}
+        </div>
       ) : (
         <Panel>
           <PanelHead
@@ -244,9 +268,9 @@ function SearchOutput({ data }: { data: SearchResponse }) {
                 Closest entry{" "}
                 <span className="text-ink-2">{closest.name}</span> scored{" "}
                 <span className="num text-ink-2">
-                  {Number(closest.score || 0).toFixed(2)}
-                </span>
-                .
+                  {Number(closest.cosine || 0).toFixed(2)}
+                </span>{" "}
+                by cosine.
               </p>
             ) : null}
             {nearMisses.length ? (
@@ -279,7 +303,7 @@ function SearchOutput({ data }: { data: SearchResponse }) {
       <Panel>
         <PanelHead
           title="Ranked candidates"
-          hint="score · cosine · rerank"
+          hint="score · cosine · picked"
         />
         <TableWrap>
           <Table className="table-fixed">
@@ -290,8 +314,8 @@ function SearchOutput({ data }: { data: SearchResponse }) {
                 <Th className="num hidden w-20 text-right md:table-cell">
                   Cosine
                 </Th>
-                <Th className="num hidden w-20 text-right md:table-cell">
-                  Rerank
+                <Th className="hidden w-20 text-right md:table-cell">
+                  Picked
                 </Th>
                 <Th className="w-24">Threshold</Th>
               </tr>
@@ -317,10 +341,8 @@ function SearchOutput({ data }: { data: SearchResponse }) {
                   <Td className="num hidden text-right text-ink-2 md:table-cell">
                     {Number(candidate.cosine).toFixed(3)}
                   </Td>
-                  <Td className="num hidden text-right text-ink-2 md:table-cell">
-                    {candidate.rerank == null
-                      ? "—"
-                      : Number(candidate.rerank).toFixed(2)}
+                  <Td className="hidden text-right text-ink-2 md:table-cell">
+                    {candidate.picked ? "yes" : "—"}
                   </Td>
                   <Td>
                     <span className="inline-flex items-center gap-1.5 text-xs text-ink-2">

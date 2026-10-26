@@ -4,8 +4,18 @@ import { logger } from "../logger.js";
 import { isLocalEndpoint } from "../net.js";
 import type { Config, StoredItem } from "../types.js";
 
+/**
+ * How many skills one intent may be answered with. A multi-part task can
+ * genuinely need more than one, but every extra body is context the agent pays
+ * for, so the set stays small and the model is told the ceiling.
+ */
+const MAX_SELECTIONS = 3;
+
 export interface RerankOutcome {
-  scores: Map<string, number>;
+  // Candidate ids the reranker chose, most relevant first. An empty list is a
+  // verdict — "none of these fit" — and not a failure; only `error` means the
+  // reranker did not decide and the caller must fall back to cosine.
+  selected: string[];
   // Why reranking did not run, when it did not. Reranking is the decision
   // layer: whenever an endpoint is configured it always runs, and any skip
   // is reported to the caller instead of silently falling back to cosine.
@@ -17,18 +27,18 @@ export async function rerankCandidates(
   candidates: StoredItem[],
   settings: Config,
 ): Promise<RerankOutcome> {
-  const scores = new Map<string, number>();
+  const selected: string[] = [];
   const hasCredentials =
     Boolean(settings.rerank_api_key) || isLocalEndpoint(settings.rerank_api_base);
   if (!settings.rerank_api_base || !settings.rerank_model || !hasCredentials) {
     return {
-      scores,
+      selected,
       error:
         "rerank not configured — ranking by cosine only; set rerank_api_base and rerank_model",
     };
   }
   if (candidates.length === 0) {
-    return { scores, error: null };
+    return { selected, error: null };
   }
 
   try {
@@ -53,46 +63,51 @@ export async function rerankCandidates(
           content:
             `User intent: "${intent}"\n\n` +
             `Candidate entries:\n${listing}\n\n` +
-            "Score each candidate 0-3 for relevance to the intent. " +
-            "Return ONLY a JSON array of numbers, e.g. [3, 1, 0, 2]. " +
-            "No explanation.",
+            "Choose the entries that should be used for the intent. " +
+            "Return ONLY a JSON array of their numbers, most relevant " +
+            `first, at most ${MAX_SELECTIONS}. Return [] if none of them ` +
+            "fit. No explanation.",
         },
       ],
       temperature: 0,
-      max_tokens: 64,
+      max_tokens: 32,
     });
     const text = (response.choices[0]?.message?.content || "").trim();
     const start = text.indexOf("[");
     const end = text.lastIndexOf("]");
     if (start === -1 || end <= start) {
-      return { scores, error: "rerank response unparseable" };
+      return { selected, error: "rerank response unparseable" };
     }
     const parsed = JSON.parse(text.slice(start, end + 1)) as unknown;
-    if (!Array.isArray(parsed) || parsed.length !== candidates.length) {
-      return {
-        scores,
-        error: `rerank returned ${
-          Array.isArray(parsed) ? parsed.length : "no"
-        } scores for ${candidates.length} candidates`,
-      };
+    if (!Array.isArray(parsed)) {
+      return { selected, error: "rerank response unparseable" };
     }
-    candidates.forEach((candidate, index) => {
-      const value = Math.min(Math.max(Number(parsed[index]) || 0, 0), 3);
-      scores.set(candidate.id, value / 3);
-    });
+    // Numbers are 1-based positions into the listing. Anything out of range is
+    // dropped rather than trusted, and the ceiling is enforced here as well as
+    // in the prompt.
+    const chosen = new Set<string>();
+    for (const entry of parsed) {
+      const index = Number(entry);
+      const candidate = Number.isInteger(index) ? candidates[index - 1] : undefined;
+      if (!candidate || chosen.has(candidate.id)) continue;
+      chosen.add(candidate.id);
+      selected.push(candidate.id);
+      if (selected.length >= MAX_SELECTIONS) break;
+    }
     logger.info(
-      "reranked %d candidates with %s at %s",
+      "reranked %d candidates to %d selections with %s at %s",
       candidates.length,
+      selected.length,
       settings.rerank_model,
       settings.rerank_api_base,
     );
-    return { scores, error: null };
+    return { selected, error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logger.warn(
       "OpenAI-compatible rerank failed, falling back to cosine: %s",
       message,
     );
-    return { scores, error: message };
+    return { selected, error: message };
   }
 }

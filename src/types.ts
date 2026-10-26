@@ -170,8 +170,11 @@ export interface SearchCandidate {
   name: string;
   description: string;
   cosine: number;
-  rerank: number | null;
-  // The score the decision actually used: rerank when reranked, otherwise cosine.
+  // Whether the reranker chose this candidate for the agent. Always false when
+  // no reranker ran.
+  picked: boolean;
+  // The score the decision used: the cosine confidence when not reranked; 1 or
+  // 0 when a reranker decided, because that choice is categorical.
   score: number;
   passes_threshold: boolean;
 }
@@ -188,13 +191,15 @@ export interface SearchResult {
   name: string;
   description: string;
   content: string;
-  confidence: number;
+  // Absent when a reranker decided: it made a categorical choice, so there is
+  // no confidence number to report.
+  confidence?: number;
   reranked: boolean;
   related?: string[];
 }
 
 export interface SearchResponse {
-  result: SearchResult | null;
+  results: SearchResult[];
   candidates: SearchCandidate[];
   near_misses: NearMiss[];
   reranked: boolean;

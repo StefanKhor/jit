@@ -196,7 +196,10 @@ async function rank(
 }
 
 export interface Evaluation {
-  result: SearchResult | null;
+  // The skills the agent should use, most relevant first. One entry when the
+  // decision came from cosine; up to MAX_SELECTIONS when a reranker chose.
+  // Empty means nothing cleared the bar.
+  results: SearchResult[];
   candidates: SearchCandidate[];
   nearMisses: NearMiss[];
   reranked: boolean;
@@ -206,7 +209,7 @@ export interface Evaluation {
 }
 
 const EMPTY: Evaluation = {
-  result: null,
+  results: [],
   candidates: [],
   nearMisses: [],
   reranked: false,
@@ -231,104 +234,136 @@ export async function evaluate(
   // Reranking is the decision layer: whenever an endpoint is configured it
   // runs on every lookup, and any skip is reported, never silent.
   const rerankOutcome = await rerankCandidates(intent, candidates, settings);
-  const rerankScores = rerankOutcome.scores;
   const rankingWarning = rerankOutcome.error || undefined;
-  if (rerankScores.size > 0) {
-    candidates.sort(
-      (a, b) => (rerankScores.get(b.id) || 0) - (rerankScores.get(a.id) || 0),
-    );
+  // When the reranker ran, its verdict is the answer — including "none of these
+  // fit", which is a real answer, not a reason to fall back. Only a rerank that
+  // failed to decide (`error`) drops through to cosine, and it says so.
+  const reranked = rerankOutcome.error === null;
+  const selectedOrder = new Map(
+    rerankOutcome.selected.map((id, index) => [id, index]),
+  );
+
+  // A reranked verdict is categorical, so the table lists what it picked first,
+  // in its own order, then whatever is left by cosine.
+  if (reranked) {
+    candidates.sort((a, b) => {
+      const left = selectedOrder.get(a.id);
+      const right = selectedOrder.get(b.id);
+      if (left !== undefined || right !== undefined) {
+        return (left ?? Number.MAX_SAFE_INTEGER) - (right ?? Number.MAX_SAFE_INTEGER);
+      }
+      return (cosine.get(b.id) || 0) - (cosine.get(a.id) || 0);
+    });
   }
 
-  const reranked = rerankScores.size > 0;
-
-  // Trust the reranker (a real 0..1 relevance judgment) when it ran; otherwise
-  // judge the winner by how far it stands above this query's own scores, capped
-  // by the raw score it stands on. Too small an index to measure a spread, and
-  // the raw cosine stands on its own.
-  //
-  // Taking the weaker of the two is what makes one number express a two-part
-  // test: a match has to clear the threshold as a raw score *and* as a standing
-  // above the field, and `min(raw, standing) >= threshold` says exactly that.
-  // Either signal alone is fooled — a raw cosine returns the wrong skill about
-  // 40% of the time on body-wording lookups, while standing alone lets a flat
-  // index, where nothing really matches, read as a confident hit.
-  const scoreOf = (id: string): number => {
-    if (reranked) return rerankScores.get(id) || 0;
+  // How far the winner stands above this query's own scores, capped by the raw
+  // score it stands on. Taking the weaker of the two is what makes one number
+  // express a two-part test: a match has to clear the threshold as a raw score
+  // *and* as a standing above the field, and `min(raw, standing) >= threshold`
+  // says exactly that. Either signal alone is fooled — a raw cosine returns the
+  // wrong skill about 40% of the time on body-wording lookups, while standing
+  // alone lets a flat index, where nothing really matches, read as a confident
+  // hit. Only cosine needs it; a reranked choice carries its own verdict.
+  const cosineConfidence = (id: string): number => {
     const raw = cosine.get(id) || 0;
     if (!spread) return raw;
-    const standing = relativeConfidence((raw - spread.mean) / spread.sd);
-    return Math.min(raw, standing);
+    return Math.min(raw, relativeConfidence((raw - spread.mean) / spread.sd));
   };
 
   const debug: SearchCandidate[] = candidates.slice(0, topN).map((item) => {
-    const score = scoreOf(item.id);
-    const rerankScore = rerankScores.get(item.id);
+    const picked = reranked ? selectedOrder.has(item.id) : false;
+    // With a reranker the choice is categorical and there is no number to show,
+    // so the score the decision used is simply 1 or 0.
+    const score = reranked ? (picked ? 1 : 0) : cosineConfidence(item.id);
     return {
       id: item.id,
       name: item.name,
       description: item.description,
       cosine: Number((cosine.get(item.id) || 0).toFixed(4)),
-      rerank:
-        rerankScore === undefined ? null : Number(rerankScore.toFixed(4)),
+      picked,
       score: Number(score.toFixed(4)),
-      passes_threshold: score >= threshold,
+      passes_threshold: reranked ? picked : score >= threshold,
     };
   });
 
-  const nearMisses: NearMiss[] = [...debug]
-    .filter((candidate) => candidate.score > 0)
+  const results: SearchResult[] = reranked
+    ? rerankOutcome.selected
+        .map((id) => candidates.find((candidate) => candidate.id === id))
+        .filter((candidate): candidate is StoredItem => Boolean(candidate))
+        .map((candidate) => ({
+          id: candidate.id,
+          name: candidate.name,
+          description: candidate.description,
+          content: candidate.body,
+          reranked: true,
+        }))
+    : cosineResult(candidates, threshold, cosineConfidence, debug);
+
+  // What was closest, by vector distance, so a miss still shows the field it was
+  // judged against. On the cosine path that is the same score the gate used.
+  const nearMisses: NearMiss[] = [...candidates]
+    .map((item) => ({
+      item,
+      score: reranked ? cosine.get(item.id) || 0 : cosineConfidence(item.id),
+    }))
+    .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, 3)
-    .map((candidate) => ({
-      id: candidate.id,
-      name: candidate.name,
-      description: candidate.description,
-      score: candidate.score,
+    .map(({ item, score }) => ({
+      id: item.id,
+      name: item.name,
+      description: item.description,
+      score: Number(score.toFixed(4)),
     }));
 
-  const best = candidates[0];
-  if (!best) {
-    return { ...empty, candidates: debug, nearMisses, rankingWarning };
-  }
-  const confidence = scoreOf(best.id);
-  if (confidence < threshold) {
+  if (results.length === 0) {
     logger.debug(
-      "no match for %r (best=%s, confidence=%.3f, cosine=%.3f)",
+      "no match for %r (best=%s, cosine=%.3f)",
       intent,
-      best.id,
-      confidence,
-      cosine.get(best.id) || 0,
+      candidates[0]?.id ?? "(none)",
+      cosine.get(candidates[0]?.id ?? "") || 0,
     );
-    return {
-      result: null,
-      candidates: debug,
-      nearMisses,
-      reranked,
-      threshold,
-      rankingWarning,
-    };
   }
 
-  const result: SearchResult = {
-    id: best.id,
-    name: best.name,
-    description: best.description,
-    content: best.body,
-    confidence: Number(confidence.toFixed(4)),
-    reranked,
-  };
-  // Multi-skill tasks are real: hand back the runners-up as one-liners so
-  // the agent can load a second domain with another JIT_FIND call.
-  const related = relatedSkills(debug, best.id);
-  if (related.length > 0) result.related = related;
   return {
-    result,
+    results,
     candidates: debug,
     nearMisses,
     reranked,
     threshold,
     rankingWarning,
   };
+}
+
+/**
+ * The cosine-only verdict: the single best entry, if it clears the threshold on
+ * both the raw and the relative scale. Related names ride along here because
+ * without a reranker this is the only signal that more than one skill may
+ * apply; a reranked answer returns extra bodies instead and needs no hint.
+ */
+function cosineResult(
+  candidates: StoredItem[],
+  threshold: number,
+  confidenceOf: (id: string) => number,
+  debug: SearchCandidate[],
+): SearchResult[] {
+  const best = candidates[0];
+  if (!best) return [];
+  const confidence = confidenceOf(best.id);
+  if (confidence < threshold) return [];
+  const result: SearchResult = {
+    id: best.id,
+    name: best.name,
+    description: best.description,
+    content: best.body,
+    confidence: Number(confidence.toFixed(4)),
+    reranked: false,
+  };
+  // Multi-skill tasks are real: hand back the runners-up as one-liners so
+  // the agent can load a second domain with another JIT_FIND call.
+  const related = relatedSkills(debug, best.id);
+  if (related.length > 0) result.related = related;
+  return [result];
 }
 
 /**

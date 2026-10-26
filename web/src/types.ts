@@ -124,7 +124,7 @@ export interface SearchCandidate {
   name: string;
   description: string;
   cosine: number;
-  rerank: number | null;
+  picked: boolean;
   score: number;
   passes_threshold: boolean;
 }
@@ -134,13 +134,13 @@ export interface SearchResult {
   name: string;
   description: string;
   content: string;
-  confidence: number;
+  confidence?: number;
   reranked: boolean;
   related?: string[];
 }
 
 export interface SearchResponse {
-  result: SearchResult | null;
+  results: SearchResult[];
   candidates: SearchCandidate[];
   near_misses: NearMiss[];
   reranked: boolean;

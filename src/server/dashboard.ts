@@ -676,7 +676,7 @@ async function search(intent: string): Promise<Record<string, unknown>> {
   const started = performance.now();
   const evaluation = await evaluate(intent, 5);
   return {
-    result: evaluation.result,
+    results: evaluation.results,
     candidates: evaluation.candidates,
     near_misses: evaluation.nearMisses,
     reranked: evaluation.reranked,
