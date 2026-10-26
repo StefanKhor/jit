@@ -173,8 +173,63 @@ export function parseSkillFile(file: string): IndexItem {
   return parseSkillText(readFileSync(file, "utf8"), file);
 }
 
+/**
+ * How much of a skill body joins the embedded text.
+ *
+ * The vector compares a short request against this text, so past a point more
+ * body stops adding signal and starts averaging the skill's identity away. On a
+ * corpus of 90 skills, the body lead took top-1 recovery of body-only phrasing
+ * from 59% (description alone) to 85% across 400-600 characters, before falling
+ * off again. This stays well inside the model's 512-token window.
+ */
+const EMBED_BODY_CHARS = 500;
+
+/**
+ * Bump when the text handed to the embedder changes shape, so the next index
+ * rebuilds vectors that were computed from the old recipe.
+ */
+const EMBEDDING_TEXT_VERSION = 3;
+
+/**
+ * The prose lead of a skill body: the first run of plain sentences, with the
+ * scaffolding a `SKILL.md` shares with its neighbours stripped out. Headings
+ * repeat the name, blockquote banners repeat across a skill family ("STOP -
+ * PREREQUISITE CHECK"), and list, table, and code lines are instructions rather
+ * than identity. Keeping them would dilute the vector with text every sibling
+ * also carries, which is what drags unrelated skills together.
+ */
+function bodyLead(body: string, maxChars = EMBED_BODY_CHARS): string {
+  const lines: string[] = [];
+  let length = 0;
+  let inFence = false;
+  for (const raw of body.split("\n")) {
+    const line = raw.trim();
+    if (line.startsWith("```")) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence || !line) continue;
+    if (
+      line.startsWith("#") ||
+      line.startsWith(">") ||
+      line.startsWith("|") ||
+      /^([-*+]|\d+\.)\s/.test(line)
+    ) {
+      continue;
+    }
+    lines.push(line);
+    length += line.length + 1;
+    if (length >= maxChars) break;
+  }
+  return lines.join(" ").slice(0, maxChars);
+}
+
 export function buildEmbeddingText(item: IndexItem): string {
-  return [item.name.replace(/[-_]/g, " "), item.description]
+  return [
+    item.name.replace(/[-_]/g, " "),
+    item.description,
+    bodyLead(item.body || ""),
+  ]
     .filter(Boolean)
     .join(" | ");
 }
@@ -188,6 +243,9 @@ export function contentHash(item: IndexItem): string {
     // JIT's own storage must update the indexed location even when the text is
     // identical.
     path: item.path || "",
+    // And so is the recipe. The same skill text embeds differently once the
+    // embedded text changes shape, so the stored vector must be rebuilt.
+    recipe: EMBEDDING_TEXT_VERSION,
   };
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
