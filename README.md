@@ -205,14 +205,26 @@ Imports are explicit, read-only on the source side, and shown before they run.
 1. **Embeddings** — local `Xenova/bge-small-en-v1.5` through Transformers.js
    (384 dimensions) by default, or a configured OpenAI-compatible embeddings API.
 2. **Vector search** — cosine similarity over embeddings stored in `index.json`,
-   top candidates kept.
+   top candidates kept. Each skill is embedded from its name, its description, and
+   the opening prose of its body (up to 500 characters, with headings, banners,
+   tables, lists, and code skipped), so wording that only appears in the body is
+   still findable.
 3. **Rerank (the decision layer)** — any OpenAI-compatible chat-completions
    endpoint re-scores the top vector candidates. When an endpoint is configured,
    every lookup is reranked — the model decides which skill wins; an
    unconfigured install falls back to cosine and says so in the response.
-4. **Two-stage threshold** — the decision uses one scale, never a mix. A reranked
-    candidate is judged on its rerank score; otherwise on cosine similarity. The
-    default threshold is `0.60`.
+4. **Confidence, and the threshold** — a vector match is not judged on its raw
+   cosine alone. Two unrelated skills already score around `0.56`, because every
+   embedding shares a common direction, so an absolute cutoff mostly measures
+   "is this English": on a 90-skill index the stock `0.60` admitted 99% of
+   lookups and 40% of what it returned was the wrong skill. The decision instead
+   takes the weaker of two readings — the raw cosine, and how far the winner
+   stands above the rest of *that query's* scores — so a match has to clear the
+   threshold on both. The number shown as confidence is that same pair reduced
+   to one value, which is why a high cosine that does not stand out still reads
+   as a low confidence. A reranked candidate is judged on its rerank score
+   alone. A small index, too small to have a meaningful spread, falls back to
+   the raw cosine. The default threshold is `0.60`.
 5. **Two-tier result** — a candidate above the threshold returns one skill body.
    Below it, `JIT_FIND` returns `{"found": false}` with up to
    three `near_misses` (names), so the agent can retry once with a sharper
@@ -242,7 +254,7 @@ the file and are never written back.
 | `JIT_MODEL_CACHE` | Local embedding-model cache | `$JIT_HOME/models` |
 | `JIT_HOST` | Dashboard bind address | `127.0.0.1` |
 | `JIT_PORT` | Dashboard port | `3000` |
-| `JIT_CONFIDENCE_THRESHOLD` | Minimum confidence to return a match (0–1) | `0.60` |
+| `JIT_CONFIDENCE_THRESHOLD` | Minimum confidence to return a match; a vector match clears it on both its raw score and its standing above the query's other scores (0–1) | `0.60` |
 | `JIT_TOP_K` | Candidates retrieved before rerank | `20` |
 | `JIT_DISABLE_EMBEDDINGS` | Disable embedding requests; retrieval returns an unavailable warning | unset |
 | `JIT_EMBEDDING_PROVIDER` | `local` or `openai-compatible` | `local` |

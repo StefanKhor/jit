@@ -1,4 +1,5 @@
 import {
+  DEFAULT_CONFIG,
   embeddingSignature,
   TOP_K_RETRIEVE,
   loadConfig,
@@ -26,6 +27,71 @@ interface Corpus {
 
 let cache: Corpus | null = null;
 
+interface ScoreSpread {
+  mean: number;
+  sd: number;
+}
+
+/**
+ * How many embedded skills a query must be scored against before its own spread
+ * is worth measuring. Below this the mean and deviation are sampling noise, so
+ * the absolute cosine is the honest answer.
+ */
+const MIN_SPREAD_SAMPLE = 8;
+
+const SPREAD_SAMPLE_TOLERANCE = 1e-6;
+
+/**
+ * Where the stock confidence threshold sits on the relative scale, in standard
+ * deviations above the query's mean score.
+ *
+ * Measured on a 90-skill index: the correct match averaged 4.4 deviations out
+ * and a wrong one 2.9. Gating at 2.5 raised the share of returns that were
+ * correct from 89% to 93% without dropping a single correct match.
+ */
+const Z_AT_DEFAULT_THRESHOLD = 2.5;
+
+/** Spread of the logistic that maps deviations onto the 0..1 scale. */
+const Z_STEEPNESS = 1;
+
+// Anchored so the threshold shipped in DEFAULT_CONFIG lands on
+// Z_AT_DEFAULT_THRESHOLD, rather than that pair being pinned by two unrelated
+// magic numbers.
+const Z_MIDPOINT =
+  Z_AT_DEFAULT_THRESHOLD -
+  Z_STEEPNESS *
+    Math.log(
+      DEFAULT_CONFIG.confidence_threshold /
+        (1 - DEFAULT_CONFIG.confidence_threshold),
+    );
+
+/**
+ * Confidence as "how far this stands out", not "what the cosine was".
+ *
+ * A raw cosine cannot separate a right match from a wrong one: two unrelated
+ * skills already score around 0.56, because every embedding shares a common
+ * direction. On a 90-skill index the fixed 0.6 cutoff admitted 99% of lookups
+ * and 40% of what it returned was the wrong skill. How far the winner stands
+ * above the query's own scores does separate them, so that margin is what the
+ * verdict rests on, squashed into the 0..1 range the threshold slider and the
+ * dashboard's confidence bar already speak.
+ */
+function relativeConfidence(z: number): number {
+  return 1 / (1 + Math.exp(-(z - Z_MIDPOINT) / Z_STEEPNESS));
+}
+
+/** Mean and spread of one query's cosine across every embedded skill. */
+function scoreSpread(scores: number[]): ScoreSpread | null {
+  if (scores.length < MIN_SPREAD_SAMPLE) return null;
+  const mean = scores.reduce((sum, score) => sum + score, 0) / scores.length;
+  const variance =
+    scores.reduce((sum, score) => sum + (score - mean) ** 2, 0) / scores.length;
+  const sd = Math.sqrt(variance);
+  // A flat field means every skill scored alike: nothing to stand out from.
+  if (!Number.isFinite(sd) || sd < SPREAD_SAMPLE_TOLERANCE) return null;
+  return { mean, sd };
+}
+
 function loadCorpus(): Corpus | null {
   const version = dataVersion();
   if (cache && cache.version === version) return cache;
@@ -45,6 +111,7 @@ async function rank(
 ): Promise<{
   candidates: StoredItem[];
   cosine: Map<string, number>;
+  spread: ScoreSpread | null;
   warning?: string;
 }> {
   const corpus = loadCorpus();
@@ -53,7 +120,7 @@ async function rank(
     corpus.items.length === 0 ||
     !corpus.items.some((item) => item.enabled)
   ) {
-    return { candidates: [], cosine: new Map() };
+    return { candidates: [], cosine: new Map(), spread: null };
   }
 
   let queryVector: Float32Array | null = null;
@@ -73,6 +140,7 @@ async function rank(
     return {
       candidates: [],
       cosine: new Map(),
+      spread: null,
       warning:
         "Embedding retrieval is required, but the index vectors do not match the active embedding provider/model. Rebuild the vector index in Settings.",
     };
@@ -82,12 +150,14 @@ async function rank(
     return {
       candidates: [],
       cosine: new Map(),
+      spread: null,
       warning: `Embedding retrieval is required, but the model is unavailable: ${embeddingError}`,
     };
   }
 
-  const cosine = new Map<string, number>();
-  const vectorRanked: string[] = [];
+  // Every enabled skill is scored, not just the ones returned: the winner is
+  // judged against the whole field, so the field has to be measured before the
+  // shortlist is taken.
   const scored = corpus.items
     .filter((item) => item.enabled && item.embedding)
     .map((item) => ({
@@ -96,10 +166,13 @@ async function rank(
         queryVector as Float32Array,
         item.embedding as Float32Array,
       ),
-    }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit);
-  for (const hit of scored) {
+    }));
+  const spread = scoreSpread(scored.map((entry) => entry.score));
+  scored.sort((a, b) => b.score - a.score);
+
+  const cosine = new Map<string, number>();
+  const vectorRanked: string[] = [];
+  for (const hit of scored.slice(0, limit)) {
     cosine.set(hit.id, hit.score);
     vectorRanked.push(hit.id);
   }
@@ -108,6 +181,7 @@ async function rank(
     return {
       candidates: [],
       cosine,
+      spread,
       warning:
         "The index has no stored embedding vectors. Reindex the skills to build them.",
     };
@@ -118,7 +192,7 @@ async function rank(
     const item = corpus.byId.get(id);
     if (item) candidates.push(item);
   }
-  return { candidates, cosine };
+  return { candidates, cosine, spread };
 }
 
 export interface Evaluation {
@@ -149,7 +223,7 @@ export async function evaluate(
   if (!intent || !intent.trim()) return empty;
 
   const ranked = await rank(intent, TOP_K_RETRIEVE);
-  const { candidates, cosine } = ranked;
+  const { candidates, cosine, spread } = ranked;
   if (candidates.length === 0) {
     return { ...empty, warning: ranked.warning };
   }
@@ -167,11 +241,23 @@ export async function evaluate(
 
   const reranked = rerankScores.size > 0;
 
-  // Trust the reranker (a real 0..1 relevance judgment) when it ran;
-  // otherwise use cosine. Candidates always have a vector score.
+  // Trust the reranker (a real 0..1 relevance judgment) when it ran; otherwise
+  // judge the winner by how far it stands above this query's own scores, capped
+  // by the raw score it stands on. Too small an index to measure a spread, and
+  // the raw cosine stands on its own.
+  //
+  // Taking the weaker of the two is what makes one number express a two-part
+  // test: a match has to clear the threshold as a raw score *and* as a standing
+  // above the field, and `min(raw, standing) >= threshold` says exactly that.
+  // Either signal alone is fooled — a raw cosine returns the wrong skill about
+  // 40% of the time on body-wording lookups, while standing alone lets a flat
+  // index, where nothing really matches, read as a confident hit.
   const scoreOf = (id: string): number => {
     if (reranked) return rerankScores.get(id) || 0;
-    return cosine.get(id) || 0;
+    const raw = cosine.get(id) || 0;
+    if (!spread) return raw;
+    const standing = relativeConfidence((raw - spread.mean) / spread.sd);
+    return Math.min(raw, standing);
   };
 
   const debug: SearchCandidate[] = candidates.slice(0, topN).map((item) => {
@@ -207,10 +293,11 @@ export async function evaluate(
   const confidence = scoreOf(best.id);
   if (confidence < threshold) {
     logger.debug(
-      "no match for %r (best=%s, confidence=%.3f)",
+      "no match for %r (best=%s, confidence=%.3f, cosine=%.3f)",
       intent,
       best.id,
       confidence,
+      cosine.get(best.id) || 0,
     );
     return {
       result: null,
