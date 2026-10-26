@@ -7,7 +7,7 @@ import { z } from "zod";
 import { VERSION } from "./config.js";
 import { logger } from "./logger.js";
 import { warmupEmbeddingModel } from "./embedding.js";
-import { evaluate, recordRetrieval } from "./retrieval/retriever.js";
+import { evaluate } from "./retrieval/retriever.js";
 
 const INSTRUCTIONS = `JIT is a just-in-time skill index: it loads the one skill you need, when you need it, instead of keeping every skill in context.
 
@@ -62,9 +62,7 @@ export function registerFind(server: McpServer): void {
       },
     },
     async ({ intent }) => {
-      const started = performance.now();
       const evaluation = await evaluate(intent, 3);
-      recordRetrieval(evaluation, intent, "mcp", performance.now() - started);
       if (evaluation.warning) {
         return textResult({
           found: false,
@@ -74,8 +72,8 @@ export function registerFind(server: McpServer): void {
       }
       if (evaluation.result) {
         // Minimal agent-facing payload: the skill itself, plus related names
-        // for multi-part tasks. Telemetry and ranking notes stay on the
-        // dashboard response, where a human reads them.
+        // for multi-part tasks. Ranking notes stay on the dashboard response,
+        // where a human reads them.
         const result = evaluation.result;
         return textResult({
           found: true,

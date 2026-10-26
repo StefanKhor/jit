@@ -25,16 +25,13 @@ function Hero() {
   );
 }
 
-/** The four headline figures, separated by true hairlines. */
+/** The three headline figures, separated by true hairlines. */
 function Figures({ stats }: { stats: Stats }) {
   const tokens = stats.tokens;
   const jit = Number(tokens?.jit || 0);
   const catalog = Number(tokens?.catalog || 0);
   const reduction = Number(tokens?.reduction_pct || 0);
   const overhead = Math.max(0, jit - catalog);
-  const retrieval = stats.retrieval;
-  const measured = Number(retrieval?.total || 0) > 0;
-  const missRate = Number(retrieval?.miss_rate || 0);
   const breakEven = Number(tokens?.break_even || 0);
   const total = stats.total || 0;
   const belowBreakEven = breakEven > 0 && total > 0 && total < breakEven;
@@ -68,24 +65,11 @@ function Figures({ stats }: { stats: Stats }) {
         reduction < 0 ? "over a catalog" : "kept out of context"
       }`,
     },
-    {
-      key: "recall",
-      label: "Recall",
-      value: measured ? (
-        <AnimatedNumber value={100 - missRate} decimals={1} />
-      ) : (
-        "—"
-      ),
-      unit: measured ? "%" : undefined,
-      hint: measured
-        ? `${fmt(retrieval?.misses || 0)} of ${fmt(retrieval?.total || 0)} missed`
-        : "not measured yet",
-    },
   ];
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line lg:grid-cols-3">
         {cells.map((cell) => (
           <div key={cell.key} className="bg-panel p-5 md:p-6">
             <Stat
@@ -638,70 +622,7 @@ function Categories({ stats }: { stats: Stats }) {
   );
 }
 
-function Quality({ stats }: { stats: Stats }) {
-  const ctx = useJit();
-  const retrieval = stats.retrieval;
-  const total = retrieval?.total || 0;
-  const misses = retrieval?.misses || 0;
-  const missRate = Number(retrieval?.miss_rate || 0);
-  const threshold = Number(ctx.config?.confidence_threshold ?? 0.6);
 
-  return (
-    <Panel>
-      <PanelHead
-        title="Retrieval quality"
-        hint={total ? `${fmt(total)} queries logged` : "not measured yet"}
-        actions={
-          total ? (
-            <Button size="sm" onClick={() => ctx.setView("search")}>
-              Inspect
-            </Button>
-          ) : null
-        }
-      />
-      {total === 0 ? (
-        <PanelBody>
-          <p className="max-w-md text-sm leading-relaxed text-ink-2">
-            Recall is JIT's core promise and is only worth trusting once it is
-            measured. Run queries from Search — every JIT_FIND and dashboard
-            search is logged with its decision and score.
-          </p>
-        </PanelBody>
-      ) : (
-        <div className="grid grid-cols-1 gap-px bg-line sm:grid-cols-2">
-          <div className="bg-panel p-5">
-            <Stat
-              label="Miss rate"
-              value={<AnimatedNumber value={missRate} decimals={1} />}
-              unit="%"
-              hint={`${fmt(misses)} of ${fmt(total)} returned nothing`}
-            />
-            <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-line">
-              <div
-                className="h-full rounded-full bg-bad"
-                style={{ width: `${Math.min(100, Math.max(0, missRate))}%` }}
-              />
-            </div>
-          </div>
-          <div className="bg-panel p-5">
-            <Stat
-              label="Hit rate"
-              value={<AnimatedNumber value={100 - missRate} decimals={1} />}
-              unit="%"
-              hint={`threshold ${threshold.toFixed(2)}`}
-            />
-            <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-line">
-              <div
-                className="h-full rounded-full bg-ok"
-                style={{ width: `${Math.min(100, Math.max(0, 100 - missRate))}%` }}
-              />
-            </div>
-          </div>
-        </div>
-      )}
-    </Panel>
-  );
-}
 
 export function Overview() {
   const ctx = useJit();
@@ -760,8 +681,6 @@ export function Overview() {
         <Heaviest stats={stats} />
         <Composition stats={stats} />
       </div>
-
-      <Quality stats={stats} />
 
       <Categories stats={stats} />
 

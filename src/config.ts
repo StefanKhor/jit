@@ -37,8 +37,6 @@ export const INDEX_DIR = path.resolve(
 );
 /** The whole index: skills, bodies, and base64 embeddings. Single writer. */
 export const INDEX_FILE = path.join(INDEX_DIR, "index.json");
-/** Append-only retrieval telemetry, one JSON object per line. */
-export const RETRIEVAL_LOG_FILE = path.join(INDEX_DIR, "retrieval.jsonl");
 export const CONFIG_FILE = path.join(INDEX_DIR, "config.json");
 export const MCP_CONFIG = path.join(INDEX_DIR, "mcp.json");
 export const JIT_SKILLS_DIR = path.join(INDEX_DIR, "skills");

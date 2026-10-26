@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 
 import { useJit } from "../state/store";
-import type { RetrievalStats, SearchResponse } from "../types";
+import type { SearchResponse } from "../types";
 import { Meta, StatusDot } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { Empty, Spinner, Stat } from "../ui/Display";
@@ -16,7 +16,6 @@ export function Search() {
   const [data, setData] = useState<SearchResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [history, setHistory] = useState<RetrievalStats | null>(null);
   const [threshold, setThreshold] = useState<number>(
     () => Number(ctx.config?.confidence_threshold ?? 0.6),
   );
@@ -26,18 +25,6 @@ export function Search() {
       setThreshold(Number(ctx.config.confidence_threshold ?? 0.6));
     }
   }, [ctx.config]);
-
-  const loadHistory = useCallback(async () => {
-    try {
-      setHistory(await ctx.api<RetrievalStats>("/api/retrieval?limit=25"));
-    } catch {
-      // Telemetry is best-effort; a failure should not disrupt search.
-    }
-  }, [ctx]);
-
-  useEffect(() => {
-    void loadHistory();
-  }, [loadHistory]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -57,7 +44,6 @@ export function Search() {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setLoading(false);
-      void loadHistory();
     }
   };
 
@@ -65,25 +51,6 @@ export function Search() {
     setThreshold(value);
     try {
       await ctx.saveConfig({ confidence_threshold: value });
-    } catch (caught) {
-      ctx.toast(
-        caught instanceof Error ? caught.message : String(caught),
-        "error",
-      );
-    }
-  };
-
-  const clearHistory = async () => {
-    const ok = await ctx.confirmAction(
-      "Clear retrieval history?",
-      "The recall and miss data on this page will be reset.",
-      "Clear",
-    );
-    if (!ok) return;
-    try {
-      await ctx.api("/api/retrieval/clear", { method: "POST" });
-      void loadHistory();
-      ctx.toast("Retrieval history cleared.");
     } catch (caught) {
       ctx.toast(
         caught instanceof Error ? caught.message : String(caught),
@@ -175,11 +142,6 @@ export function Search() {
       ) : (
         <SearchOutput data={data} />
       )}
-
-      <RetrievalHistory
-        history={history}
-        onClear={history?.total ? clearHistory : undefined}
-      />
     </div>
   );
 }
@@ -378,80 +340,4 @@ function SearchOutput({ data }: { data: SearchResponse }) {
   );
 }
 
-function RetrievalHistory({
-  history,
-  onClear,
-}: {
-  history: RetrievalStats | null;
-  onClear?: () => void;
-}) {
-  const recent = history?.recent || [];
-  return (
-    <Panel>
-      <PanelHead
-        title="Retrieval history"
-        hint={
-          history && history.total
-            ? `${history.total} logged · ${history.miss_rate}% missed`
-            : "no queries logged yet"
-        }
-        actions={
-          onClear ? (
-            <Button size="sm" variant="ghost" onClick={onClear}>
-              Clear
-            </Button>
-          ) : undefined
-        }
-      />
-      {recent.length === 0 ? (
-        <Empty title="No queries yet.">
-          Every JIT_FIND call and dashboard search is logged here so misses are
-          visible instead of silent.
-        </Empty>
-      ) : (
-        <TableWrap>
-          <Table className="table-fixed">
-            <thead>
-              <tr>
-                <Th className="w-20">When</Th>
-                <Th className="hidden w-24 sm:table-cell">From</Th>
-                <Th>Intent</Th>
-                <Th className="num w-24 text-right">Best score</Th>
-                <Th className="w-28">Decision</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {recent.map((entry) => (
-                <Tr key={entry.id}>
-                  <Td className="num text-ink-2">{entry.ts.slice(11, 19)}</Td>
-                  <Td className="hidden truncate sm:table-cell">
-                    {entry.source}
-                  </Td>
-                  <Td className="min-w-0">
-                    <span
-                      className="block truncate text-ink-2"
-                      title={entry.intent}
-                    >
-                      {entry.intent}
-                    </span>
-                  </Td>
-                  <Td className="num text-right text-ink-2">
-                    {Number(entry.score).toFixed(3)}
-                  </Td>
-                  <Td>
-                    <span className="inline-flex items-center gap-1.5 text-xs text-ink-2">
-                      <StatusDot
-                        tone={entry.decision === "hit" ? "ok" : "warn"}
-                      />
-                      {entry.decision === "hit" ? "hit" : "miss"}
-                    </span>
-                  </Td>
-                </Tr>
-              ))}
-            </tbody>
-          </Table>
-        </TableWrap>
-      )}
-    </Panel>
-  );
-}
+

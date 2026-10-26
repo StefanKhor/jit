@@ -9,7 +9,6 @@ import {
   dataVersion,
   getAllItems,
   getEmbeddingSignature,
-  logRetrieval,
 } from "../storage/store.js";
 import type {
   NearMiss,
@@ -260,34 +259,4 @@ export function relatedSkills(
     .filter((candidate) => candidate.id !== winnerId && candidate.score > 0)
     .slice(0, limit)
     .map((candidate) => candidate.name);
-}
-
-// Persist one retrieval for the dashboard's recall view. Telemetry only; a
-// failure here must never break retrieval.
-export function recordRetrieval(
-  evaluation: Evaluation,
-  intent: string,
-  source: string,
-  elapsedMs: number,
-): void {
-  try {
-    const top = evaluation.candidates[0];
-    logRetrieval({
-      source,
-      intent,
-      bestId: top?.id || "",
-      bestName: top?.name || "",
-      score: top?.score || 0,
-      cosine: top?.cosine || 0,
-      rerank: top ? top.rerank : null,
-      candidates: evaluation.candidates.length,
-      decision: evaluation.result ? "hit" : "miss",
-      elapsedMs: Number(elapsedMs.toFixed(1)),
-    });
-  } catch (error) {
-    logger.debug(
-      "could not record retrieval: %s",
-      error instanceof Error ? error.message : String(error),
-    );
-  }
 }

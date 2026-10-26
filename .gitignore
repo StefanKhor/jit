@@ -10,7 +10,6 @@ static/
 
 # JIT runtime state and local model cache
 .jit/
-skills.db
 models/
 
 # Environment

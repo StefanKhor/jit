@@ -13,8 +13,8 @@ plus a short `near_misses` list instead of a silent empty result. You carry one
 body, not a catalog. A multi-part task spans skills: a confident hit also lists
 up to two related skill names, and a second call loads the next body — one body
 per call, never a catalog. The MCP response carries only the skill name and its
-body — scores, ranking notes, and telemetry stay on the dashboard, where a
-human reads them. The whole shipped MCP surface is one
+body — scores and ranking notes stay on the dashboard, where a human reads them.
+The whole shipped MCP surface is one
 tool: `JIT_FIND`.
 
 JIT stays quiet until it is called. MCP is pull-based, so JIT is built to be
@@ -24,10 +24,6 @@ background work in the agent's loop.
 Local embeddings are the default. If you explicitly choose a cloud embedding
 provider or remote reranker, the corresponding text is sent to that configured
 endpoint and may incur provider costs.
-
-Recall is the part of a retriever that is easiest to claim and hardest to prove,
-so the dashboard logs every retrieval (from both `JIT_FIND` and Search) and shows
-the measured miss rate, making misses visible instead of silent.
 
 The dashboard is the primary interface. Every index number in it is computed
 from the actual index: real body lengths, real entry counts, real cosine
@@ -59,7 +55,7 @@ bun run dev
 ```
 
 The production build is a single self-contained `static/dashboard.html` served
-by the Node process. There is no CDN, telemetry, or runtime frontend build.
+by the Node process. There is no CDN or runtime frontend build.
 
 ## Connect your agent
 
@@ -165,12 +161,11 @@ Being honest about the boundary is part of being production-ready.
 A single-file React SPA served by the Node process.
 
 - **Overview** — context per task vs. a skill catalog, reduction or overhead,
-  the break-even index size, index composition, heaviest entries, categories,
-  and the measured retrieval miss rate.
+  the break-even index size, index composition, heaviest entries, and categories.
 - **Skills** — list, read, enable/disable, index a path, transfer, and remove.
 - **MCP** — connect, disconnect, import a client config, add a server manually.
 - **Search** — live retrieval with the effective score, cosine, rerank
-  and the threshold, plus a confidence slider and the retrieval log.
+  and the threshold, plus a confidence slider.
 - **Settings** — local/cloud embeddings, the reranker, confidence threshold, dashboard auth,
   import/export, clear.
 
@@ -351,10 +346,9 @@ src/indexer.ts ──► src/storage/store.ts ──► ~/.jit
 src/mcp-server.ts (stdio) ──► src/mcp/client.ts ──► stdio / HTTP / SSE
 ```
 
-- **Storage** — two plain files, no database. `index.json` is the source of
+- **Storage** — one plain file, no database. `index.json` is the source of
   truth: every skill, its body, and its base64 embedding, replaced atomically on
-  each write. A content hash keeps the index self-consistent and `retrieval.jsonl`
-  holds append-only telemetry.
+  each write. A content hash keeps the index self-consistent.
 - **Retrieval cache** — the corpus is keyed on the index file's mtime/size, so
   a dashboard edit is visible to a separately running `jit serve` immediately.
 - **Concurrency** — the dashboard is async; the MCP client owns one connection
@@ -362,9 +356,6 @@ src/mcp-server.ts (stdio) ──► src/mcp/client.ts ──► stdio / HTTP / S
 - **Security** — the API is local by default, request bodies are size-limited,
   paths are resolved and checked before JIT-owned files are deleted, secrets are
   written with `0600` permissions, and keys are compared in constant time.
-- **Telemetry** — every retrieval is appended to a bounded log (date, source,
-  intent, score, hit/miss) so recall can be inspected. Nothing is sent anywhere;
-  the log is `~/.jit/retrieval.jsonl`, cleared from Search.
 
 ## NixOS
 

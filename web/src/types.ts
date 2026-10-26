@@ -64,11 +64,6 @@ export interface Stats {
     reduction_pct: number;
     break_even: number;
   };
-  retrieval?: {
-    total: number;
-    misses: number;
-    miss_rate: number;
-  };
 }
 
 export interface SkillListItem {
@@ -159,32 +154,6 @@ export interface SearchResponse {
   ranking_warning?: string;
   threshold: number;
   elapsed_ms: number;
-}
-
-export interface RetrievalLogEntry {
-  id: number;
-  ts: string;
-  source: string;
-  intent: string;
-  best_id: string;
-  best_name: string;
-  score: number;
-  cosine: number;
-  rerank: number | null;
-  candidates: number;
-  decision: "hit" | "miss";
-  elapsed_ms: number;
-}
-
-export interface RetrievalStats {
-  total: number;
-  hits: number;
-  misses: number;
-  miss_rate: number;
-  threshold: number;
-  recent: RetrievalLogEntry[];
-  misses_recent: RetrievalLogEntry[];
-  top_misses: Array<{ intent: string; count: number; best_name: string }>;
 }
 
 export interface TransferResult {

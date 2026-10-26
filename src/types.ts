@@ -210,34 +210,6 @@ export interface SearchResponse {
   elapsed_ms: number;
 }
 
-export type RetrievalDecision = "hit" | "miss";
-
-export interface RetrievalLogEntry {
-  id: number;
-  ts: string;
-  source: string;
-  intent: string;
-  best_id: string;
-  best_name: string;
-  score: number;
-  cosine: number;
-  rerank: number | null;
-  candidates: number;
-  decision: RetrievalDecision;
-  elapsed_ms: number;
-}
-
-export interface RetrievalStats {
-  total: number;
-  hits: number;
-  misses: number;
-  miss_rate: number;
-  threshold: number;
-  recent: RetrievalLogEntry[];
-  misses_recent: RetrievalLogEntry[];
-  top_misses: Array<{ intent: string; count: number; best_name: string }>;
-}
-
 export interface TransferResult {
   mode?: "copy" | "link";
   found?: number;

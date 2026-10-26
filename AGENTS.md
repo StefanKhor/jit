@@ -13,7 +13,7 @@ JIT is a local Node.js/TypeScript app with an MCP server and a React dashboard. 
 - `src/retrieval/retriever.ts` — retrieval, confidence gating, and warnings.
 - `src/embedding.ts`, `src/retrieval/rerank.ts` — retrieval components.
 - `src/indexer.ts` — indexing orchestration and public index operations.
-- `src/storage/store.ts` — file-backed index and retrieval log (schema, persistence, lists, and stats).
+- `src/storage/store.ts` — file-backed index (schema, persistence, lists, and stats).
 - `src/config.ts`, `src/types.ts` — server config and shared domain types.
 - `src/server/dashboard.ts` — HTTP API and dashboard hosting.
 - `web/src/views/` — dashboard pages; `web/src/state/store.tsx` — shared frontend state.

@@ -1,43 +1,29 @@
-import { appendFileSync, existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 
 import {
   atomicWriteFile,
   embeddingSignature,
-  ensureJitDir,
   INDEX_FILE,
-  RETRIEVAL_LOG_FILE,
 } from "../config.js";
 import type {
   IndexItem,
   ListItem,
-  RetrievalLogEntry,
-  RetrievalStats,
   Stats,
   StoredItem,
 } from "../types.js";
 
 /**
- * The index is two plain files, not a database:
+ * The index is one plain file, not a database. `index.json` holds every skill
+ * (metadata, body, content hash, and its embedding as base64) plus the embedding
+ * signature. It is the single source of truth and is always replaced atomically,
+ * so a reader sees either the whole previous file or the whole next one.
  *
- * - `index.json` holds every skill (metadata, body, content hash, and its
- *   embedding as base64) plus the embedding signature. It is the single source
- *   of truth and is always replaced atomically, so a reader sees either the
- *   whole previous file or the whole next one.
- * - `retrieval.jsonl` is append-only telemetry, one JSON object per line. It is
- *   written by both the dashboard and `jit serve`, trimmed by size, and never
- *   read on the retrieval path.
- *
- * Splitting the two is what keeps writes safe without a database: `index.json`
- * has a single writer (the dashboard), while the log is append-only and
- * best-effort. Reads of the index are cached in-process and revalidated against
- * the file's mtime/size, so a `jit serve` process notices dashboard edits
- * immediately.
+ * That single-writer, atomic-replace model is what keeps writes safe without a
+ * database. Reads are cached in-process and revalidated against the file's
+ * mtime/size, so a `jit serve` process notices dashboard edits immediately.
  */
 
 const INDEX_VERSION = 1;
-const RETRIEVAL_LOG_LIMIT = 500;
-const MAX_LOG_BYTES = 512 * 1024;
-const MAX_INTENT_CHARS = 2000;
 
 /** A skill as serialized to `index.json`. The embedding is base64 float32. */
 interface Row {
@@ -67,19 +53,6 @@ export interface UpsertRow {
   contentHash: string;
   embedding: Float32Array | null;
   updatedAt: string;
-}
-
-export interface RetrievalRecord {
-  source: string;
-  intent: string;
-  bestId: string;
-  bestName: string;
-  score: number;
-  cosine: number;
-  rerank: number | null;
-  candidates: number;
-  decision: "hit" | "miss";
-  elapsedMs: number;
 }
 
 function errorMessage(error: unknown): string {
@@ -400,151 +373,4 @@ export function clearIndex(): void {
   const file = readIndex();
   file.items = [];
   writeIndex(file);
-}
-
-/*
- * Retrieval telemetry. Append-only, so the two processes that record lookups
- * (the dashboard and `jit serve`) never contend for a read-modify-write of the
- * index. Losing a line to a rare interleaved append is acceptable; the reader
- * skips anything it cannot parse.
- */
-
-// A local ordering key, not a durable id: millisecond timestamp with 1000
-// sub-slots per process so entries sort newest-first.
-let logSeq = 0;
-
-function nextLogId(): number {
-  logSeq = (logSeq + 1) % 1000;
-  return Date.now() * 1000 + logSeq;
-}
-
-export function logRetrieval(record: RetrievalRecord): void {
-  const entry: RetrievalLogEntry = {
-    id: nextLogId(),
-    ts: new Date().toISOString(),
-    source: record.source,
-    intent: record.intent.slice(0, MAX_INTENT_CHARS),
-    best_id: record.bestId,
-    best_name: record.bestName,
-    score: record.score,
-    cosine: record.cosine,
-    rerank: record.rerank,
-    candidates: record.candidates,
-    decision: record.decision,
-    elapsed_ms: record.elapsedMs,
-  };
-  ensureJitDir();
-  appendFileSync(RETRIEVAL_LOG_FILE, `${JSON.stringify(entry)}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
-  trimLog();
-}
-
-function asLogEntry(value: unknown): RetrievalLogEntry | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const row = value as Record<string, unknown>;
-  const decision = row.decision === "hit" ? "hit" : "miss";
-  return {
-    id: Number(row.id ?? 0),
-    ts: String(row.ts ?? ""),
-    source: String(row.source ?? ""),
-    intent: String(row.intent ?? ""),
-    best_id: String(row.best_id ?? ""),
-    best_name: String(row.best_name ?? ""),
-    score: Number(row.score ?? 0),
-    cosine: Number(row.cosine ?? 0),
-    rerank:
-      row.rerank === null || row.rerank === undefined
-        ? null
-        : Number(row.rerank),
-    candidates: Number(row.candidates ?? 0),
-    decision,
-    elapsed_ms: Number(row.elapsed_ms ?? 0),
-  };
-}
-
-/** Every log entry, oldest first. Unparseable lines are skipped. */
-function readLog(): RetrievalLogEntry[] {
-  let raw: string;
-  try {
-    raw = readFileSync(RETRIEVAL_LOG_FILE, "utf8");
-  } catch {
-    return [];
-  }
-  const entries: RetrievalLogEntry[] = [];
-  for (const line of raw.split("\n")) {
-    if (!line.trim()) continue;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    const entry = asLogEntry(parsed);
-    if (entry) entries.push(entry);
-  }
-  return entries;
-}
-
-function trimLog(): void {
-  let size: number;
-  try {
-    size = statSync(RETRIEVAL_LOG_FILE).size;
-  } catch {
-    return;
-  }
-  if (size <= MAX_LOG_BYTES) return;
-  const kept = readLog().slice(-RETRIEVAL_LOG_LIMIT);
-  atomicWriteFile(
-    RETRIEVAL_LOG_FILE,
-    kept.map((entry) => JSON.stringify(entry)).join("\n") +
-      (kept.length ? "\n" : ""),
-    0o600,
-  );
-}
-
-export function listRetrievals(limit = 100): RetrievalLogEntry[] {
-  const bounded = Math.max(1, Math.min(1000, limit));
-  return readLog().reverse().slice(0, bounded);
-}
-
-export function retrievalStats(recentLimit = 50): RetrievalStats {
-  const entries = readLog();
-  const recent = [...entries].reverse().slice(0, Math.max(1, recentLimit));
-  let hits = 0;
-  let misses = 0;
-  for (const entry of entries) {
-    if (entry.decision === "hit") hits += 1;
-    else misses += 1;
-  }
-  const grouped = new Map<string, { count: number; best_name: string }>();
-  for (const entry of entries) {
-    if (entry.decision !== "miss") continue;
-    const key = entry.intent.trim().toLowerCase();
-    if (!key) continue;
-    const current = grouped.get(key);
-    if (current) current.count += 1;
-    else grouped.set(key, { count: 1, best_name: entry.best_name });
-  }
-  const total = entries.length;
-  return {
-    total,
-    hits,
-    misses,
-    miss_rate: total ? Number(((misses / total) * 100).toFixed(1)) : 0,
-    threshold: 0,
-    recent,
-    misses_recent: recent.filter((entry) => entry.decision === "miss"),
-    top_misses: [...grouped.entries()]
-      .map(([intent, value]) => ({ intent, ...value }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 5),
-  };
-}
-
-export function clearRetrievals(): number {
-  const count = readLog().length;
-  atomicWriteFile(RETRIEVAL_LOG_FILE, "", 0o600);
-  return count;
 }

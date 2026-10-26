@@ -29,11 +29,7 @@ import {
   setEnabled,
   tokenEstimate,
 } from "../indexer.js";
-import {
-  clearRetrievals,
-  getAllItems,
-  retrievalStats,
-} from "../storage/store.js";
+import { getAllItems } from "../storage/store.js";
 import { logger } from "../logger.js";
 import { isLocalEndpoint } from "../net.js";
 import {
@@ -42,7 +38,7 @@ import {
   shutdown as shutdownMcp,
 } from "../mcp/client.js";
 import { jitSchemaTokens } from "../mcp-server.js";
-import { evaluate, recordRetrieval } from "../retrieval/retriever.js";
+import { evaluate } from "../retrieval/retriever.js";
 import {
   exportSkills,
   indexSkillsInPlace,
@@ -331,7 +327,6 @@ export function createApp(): Hono {
       ? Math.floor(stats.catalog_tokens / stats.total)
       : 0;
     const breakEven = breakEvenSize(schemaTokens, averageCatalog);
-    const retrieval = retrievalStats(1);
     return c.json({
       ...stats,
       tokens: {
@@ -342,11 +337,6 @@ export function createApp(): Hono {
         saved,
         reduction_pct: reduction,
         break_even: breakEven,
-      },
-      retrieval: {
-        total: retrieval.total,
-        misses: retrieval.misses,
-        miss_rate: retrieval.miss_rate,
       },
     });
   });
@@ -601,18 +591,6 @@ export function createApp(): Hono {
     return c.json(await search(String(body.intent || "").trim()));
   });
 
-  app.get("/api/retrieval", (c) => {
-    const raw = Number(c.req.query("limit") || 100);
-    const limit = Number.isFinite(raw) ? raw : 100;
-    const stats = retrievalStats(limit);
-    stats.threshold = loadConfig().confidence_threshold;
-    return c.json(stats);
-  });
-
-  app.post("/api/retrieval/clear", (c) => {
-    return c.json({ cleared: clearRetrievals() });
-  });
-
   app.get("/api/export", (c) => {
     const items = getAllItems().map((item) => {
       const { embedding: _embedding, content_hash: _hash, updated_at: _updated, ...rest } = item;
@@ -702,7 +680,6 @@ async function search(intent: string): Promise<Record<string, unknown>> {
   if (intent.length > 2000) throw new HttpError(400, "intent too long");
   const started = performance.now();
   const evaluation = await evaluate(intent, 5);
-  recordRetrieval(evaluation, intent, "dashboard", performance.now() - started);
   return {
     result: evaluation.result,
     candidates: evaluation.candidates,
