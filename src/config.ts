@@ -55,6 +55,9 @@ export const DEFAULT_SKILL_PATHS = [
   path.join(homedir(), ".config", "opencode", "skills"),
   path.join(process.cwd(), ".opencode", "skills"),
   path.join(process.cwd(), "skills"),
+  // JIT's own managed copies, so a scan still finds skills that live only in
+  // JIT's storage — e.g. after the index is rebuilt from scratch.
+  JIT_SKILLS_DIR,
 ];
 
 function envNumber(
