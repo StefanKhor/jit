@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -8,7 +8,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { homedir, platform } from "node:os";
+import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -35,7 +35,10 @@ export const DASHBOARD_HTML = path.join(STATIC_DIR, "dashboard.html");
 export const INDEX_DIR = path.resolve(
   (process.env.JIT_HOME || path.join(homedir(), ".jit")).replace(/^~(?=$|\/)/, homedir()),
 );
-export const META_DB = path.join(INDEX_DIR, "skills.db");
+/** The whole index: skills, bodies, and base64 embeddings. Single writer. */
+export const INDEX_FILE = path.join(INDEX_DIR, "index.json");
+/** Append-only retrieval telemetry, one JSON object per line. */
+export const RETRIEVAL_LOG_FILE = path.join(INDEX_DIR, "retrieval.jsonl");
 export const CONFIG_FILE = path.join(INDEX_DIR, "config.json");
 export const MCP_CONFIG = path.join(INDEX_DIR, "mcp.json");
 export const JIT_SKILLS_DIR = path.join(INDEX_DIR, "skills");
@@ -71,24 +74,9 @@ function envNumber(
   return integer ? Math.round(bounded) : bounded;
 }
 
-export const CONFIDENCE_THRESHOLD = envNumber(
-  "JIT_CONFIDENCE_THRESHOLD",
-  0.6,
-  0,
-  1,
-);
 export const TOP_K_RETRIEVE = envNumber("JIT_TOP_K", 20, 1, 1000, true);
 
-// Transformers.js needs an ONNX-converted model. The BAAI repository is the
-// source model; Xenova/bge-small-en-v1.5 is the compatible local export.
-export const EMBEDDING_MODEL =
-  process.env.JIT_EMBEDDING_MODEL || "Xenova/bge-small-en-v1.5";
-export const EMBEDDING_DIM = envNumber("JIT_EMBEDDING_DIM", 384, 1, 16384, true);
-export const EMBEDDING_SIGNATURE_KEY = "embedding_signature";
-const DEFAULT_EMBEDDING_PROVIDER =
-  process.env.JIT_EMBEDDING_PROVIDER === "openai-compatible"
-    ? "openai-compatible"
-    : "local";
+const MAX_EMBEDDING_DIM = 16384;
 
 export const DEFAULT_HOST = process.env.JIT_HOST || "127.0.0.1";
 export const DEFAULT_PORT = envNumber("JIT_PORT", 3000, 1, 65535, true);
@@ -107,47 +95,83 @@ export const MAX_SKILL_BYTES = envNumber(
   true,
 );
 
+// Plain defaults. Environment overrides are applied in `loadConfig`, so a
+// default here is never env-derived and the two can be read independently.
 export const DEFAULT_CONFIG: Config = {
-  embedding_provider: DEFAULT_EMBEDDING_PROVIDER,
-  embedding_local_model: EMBEDDING_MODEL,
-  embedding_local_dim: EMBEDDING_DIM,
-  embedding_api_key: process.env.JIT_EMBEDDING_API_KEY || "",
-  embedding_api_base: process.env.JIT_EMBEDDING_API_BASE || "",
-  embedding_api_model: process.env.JIT_EMBEDDING_API_MODEL || "",
-  embedding_api_dim: envNumber("JIT_EMBEDDING_API_DIM", 1536, 1, 16384, true),
-  rerank_api_key: process.env.JIT_RERANK_API_KEY || "",
+  embedding_provider: "local",
+  embedding_local_model: "Xenova/bge-small-en-v1.5",
+  embedding_local_dim: 384,
+  embedding_api_key: "",
+  embedding_api_base: "",
+  embedding_api_model: "",
+  embedding_api_dim: 1536,
+  rerank_api_key: "",
   rerank_api_base: "",
   rerank_model: "",
   api_key: "",
-  confidence_threshold: CONFIDENCE_THRESHOLD,
+  confidence_threshold: 0.6,
   first_run: true,
 };
 
-const FILE_KEYS = new Set<keyof Config>([
-  "embedding_provider",
-  "embedding_local_model",
-  "embedding_local_dim",
-  "embedding_api_key",
-  "embedding_api_base",
-  "embedding_api_model",
-  "embedding_api_dim",
-  "rerank_api_key",
-  "rerank_api_base",
-  "rerank_model",
-  "api_key",
-  "confidence_threshold",
-  "first_run",
-]);
+function textValue(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
 
-const ENV_KEYS: Partial<Record<keyof Config, string>> = {
-  embedding_api_key: "JIT_EMBEDDING_API_KEY",
-  embedding_api_base: "JIT_EMBEDDING_API_BASE",
-  embedding_api_model: "JIT_EMBEDDING_API_MODEL",
-  rerank_api_key: "JIT_RERANK_API_KEY",
-  rerank_api_base: "JIT_RERANK_API_BASE",
-  rerank_model: "JIT_RERANK_MODEL",
-  api_key: "JIT_API_KEY",
+function boundedInteger(value: unknown, max: number): number | undefined {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= max
+    ? parsed
+    : undefined;
+}
+
+function unitInterval(value: unknown): number | undefined {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.min(1, Math.max(0, parsed)) : undefined;
+}
+
+interface ConfigField {
+  /** Environment variable that overrides this key; omit when there is none. */
+  env?: string;
+  /**
+   * Parse a raw value from `config.json` or an environment variable. Returning
+   * `undefined` rejects it, so the default (or the previously stored value) is
+   * kept. Both sources share one parser, so the file and the environment can
+   * never drift apart.
+   */
+  parse?: (raw: unknown) => unknown;
+}
+
+/**
+ * Every `Config` key described once. `Record<keyof Config, ...>` means adding a
+ * key without a rule is a compile error rather than a silent gap.
+ */
+const CONFIG_FIELDS: Record<keyof Config, ConfigField> = {
+  embedding_provider: {
+    env: "JIT_EMBEDDING_PROVIDER",
+    parse: (raw) =>
+      raw === "local" || raw === "openai-compatible" ? raw : undefined,
+  },
+  embedding_local_model: { env: "JIT_EMBEDDING_MODEL", parse: textValue },
+  embedding_local_dim: {
+    env: "JIT_EMBEDDING_DIM",
+    parse: (raw) => boundedInteger(raw, MAX_EMBEDDING_DIM),
+  },
+  embedding_api_key: { env: "JIT_EMBEDDING_API_KEY", parse: textValue },
+  embedding_api_base: { env: "JIT_EMBEDDING_API_BASE", parse: textValue },
+  embedding_api_model: { env: "JIT_EMBEDDING_API_MODEL", parse: textValue },
+  embedding_api_dim: {
+    env: "JIT_EMBEDDING_API_DIM",
+    parse: (raw) => boundedInteger(raw, MAX_EMBEDDING_DIM),
+  },
+  rerank_api_key: { env: "JIT_RERANK_API_KEY", parse: textValue },
+  rerank_api_base: { env: "JIT_RERANK_API_BASE", parse: textValue },
+  rerank_model: { env: "JIT_RERANK_MODEL", parse: textValue },
+  api_key: { env: "JIT_API_KEY", parse: textValue },
+  confidence_threshold: { env: "JIT_CONFIDENCE_THRESHOLD", parse: unitInterval },
+  first_run: { parse: (raw) => (typeof raw === "boolean" ? raw : undefined) },
 };
+
+const CONFIG_KEYS = Object.keys(CONFIG_FIELDS) as Array<keyof Config>;
 
 export function ensureJitDir(): void {
   mkdirSync(INDEX_DIR, { recursive: true });
@@ -193,41 +217,13 @@ function readStoredConfig(): Partial<Config> {
     return {};
   }
   const raw = parsed as Record<string, unknown>;
-  const stored: Partial<Config> = {};
-  for (const key of FILE_KEYS) {
+  const stored: Record<string, unknown> = {};
+  for (const key of CONFIG_KEYS) {
     if (!(key in raw)) continue;
-    const value = raw[key];
-    if (key === "embedding_provider") {
-      if (value === "local" || value === "openai-compatible") {
-        stored.embedding_provider = value;
-      }
-      continue;
-    }
-    if (key === "embedding_local_dim" || key === "embedding_api_dim") {
-      const parsed = Number(value);
-      if (Number.isInteger(parsed) && parsed >= 1 && parsed <= 16384) {
-        stored[key] = parsed;
-      }
-      continue;
-    }
-    if (key === "first_run") {
-      if (typeof value === "boolean") {
-        (stored as Record<string, unknown>)[key] = value;
-      }
-      continue;
-    }
-    if (key === "confidence_threshold") {
-      const parsed = Number(value);
-      if (Number.isFinite(parsed)) {
-        stored.confidence_threshold = parsed;
-      }
-      continue;
-    }
-    if (typeof value === "string") {
-      (stored as Record<string, unknown>)[key] = value;
-    }
+    const value = CONFIG_FIELDS[key].parse?.(raw[key]);
+    if (value !== undefined) stored[key] = value;
   }
-  return stored;
+  return stored as Partial<Config>;
 }
 
 // `loadConfig` is on the hot path (every API request, the auth check, every
@@ -261,46 +257,23 @@ function readStoredConfigCached(): Partial<Config> {
 
 export function loadConfig(): Config {
   const config: Config = { ...DEFAULT_CONFIG, ...readStoredConfigCached() };
-  for (const [key, envName] of Object.entries(ENV_KEYS) as Array<
-    [keyof Config, string]
-  >) {
-    const value = process.env[envName];
-    if (value) {
+
+  // The environment wins over config.json for every key that declares it.
+  for (const key of CONFIG_KEYS) {
+    const envName = CONFIG_FIELDS[key].env;
+    if (!envName) continue;
+    const raw = process.env[envName];
+    if (raw === undefined || raw === "") continue;
+    const value = CONFIG_FIELDS[key].parse?.(raw);
+    if (value !== undefined) {
       (config as unknown as Record<string, unknown>)[key] = value;
     }
   }
+
   config.first_run = Boolean(config.first_run);
-  if (process.env.JIT_EMBEDDING_PROVIDER === "local" ||
-      process.env.JIT_EMBEDDING_PROVIDER === "openai-compatible") {
-    config.embedding_provider = process.env.JIT_EMBEDDING_PROVIDER;
-  }
-  const localModelEnv = process.env.JIT_EMBEDDING_MODEL;
-  if (localModelEnv) config.embedding_local_model = localModelEnv;
-  const localDimEnv = Number(process.env.JIT_EMBEDDING_DIM);
-  if (
-    process.env.JIT_EMBEDDING_DIM &&
-    Number.isInteger(localDimEnv) &&
-    localDimEnv >= 1 &&
-    localDimEnv <= 16384
-  ) {
-    config.embedding_local_dim = localDimEnv;
-  }
-  const apiDimEnv = Number(process.env.JIT_EMBEDDING_API_DIM);
-  if (
-    process.env.JIT_EMBEDDING_API_DIM &&
-    Number.isInteger(apiDimEnv) &&
-    apiDimEnv >= 1 &&
-    apiDimEnv <= 16384
-  ) {
-    config.embedding_api_dim = apiDimEnv;
-  }
-  const envThreshold = Number(process.env.JIT_CONFIDENCE_THRESHOLD);
-  if (process.env.JIT_CONFIDENCE_THRESHOLD && Number.isFinite(envThreshold)) {
-    config.confidence_threshold = envThreshold;
-  }
-  config.confidence_threshold = Number.isFinite(Number(config.confidence_threshold))
-    ? Math.min(1, Math.max(0, Number(config.confidence_threshold)))
-    : CONFIDENCE_THRESHOLD;
+  config.confidence_threshold =
+    unitInterval(config.confidence_threshold) ??
+    DEFAULT_CONFIG.confidence_threshold;
   return config;
 }
 
@@ -343,7 +316,7 @@ export function saveConfig(updates: Partial<Config>): Config {
   for (const [key, value] of Object.entries(updates) as Array<
     [keyof Config, unknown]
   >) {
-    if (FILE_KEYS.has(key) && value !== undefined && value !== null) {
+    if (value !== undefined && value !== null) {
       (stored as Record<string, unknown>)[key] = value;
     }
   }
@@ -351,18 +324,6 @@ export function saveConfig(updates: Partial<Config>): Config {
   atomicWriteFile(CONFIG_FILE, JSON.stringify(stored, null, 2) + "\n", 0o600);
   storedConfigCache = null;
   return loadConfig();
-}
-
-export function getConfigValue<K extends keyof Config>(key: K): Config[K] {
-  return loadConfig()[key];
-}
-
-export function isFirstRun(): boolean {
-  return Boolean(loadConfig().first_run);
-}
-
-export function completeFirstRun(): void {
-  saveConfig({ first_run: false });
 }
 
 export function publicConfig(): PublicConfig {
@@ -399,12 +360,4 @@ export function publicConfig(): PublicConfig {
   return redacted;
 }
 
-export function configFingerprint(): string {
-  return createHash("sha256")
-    .update(JSON.stringify(loadConfig()))
-    .digest("hex");
-}
 
-export function isPosix(): boolean {
-  return platform() !== "win32";
-}

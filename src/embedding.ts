@@ -7,6 +7,7 @@ import {
 
 import { getEmbeddingSettings, MODEL_CACHE_DIR } from "./config.js";
 import { logger } from "./logger.js";
+import { isLocalEndpoint } from "./net.js";
 
 env.cacheDir = MODEL_CACHE_DIR;
 env.allowLocalModels = true;
@@ -57,12 +58,6 @@ function getExtractor(model: string): Promise<FeatureExtractionPipeline> {
     );
   });
   return extractorPromise;
-}
-
-export function resetEmbeddingModel(): void {
-  extractorPromise = null;
-  extractorModel = "";
-  lastFailureAt = 0;
 }
 
 function normalizedVector(values: ArrayLike<number>, dimensions: number): Float32Array {
@@ -120,8 +115,8 @@ async function embedWithApi(texts: string[]): Promise<Float32Array[]> {
   }
   let localEndpoint = false;
   try {
-    const hostname = new URL(settings.apiBase).hostname.toLowerCase();
-    localEndpoint = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(hostname);
+    new URL(settings.apiBase); // reject a malformed base before reporting auth
+    localEndpoint = isLocalEndpoint(settings.apiBase);
   } catch {
     throw new Error("embeddings API base is not a valid URL");
   }

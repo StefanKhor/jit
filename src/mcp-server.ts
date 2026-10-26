@@ -6,7 +6,6 @@ import { z } from "zod";
 
 import { VERSION } from "./config.js";
 import { logger } from "./logger.js";
-import { closeDb } from "./storage/db.js";
 import { warmupEmbeddingModel } from "./embedding.js";
 import { evaluate, recordRetrieval } from "./retrieval/retriever.js";
 
@@ -156,7 +155,6 @@ export async function serveMcp(): Promise<void> {
 
   const stop = (signal: string): void => {
     logger.info("received %s, shutting down", signal);
-    closeDb();
     process.exit(0);
   };
   process.once("SIGINT", () => stop("SIGINT"));

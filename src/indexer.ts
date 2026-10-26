@@ -14,8 +14,6 @@ import matter from "gray-matter";
 import {
   DEFAULT_SKILL_PATHS,
   embeddingSignature,
-  EMBEDDING_SIGNATURE_KEY,
-  INDEX_DIR,
   MAX_SKILL_BYTES,
 } from "./config.js";
 import { embedTexts } from "./embedding.js";
@@ -23,21 +21,19 @@ import { logger } from "./logger.js";
 import {
   clearIndex,
   dataVersion,
-  deleteItem as dbDeleteItem,
-  getItem,
-  getMeta,
-  getStats,
-  initDb,
-  listItems,
-  setEnabled as dbSetEnabled,
-  setMeta,
-  transaction,
-  upsertItem,
+  deleteItem,
+  getEmbeddingSignature,
   getExisting,
-} from "./storage/db.js";
-import type { IndexItem, ListItem, Stats } from "./types.js";
+  getItem,
+  getStats,
+  listItems,
+  setEnabled,
+  upsertItems,
+  type UpsertRow,
+} from "./storage/store.js";
+import type { IndexItem } from "./types.js";
 
-export { clearIndex, dataVersion, getItem, getStats, listItems };
+export { clearIndex, dataVersion, deleteItem, getItem, getStats, listItems, setEnabled };
 
 const TOP_LEVEL_MARKDOWN = /\.md$/i;
 const SKIP_DIRS = new Set([
@@ -56,10 +52,6 @@ const MAX_SCAN_DEPTH = 6;
 
 // Batch local or remote embedding requests; import accepts up to 50k items.
 const EMBED_BATCH_SIZE = 64;
-
-// Records which embedding model produced the stored vectors. When the model or
-// dimension changes, every vector is invalid and must be recomputed even if the
-// entry text is unchanged.
 
 export function expandHome(value: string): string {
   if (value === "~") return homedir();
@@ -239,7 +231,6 @@ export interface IndexResult {
 export async function indexItems(
   items: IndexItem[],
 ): Promise<IndexResult> {
-  const db = initDb();
   let added = 0;
   let updated = 0;
   let skipped = 0;
@@ -247,8 +238,10 @@ export async function indexItems(
 
   try {
     const activeSignature = embeddingSignature();
-    const modelChanged = getMeta(db, EMBEDDING_SIGNATURE_KEY) !== activeSignature;
-    const existing = getExisting(db);
+    // When the embedding model or dimension changes, every stored vector is
+    // invalid and must be recomputed even if the entry text is unchanged.
+    const modelChanged = getEmbeddingSignature() !== activeSignature;
+    const existing = getExisting();
     const pending: Array<{
       item: IndexItem;
       digest: string;
@@ -316,26 +309,25 @@ export async function indexItems(
     }
 
     const now = new Date().toISOString();
+    const rows: UpsertRow[] = [];
     let addedNow = 0;
     let updatedNow = 0;
-    transaction(db, () => {
-      for (let index = 0; index < pending.length; index += 1) {
-        const entry = pending[index];
-        if (!entry) continue;
-        const { item, digest, current } = entry;
-        upsertItem(db, {
-          item,
-          contentHash: digest,
-          embedding: embeddings[index] ?? null,
-          updatedAt: now,
-        });
-        if (current) updatedNow += 1;
-        else addedNow += 1;
-      }
-      // Only record the signature once vectors were actually produced, so a
-      // failed run retries instead of marking stale vectors as current.
-      if (embedded) setMeta(db, EMBEDDING_SIGNATURE_KEY, activeSignature);
-    });
+    for (let index = 0; index < pending.length; index += 1) {
+      const entry = pending[index];
+      if (!entry) continue;
+      const { item, digest, current } = entry;
+      rows.push({
+        item,
+        contentHash: digest,
+        embedding: embeddings[index] ?? null,
+        updatedAt: now,
+      });
+      if (current) updatedNow += 1;
+      else addedNow += 1;
+    }
+    // Only record the signature once vectors were actually produced, so a
+    // failed run retries instead of marking stale vectors as current.
+    upsertItems(rows, embedded ? activeSignature : undefined);
     added += addedNow;
     updated += updatedNow;
 
@@ -352,14 +344,6 @@ export async function indexItems(
   }
 
   return { added, updated, skipped, errors };
-}
-
-export function deleteItem(id: string): boolean {
-  return dbDeleteItem(initDb(), id);
-}
-
-export function setEnabled(id: string, enabled: boolean): boolean {
-  return dbSetEnabled(initDb(), id, enabled);
 }
 
 export async function indexDefaultPaths(
@@ -396,18 +380,6 @@ export async function indexDefaultPaths(
   };
 }
 
-export function indexDirectory(): string {
-  return INDEX_DIR;
-}
-
 export function tokenEstimate(text: string): number {
   return Math.max(1, Math.ceil(text.length / 4));
-}
-
-export function getListItem(id: string): ListItem | null {
-  return listItems(initDb()).find((item) => item.id === id) || null;
-}
-
-export function getStatsSnapshot(): Stats {
-  return getStats(initDb());
 }

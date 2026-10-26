@@ -1,16 +1,8 @@
 import OpenAI from "openai";
 
 import { logger } from "../logger.js";
+import { isLocalEndpoint } from "../net.js";
 import type { Config, StoredItem } from "../types.js";
-
-function isLocalEndpoint(value: string): boolean {
-  try {
-    const hostname = new URL(value).hostname.toLowerCase();
-    return ["127.0.0.1", "localhost", "::1", "[::1]"].includes(hostname);
-  } catch {
-    return false;
-  }
-}
 
 export interface RerankOutcome {
   scores: Map<string, number>;

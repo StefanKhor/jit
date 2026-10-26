@@ -1,6 +1,5 @@
 import {
   embeddingSignature,
-  EMBEDDING_SIGNATURE_KEY,
   TOP_K_RETRIEVE,
   loadConfig,
 } from "../config.js";
@@ -9,10 +8,9 @@ import { logger } from "../logger.js";
 import {
   dataVersion,
   getAllItems,
-  getMeta,
-  initDb,
+  getEmbeddingSignature,
   logRetrieval,
-} from "../storage/db.js";
+} from "../storage/store.js";
 import type {
   NearMiss,
   SearchCandidate,
@@ -30,10 +28,9 @@ interface Corpus {
 let cache: Corpus | null = null;
 
 function loadCorpus(): Corpus | null {
-  const db = initDb();
-  const version = dataVersion(db);
+  const version = dataVersion();
   if (cache && cache.version === version) return cache;
-  const items = getAllItems(db);
+  const items = getAllItems();
   const corpus: Corpus = {
     version,
     items,
@@ -73,7 +70,7 @@ async function rank(
     );
   }
 
-  if (getMeta(initDb(), EMBEDDING_SIGNATURE_KEY) !== embeddingSignature()) {
+  if (getEmbeddingSignature() !== embeddingSignature()) {
     return {
       candidates: [],
       cosine: new Map(),
@@ -265,17 +262,6 @@ export function relatedSkills(
     .map((candidate) => candidate.name);
 }
 
-export async function retrieve(intent: string): Promise<SearchResult | null> {
-  return (await evaluate(intent, 1)).result;
-}
-
-export async function searchDebug(
-  intent: string,
-  topN = 5,
-): Promise<SearchCandidate[]> {
-  return (await evaluate(intent, topN)).candidates;
-}
-
 // Persist one retrieval for the dashboard's recall view. Telemetry only; a
 // failure here must never break retrieval.
 export function recordRetrieval(
@@ -286,7 +272,7 @@ export function recordRetrieval(
 ): void {
   try {
     const top = evaluation.candidates[0];
-    logRetrieval(initDb(), {
+    logRetrieval({
       source,
       intent,
       bestId: top?.id || "",
@@ -304,8 +290,4 @@ export function recordRetrieval(
       error instanceof Error ? error.message : String(error),
     );
   }
-}
-
-export function invalidateRetrievalCache(): void {
-  cache = null;
 }

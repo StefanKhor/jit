@@ -202,8 +202,8 @@ Imports are explicit, read-only on the source side, and shown before they run.
 
 1. **Embeddings** — local `Xenova/bge-small-en-v1.5` through Transformers.js
    (384 dimensions) by default, or a configured OpenAI-compatible embeddings API.
-2. **Vector search** — cosine similarity over embeddings stored in SQLite, top
-   candidates kept.
+2. **Vector search** — cosine similarity over embeddings stored in `index.json`,
+   top candidates kept.
 3. **Rerank (the decision layer)** — any OpenAI-compatible chat-completions
    endpoint re-scores the top vector candidates. When an endpoint is configured,
    every lookup is reranked — the model decides which skill wins; an
@@ -346,24 +346,25 @@ src/server/dashboard.ts ──► src/retrieval/retriever.ts
         │                         ▼
         │                  embeddings + OpenAI-compatible reranker
         ▼
-src/indexer.ts ──► src/storage/db.ts ──► ~/.jit
+src/indexer.ts ──► src/storage/store.ts ──► ~/.jit
         ▲
 src/mcp-server.ts (stdio) ──► src/mcp/client.ts ──► stdio / HTTP / SSE
 ```
 
-- **Storage** — SQLite (`node:sqlite`) is the source of truth. Embeddings are
-  stored as blobs; there is no separate vector file to rebuild. WAL mode and a
-  content hash keep the index self-consistent.
-- **Retrieval cache** — the corpus is keyed on a SQLite data signature, so
+- **Storage** — two plain files, no database. `index.json` is the source of
+  truth: every skill, its body, and its base64 embedding, replaced atomically on
+  each write. A content hash keeps the index self-consistent and `retrieval.jsonl`
+  holds append-only telemetry.
+- **Retrieval cache** — the corpus is keyed on the index file's mtime/size, so
   a dashboard edit is visible to a separately running `jit serve` immediately.
 - **Concurrency** — the dashboard is async; the MCP client owns one connection
   per server, deduplicates concurrent connects, and times out hung connections.
 - **Security** — the API is local by default, request bodies are size-limited,
   paths are resolved and checked before JIT-owned files are deleted, secrets are
   written with `0600` permissions, and keys are compared in constant time.
-- **Telemetry** — every retrieval is logged to a bounded table (date, source,
+- **Telemetry** — every retrieval is appended to a bounded log (date, source,
   intent, score, hit/miss) so recall can be inspected. Nothing is sent anywhere;
-  the log is a local SQLite table, cleared from Search.
+  the log is `~/.jit/retrieval.jsonl`, cleared from Search.
 
 ## NixOS
 

@@ -23,7 +23,6 @@ import {
   parseSkillText,
 } from "./indexer.js";
 import { logger } from "./logger.js";
-import { initDb } from "./storage/db.js";
 import type {
   ExportSkillsResult,
   IndexItem,
@@ -189,14 +188,13 @@ export async function exportSkills(
   }
   mkdirSync(dest, { recursive: true });
 
-  const db = initDb();
   const exported: Array<{ id: string; path: string }> = [];
   const skipped: string[] = [];
   const errors: string[] = [];
   for (const rawId of ids) {
     const itemId = String(rawId || "").trim();
     if (!itemId) continue;
-    const item = getItem(db, itemId);
+    const item = getItem(itemId);
     if (!item) {
       errors.push(`${itemId}: not found`);
       continue;
@@ -236,7 +234,7 @@ export async function exportSkills(
 }
 
 export async function removeSkillCopy(id: string): Promise<boolean> {
-  const item = getItem(initDb(), id);
+  const item = getItem(id);
   if (!item) return false;
   let fileRemoved = false;
   const resolved = path.resolve(item.path || "");

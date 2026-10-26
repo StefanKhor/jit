@@ -31,12 +31,11 @@ import {
 } from "../indexer.js";
 import {
   clearRetrievals,
-  closeDb,
   getAllItems,
-  initDb,
   retrievalStats,
-} from "../storage/db.js";
+} from "../storage/store.js";
 import { logger } from "../logger.js";
+import { isLocalEndpoint } from "../net.js";
 import {
   defaultManager,
   MCPClientManager,
@@ -50,7 +49,7 @@ import {
   removeSkillCopy,
   transferSkills,
 } from "../transfer.js";
-import type { IndexItem } from "../types.js";
+import type { Config, IndexItem } from "../types.js";
 
 const START_TIME = Date.now();
 
@@ -79,20 +78,7 @@ function isSecureApiBase(value: string): boolean {
   try {
     const url = new URL(value);
     if (url.protocol === "https:") return true;
-    return (
-      url.protocol === "http:" &&
-      ["localhost", "127.0.0.1", "[::1]", "::1"].includes(url.hostname)
-    );
-  } catch {
-    return false;
-  }
-}
-
-function isLocalEndpoint(value: string): boolean {
-  try {
-    return ["localhost", "127.0.0.1", "[::1]", "::1"].includes(
-      new URL(value).hostname.toLowerCase(),
-    );
+    return url.protocol === "http:" && isLocalEndpoint(value);
   } catch {
     return false;
   }
@@ -177,6 +163,104 @@ function setSecurityHeaders(c: Context): void {
   c.header("X-Frame-Options", "DENY");
 }
 
+const MAX_EMBEDDING_DIM = 16384;
+
+const EMBEDDING_UPDATE_KEYS = [
+  "embedding_local_model",
+  "embedding_api_key",
+  "embedding_api_base",
+  "embedding_api_model",
+] as const;
+
+const RERANK_UPDATE_KEYS = [
+  "rerank_api_key",
+  "rerank_api_base",
+  "rerank_model",
+] as const;
+
+/**
+ * Validate and normalise a dashboard config payload. Rules that span more than
+ * one field — a remote embedding endpoint needs a key, a local provider needs a
+ * model — live here so the route stays a two-liner and the rules can be read in
+ * one place.
+ */
+function buildConfigUpdates(body: Record<string, unknown>): Partial<Config> {
+  const updates: Record<string, unknown> = {};
+
+  for (const key of EMBEDDING_UPDATE_KEYS) {
+    if (key in body) updates[key] = String(body[key] || "").trim();
+  }
+  if ("embedding_api_base" in updates) {
+    updates.embedding_api_base = String(updates.embedding_api_base).replace(/\/+$/, "");
+  }
+  if ("embedding_provider" in body) {
+    if (!["local", "openai-compatible"].includes(String(body.embedding_provider))) {
+      throw new HttpError(400, "embedding_provider must be local or openai-compatible");
+    }
+    updates.embedding_provider = body.embedding_provider;
+  }
+  for (const key of ["embedding_local_dim", "embedding_api_dim"] as const) {
+    if (!(key in body)) continue;
+    const dimension = Number(body[key]);
+    if (!Number.isInteger(dimension) || dimension < 1 || dimension > MAX_EMBEDDING_DIM) {
+      throw new HttpError(400, `${key} must be an integer from 1 to ${MAX_EMBEDDING_DIM}`);
+    }
+    updates[key] = dimension;
+  }
+
+  const touchesEmbeddings = Object.keys(updates).some((key) =>
+    key.startsWith("embedding_"),
+  );
+  if (touchesEmbeddings) {
+    const current = loadConfig();
+    const provider = String(updates.embedding_provider || current.embedding_provider);
+    if (provider === "local") {
+      const model = String(updates.embedding_local_model ?? current.embedding_local_model);
+      if (!model) throw new HttpError(400, "a local embedding model is required");
+    } else {
+      const base = String(updates.embedding_api_base ?? current.embedding_api_base);
+      const model = String(updates.embedding_api_model ?? current.embedding_api_model);
+      const key = String(updates.embedding_api_key ?? current.embedding_api_key);
+      if (!base || !isSecureApiBase(base)) {
+        throw new HttpError(
+          400,
+          "embeddings API base must use https:// (http:// is allowed only for localhost)",
+        );
+      }
+      if (!model) throw new HttpError(400, "an embeddings model is required");
+      if (!key && !isLocalEndpoint(base)) {
+        throw new HttpError(400, "a remote embeddings endpoint requires an API key");
+      }
+    }
+  }
+
+  for (const key of RERANK_UPDATE_KEYS) {
+    if (key in body) updates[key] = String(body[key] || "").trim();
+  }
+  const rerankBase = String(updates.rerank_api_base || "");
+  if (rerankBase && !isSecureApiBase(rerankBase)) {
+    throw new HttpError(
+      400,
+      "rerank API base must use https:// (http:// is allowed only for localhost)",
+    );
+  }
+  if ("rerank_api_base" in updates) {
+    updates.rerank_api_base = rerankBase.replace(/\/+$/, "");
+  }
+
+  if ("confidence_threshold" in body) {
+    const parsed = Number(body.confidence_threshold);
+    if (!Number.isFinite(parsed)) {
+      throw new HttpError(400, "confidence_threshold must be a number");
+    }
+    updates.confidence_threshold = Math.min(1, Math.max(0, parsed));
+  }
+  if ("api_key" in body) updates.api_key = String(body.api_key || "").trim();
+  if (boolValue(body.complete_setup, false)) updates.first_run = false;
+
+  return updates as Partial<Config>;
+}
+
 export function createApp(): Hono {
   const app = new Hono();
   const manager = defaultManager();
@@ -224,7 +308,7 @@ export function createApp(): Hono {
   });
 
   app.get("/api/status", (c) => {
-    const stats = getStats(initDb());
+    const stats = getStats();
     return c.json({
       indexed: stats.total,
       enabled: stats.enabled,
@@ -232,7 +316,7 @@ export function createApp(): Hono {
   });
 
   app.get("/api/stats", async (c) => {
-    const stats = getStats(initDb());
+    const stats = getStats();
     const schemaTokens = await jitSchemaTokens();
     // At rest a plain skill setup keeps every name and description in context;
     // JIT keeps its fixed tool schema. A task's body is fetched on demand by
@@ -247,7 +331,7 @@ export function createApp(): Hono {
       ? Math.floor(stats.catalog_tokens / stats.total)
       : 0;
     const breakEven = breakEvenSize(schemaTokens, averageCatalog);
-    const retrieval = retrievalStats(initDb(), 1);
+    const retrieval = retrievalStats(1);
     return c.json({
       ...stats,
       tokens: {
@@ -270,106 +354,17 @@ export function createApp(): Hono {
   app.get("/api/config", (c) => c.json(publicConfig()));
 
   app.post("/api/config", async (c) => {
-    const body = await readJson(c);
-    const updates: Record<string, unknown> = {};
-    for (const key of [
-      "embedding_local_model",
-      "embedding_api_key",
-      "embedding_api_base",
-      "embedding_api_model",
-    ]) {
-      if (key in body) updates[key] = String(body[key] || "").trim();
-    }
-    if ("embedding_api_base" in updates) {
-      updates.embedding_api_base = String(updates.embedding_api_base).replace(/\/+$/, "");
-    }
-    if ("embedding_provider" in body) {
-      if (!["local", "openai-compatible"].includes(String(body.embedding_provider))) {
-        throw new HttpError(400, "embedding_provider must be local or openai-compatible");
-      }
-      updates.embedding_provider = body.embedding_provider;
-    }
-    for (const bodyKey of ["embedding_local_dim", "embedding_api_dim"] as const) {
-      if (!(bodyKey in body)) continue;
-      const dimension = Number(body[bodyKey]);
-      if (!Number.isInteger(dimension) || dimension < 1 || dimension > 16384) {
-        throw new HttpError(400, `${bodyKey} must be an integer from 1 to 16384`);
-      }
-      updates[bodyKey] = dimension;
-    }
-    const currentConfig = loadConfig();
-    const embeddingProvider = String(
-      updates.embedding_provider || currentConfig.embedding_provider,
-    );
-    const embeddingBase = String(
-      updates.embedding_api_base ?? currentConfig.embedding_api_base,
-    );
-    const embeddingModel = String(
-      updates.embedding_api_model ?? currentConfig.embedding_api_model,
-    );
-    const embeddingKey = String(
-      updates.embedding_api_key ?? currentConfig.embedding_api_key,
-    );
-    const localEmbeddingModel = String(
-      updates.embedding_local_model ?? currentConfig.embedding_local_model,
-    );
-    if (
-      Object.keys(updates).some((key) => key.startsWith("embedding_")) &&
-      embeddingProvider === "local" &&
-      !localEmbeddingModel
-    ) {
-      throw new HttpError(400, "a local embedding model is required");
-    }
-    if (
-      Object.keys(updates).some((key) => key.startsWith("embedding_")) &&
-      embeddingProvider === "openai-compatible"
-    ) {
-      if (!embeddingBase || !isSecureApiBase(embeddingBase)) {
-        throw new HttpError(
-          400,
-          "embeddings API base must use https:// (http:// is allowed only for localhost)",
-        );
-      }
-      if (!embeddingModel) {
-        throw new HttpError(400, "an embeddings model is required");
-      }
-      if (!embeddingKey && !isLocalEndpoint(embeddingBase)) {
-        throw new HttpError(400, "a remote embeddings endpoint requires an API key");
-      }
-    }
-    for (const key of ["rerank_api_key", "rerank_api_base", "rerank_model"]) {
-      if (key in body) updates[key] = String(body[key] || "").trim();
-    }
-    const rerankBase = String(updates.rerank_api_base || "");
-    if (rerankBase && !isSecureApiBase(rerankBase)) {
-      throw new HttpError(
-        400,
-        "rerank API base must use https:// (http:// is allowed only for localhost)",
-      );
-    }
-    if ("rerank_api_base" in updates) {
-      updates.rerank_api_base = rerankBase.replace(/\/+$/, "");
-    }
-    if ("confidence_threshold" in body) {
-      const parsed = Number(body.confidence_threshold);
-      if (!Number.isFinite(parsed)) {
-        throw new HttpError(400, "confidence_threshold must be a number");
-      }
-      updates.confidence_threshold = Math.min(1, Math.max(0, parsed));
-    }
-    if ("api_key" in body) updates.api_key = String(body.api_key || "").trim();
-    if (boolValue(body.complete_setup, false)) updates.first_run = false;
-    saveConfig(updates as Partial<import("../types.js").Config>);
+    saveConfig(buildConfigUpdates(await readJson(c)));
     return c.json({ saved: true, config: publicConfig() });
   });
 
   app.post("/api/embeddings/reindex", async (c) => {
-    const items = getAllItems(initDb());
+    const items = getAllItems();
     return c.json(await indexItems(items));
   });
 
   app.get("/api/skills", (c) => {
-    const items = listItems(initDb());
+    const items = listItems();
     const root = path.resolve(JIT_SKILLS_DIR);
     return c.json({
       skills: items.map((item) => ({
@@ -390,7 +385,7 @@ export function createApp(): Hono {
 
   app.get("/api/skills/:id", (c) => {
     const id = c.req.param("id");
-    const item = getItem(initDb(), id);
+    const item = getItem(id);
     if (!item) throw new HttpError(404, "not found");
     const {
       embedding: _embedding,
@@ -409,11 +404,11 @@ export function createApp(): Hono {
     const purge = ["1", "true", "yes"].includes(
       String(c.req.query("purge") || "0").toLowerCase(),
     );
-    const item = getItem(initDb(), id);
+    const item = getItem(id);
     if (!item) throw new HttpError(404, "not found");
     if (purge) {
       const fileRemoved = await removeSkillCopy(id);
-      if (getItem(initDb(), id)) {
+      if (getItem(id)) {
         throw new HttpError(500, "could not remove the JIT-owned skill copy");
       }
       return c.json({ removed: id, file_removed: fileRemoved, purged: true });
@@ -498,7 +493,7 @@ export function createApp(): Hono {
     for (const id of ids) {
       try {
         if (action === "remove") {
-          if (!getItem(initDb(), id)) throw new Error("not found");
+          if (!getItem(id)) throw new Error("not found");
           // Unindexes always; only deletes the file when JIT owns the copy.
           if (await removeSkillCopy(id)) filesRemoved += 1;
         } else if (!setEnabled(id, action === "enable")) {
@@ -609,17 +604,17 @@ export function createApp(): Hono {
   app.get("/api/retrieval", (c) => {
     const raw = Number(c.req.query("limit") || 100);
     const limit = Number.isFinite(raw) ? raw : 100;
-    const stats = retrievalStats(initDb(), limit);
+    const stats = retrievalStats(limit);
     stats.threshold = loadConfig().confidence_threshold;
     return c.json(stats);
   });
 
   app.post("/api/retrieval/clear", (c) => {
-    return c.json({ cleared: clearRetrievals(initDb()) });
+    return c.json({ cleared: clearRetrievals() });
   });
 
   app.get("/api/export", (c) => {
-    const items = getAllItems(initDb()).map((item) => {
+    const items = getAllItems().map((item) => {
       const { embedding: _embedding, content_hash: _hash, updated_at: _updated, ...rest } = item;
       return rest;
     });
@@ -746,7 +741,6 @@ export function startDashboard(
       setTimeout(resolve, 5_000).unref();
     });
     void Promise.race([shutdownMcp(), timeout]).finally(() => {
-      closeDb();
       process.exit(0);
     });
   };
