@@ -5,6 +5,7 @@ import {
   embeddingSignature,
   INDEX_FILE,
 } from "../config.js";
+import { readSkillBody } from "../skill-text.js";
 import type {
   IndexItem,
   ListItem,
@@ -13,10 +14,15 @@ import type {
 } from "../types.js";
 
 /**
- * The index is one plain file, not a database. `index.json` holds every skill
- * (metadata, body, content hash, and its embedding as base64) plus the embedding
+ * The index is one plain file, not a database. `index.json` holds every skill's
+ * metadata, its content hash, and its embedding as base64, plus the embedding
  * signature. It is the single source of truth and is always replaced atomically,
  * so a reader sees either the whole previous file or the whole next one.
+ *
+ * It does not hold the body. A skill is a directory on disk and its `SKILL.md`
+ * stays the source of the text, so a lookup reads the body from there rather
+ * than serving a copy that drifts the moment someone edits the file. The one
+ * exception is an entry with no path to read — see `upsertItems`.
  *
  * That single-writer, atomic-replace model is what keeps writes safe without a
  * database. Reads are cached in-process and revalidated against the file's
@@ -30,7 +36,10 @@ interface Row {
   id: string;
   name: string;
   description: string;
+  /** Only kept for an entry with no path to read the body from. */
   body: string;
+  /** Body tokens, measured at index time so no read is needed to report them. */
+  tokens: number;
   path: string;
   enabled: boolean;
   content_hash: string;
@@ -99,11 +108,16 @@ function asRow(value: unknown): Row | null {
   const row = value as Record<string, unknown>;
   const id = String(row.id ?? "").trim();
   if (!id) return null;
+  const body = String(row.body ?? "");
   return {
     id,
     name: String(row.name ?? id),
     description: String(row.description ?? ""),
-    body: String(row.body ?? ""),
+    body,
+    // An index written before bodies moved out of the file carries no token
+    // count, so measure the body it still has.
+    tokens:
+      typeof row.tokens === "number" ? row.tokens : estimateTokens(body),
     path: String(row.path ?? ""),
     enabled: row.enabled !== false,
     content_hash: String(row.content_hash ?? ""),
@@ -122,7 +136,12 @@ function normalize(value: unknown): IndexFile {
   ) as Record<string, unknown>;
   const items = (Array.isArray(source.items) ? source.items : [])
     .map(asRow)
-    .filter((row): row is Row => row !== null);
+    .filter((row): row is Row => row !== null)
+    // Drop the body of anything with a file to read it from. An index written
+    // before bodies moved out of the file still carries a copy, and the copy is
+    // dead weight the moment the skill is edited. Stripping it here means the
+    // file converges on the next write of any kind, not only on a reindex.
+    .map((row) => (row.path ? { ...row, body: "" } : row));
   items.sort(byName);
   return {
     version: INDEX_VERSION,
@@ -198,7 +217,9 @@ function rowToItem(row: Row, includeBody = true): StoredItem {
     id: row.id,
     name: row.name,
     description: row.description,
-    body: includeBody ? row.body : "",
+    // The body is read from the skill file, not from the index. An entry with
+    // no path has nothing to read, so it falls back to the copy the index kept.
+    body: includeBody ? (row.path ? readSkillBody(row.path) : row.body) : "",
     path: row.path,
     enabled: row.enabled,
     content_hash: row.content_hash,
@@ -250,7 +271,7 @@ export function listItems(): ListItem[] {
     description: row.description,
     path: row.path,
     enabled: row.enabled,
-    tokens: estimateTokens(row.body),
+    tokens: row.tokens,
     catalog_tokens: catalogTokens(row),
     has_embedding: embeddingsCurrent && row.embedding !== null,
   }));
@@ -270,12 +291,12 @@ export function getStats(): Stats {
   for (const row of file.items) {
     if (row.enabled) enabled += 1;
     else disabled += 1;
-    const body = estimateTokens(row.body);
-    bodyTokens += body;
+    const tokens = row.tokens;
+    bodyTokens += tokens;
     catalog += catalogTokens(row);
-    if (body > largest) largest = body;
+    if (tokens > largest) largest = tokens;
     if (row.embedding !== null) embedded += 1;
-    heaviest.push({ name: row.name, tokens: body });
+    heaviest.push({ name: row.name, tokens });
   }
   const total = file.items.length;
   heaviest.sort((a, b) => b.tokens - a.tokens || a.name.localeCompare(b.name));
@@ -310,7 +331,10 @@ export function upsertItems(rows: UpsertRow[], signature?: string): void {
       id: item.id,
       name: item.name,
       description: item.description || "",
-      body: item.body || "",
+      // The body is read back from the skill file at lookup time. An entry with
+      // no path has no file to read, so it is the one case that keeps a copy.
+      body: item.path ? "" : item.body || "",
+      tokens: estimateTokens(item.body || ""),
       path: item.path || "",
       enabled: existing ? existing.enabled : true,
       content_hash: contentHash,

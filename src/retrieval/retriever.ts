@@ -10,6 +10,7 @@ import {
   dataVersion,
   getAllItems,
   getEmbeddingSignature,
+  getItem,
 } from "../storage/store.js";
 import type {
   NearMiss,
@@ -95,7 +96,9 @@ function scoreSpread(scores: number[]): ScoreSpread | null {
 function loadCorpus(): Corpus | null {
   const version = dataVersion();
   if (cache && cache.version === version) return cache;
-  const items = getAllItems();
+  // Metadata and vectors only. Bodies are read from their files for the one or
+  // two skills that are actually returned, never for the whole catalog.
+  const items = getAllItems(false);
   const corpus: Corpus = {
     version,
     items,
@@ -286,6 +289,10 @@ export async function evaluate(
     };
   });
 
+  // The corpus carries metadata and vectors, not bodies: a skill's text is
+  // read from its file only for the entries actually handed back.
+  const contentOf = (id: string): string => getItem(id)?.body ?? "";
+
   const results: SearchResult[] = reranked
     ? rerankOutcome.selected
         .map((id) => candidates.find((candidate) => candidate.id === id))
@@ -294,11 +301,11 @@ export async function evaluate(
           id: candidate.id,
           name: candidate.name,
           description: candidate.description,
-          content: candidate.body,
+          content: contentOf(candidate.id),
           path: candidate.path,
           reranked: true,
         }))
-    : cosineResult(candidates, threshold, cosineConfidence, debug);
+    : cosineResult(candidates, threshold, cosineConfidence, debug, contentOf);
 
   // What was closest, by vector distance, so a miss still shows the field it was
   // judged against. On the cosine path that is the same score the gate used.
@@ -347,6 +354,7 @@ function cosineResult(
   threshold: number,
   confidenceOf: (id: string) => number,
   debug: SearchCandidate[],
+  contentOf: (id: string) => string,
 ): SearchResult[] {
   const best = candidates[0];
   if (!best) return [];
@@ -356,7 +364,7 @@ function cosineResult(
     id: best.id,
     name: best.name,
     description: best.description,
-    content: best.body,
+    content: contentOf(best.id),
     path: best.path,
     confidence: Number(confidence.toFixed(4)),
     reranked: false,

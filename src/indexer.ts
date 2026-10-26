@@ -3,13 +3,10 @@ import { homedir } from "node:os";
 import {
   existsSync,
   lstatSync,
-  readFileSync,
   readdirSync,
   statSync,
 } from "node:fs";
 import path from "node:path";
-
-import matter from "gray-matter";
 
 import {
   DEFAULT_SKILL_PATHS,
@@ -19,6 +16,7 @@ import {
 } from "./config.js";
 import { embedTexts } from "./embedding.js";
 import { logger } from "./logger.js";
+import { parseSkillFile } from "./skill-text.js";
 import {
   clearIndex,
   dataVersion,
@@ -35,6 +33,8 @@ import {
 import type { IndexItem } from "./types.js";
 
 export { clearIndex, dataVersion, deleteItem, getItem, getStats, listItems, setEnabled };
+// Re-exported so the parse helpers keep their long-standing import site.
+export { parseSkillFile, parseSkillText } from "./skill-text.js";
 
 const TOP_LEVEL_MARKDOWN = /\.md$/i;
 const SKIP_DIRS = new Set([
@@ -126,51 +126,6 @@ export function discoverSkills(paths: string[] = DEFAULT_SKILL_PATHS): string[] 
   }
 
   return [...found].sort();
-}
-
-export function parseSkillText(
-  text: string,
-  sourcePath = "",
-  fallbackName = "inline-skill",
-): IndexItem {
-  if (Buffer.byteLength(text, "utf8") > MAX_SKILL_BYTES) {
-    throw new Error(`skill file exceeds ${MAX_SKILL_BYTES} bytes`);
-  }
-  const parsed = matter(text);
-  const meta = (parsed.data || {}) as Record<string, unknown>;
-  const body = (parsed.content || "").trim();
-
-  let name = String(meta.name || "").trim();
-  if (!name) {
-    if (sourcePath && path.basename(sourcePath) === "SKILL.md") {
-      name = path.basename(path.dirname(sourcePath));
-    } else if (sourcePath) {
-      name = path.basename(sourcePath, path.extname(sourcePath));
-    } else {
-      name = fallbackName;
-    }
-  }
-  name = name.replace(/[\\/]+/g, "-");
-  const title = String(meta.title || name).trim();
-  const description =
-    String(meta.description || "").trim() ||
-    body.slice(0, 120).replace(/\n/g, " ").trim() ||
-    "No description";
-  return {
-    id: name,
-    name: title || name,
-    description,
-    body,
-    path: sourcePath,
-  };
-}
-
-export function parseSkillFile(file: string): IndexItem {
-  const stat = statSync(file);
-  if (stat.size > MAX_SKILL_BYTES) {
-    throw new Error(`skill file exceeds ${MAX_SKILL_BYTES} bytes`);
-  }
-  return parseSkillText(readFileSync(file, "utf8"), file);
 }
 
 /**
