@@ -9,6 +9,13 @@ import { logger } from "./logger.js";
 import { warmupEmbeddingModel } from "./embedding.js";
 import { evaluate } from "./retrieval/retriever.js";
 
+// The server cannot push a reminder mid-session, so the one fresh channel it
+// controls is the tool's own result. This short cue rides on every result,
+// re-asserting the rule exactly where the model is looking — something the
+// one-time system-prompt instruction cannot do once the session grows.
+const CALL_HINT =
+  "Call JIT_FIND again whenever the work moves to a new domain or platform.";
+
 // The rule that gets the agent to call JIT. It is deliberately a recurring
 // condition, not a one-time "start of task" cue: a trigger the agent meets once
 // decays as the session grows, while one it re-meets on every domain shift keeps
@@ -59,7 +66,8 @@ export function registerFind(server: McpServer): void {
         intent: z
           .string()
           .describe(
-            "One-sentence search query: concrete action plus platform or domain.",
+            "One-sentence search query: concrete action plus platform or " +
+              'domain, e.g. "deploy a node app to azure".',
           ),
       },
       // Read-only, idempotent, local. Clients that gate on these hints can
@@ -90,15 +98,17 @@ export function registerFind(server: McpServer): void {
           name: result.name,
           content: result.content,
           ...(result.related ? { related: result.related } : {}),
+          hint: CALL_HINT,
         });
       }
       if (evaluation.nearMisses.length > 0) {
         return textResult({
           found: false,
           near_misses: evaluation.nearMisses.map((miss) => miss.name),
+          hint: CALL_HINT,
         });
       }
-      return textResult({ found: false });
+      return textResult({ found: false, hint: CALL_HINT });
     },
   );
 }
