@@ -204,10 +204,32 @@ function readIndex(): IndexFile {
   return file;
 }
 
+/**
+ * A row as written out. `body` is absent, not empty, for an entry that has a
+ * file to read: an empty string is still a key on every one of a hundred rows,
+ * saying only that there is nothing there.
+ */
+function serializeRow(row: Row): Record<string, unknown> {
+  const json: Record<string, unknown> = {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+  };
+  if (row.body) json.body = row.body;
+  json.tokens = row.tokens;
+  json.path = row.path;
+  json.enabled = row.enabled;
+  json.content_hash = row.content_hash;
+  json.updated_at = row.updated_at;
+  json.embedding = row.embedding;
+  return json;
+}
+
 function writeIndex(file: IndexFile): void {
   file.version = INDEX_VERSION;
   file.revision += 1;
-  atomicWriteFile(INDEX_FILE, `${JSON.stringify(file, null, 2)}\n`, 0o600);
+  const payload = { ...file, items: file.items.map(serializeRow) };
+  atomicWriteFile(INDEX_FILE, `${JSON.stringify(payload, null, 2)}\n`, 0o600);
   writeSeq += 1;
   cache = { token: currentToken(), file };
 }
