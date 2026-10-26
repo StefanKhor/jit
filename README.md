@@ -1,21 +1,20 @@
 # JIT — a search engine for skills
 
 **JIT works like a search engine for an agent's skills: the agent describes the
-task, JIT returns the one tested procedure for it — not ten links to read and
+task, JIT routes it to the tested procedure for it — not ten links to read and
 assemble. Everything stays local.**
 
 What makes it worth running:
 
-**Context.** At task time the agent calls
-`JIT_FIND("create a Linear issue for the login bug")` and gets the single best
-skill, or — when nothing clears the confidence threshold — `{"found": false}`
-plus a short `near_misses` list instead of a silent empty result. You carry one
+**Routing, with abstention.** At task time the agent calls
+`JIT_FIND("create a Linear issue for the login bug")` and gets the
+best-matching skill — or, when nothing clears the bar, `{"found": false}` plus
+a short `near_misses` list instead of a silent wrong answer. You carry one
 body, not a catalog. A multi-part task spans skills: a confident hit also lists
-up to two related skill names, and a second call loads the next body — one body
-per call, never a catalog. The MCP response carries only the skill name and its
-body — scores and ranking notes stay on the dashboard, where a human reads them.
-The whole shipped MCP surface is one
-tool: `JIT_FIND`.
+up to two related skill names, and a second call loads the next body — a couple
+of bodies at most, never a catalog. The MCP response carries only skill names,
+paths, and bodies — scores and ranking notes stay on the dashboard, where a
+human reads them. The whole shipped MCP surface is one tool: `JIT_FIND`.
 
 JIT stays quiet until it is called. MCP is pull-based, so JIT is built to be
 *invoked*, not to push: a small tool surface, sharp descriptions, and no
@@ -57,6 +56,15 @@ bun run dev
 The production build is a single self-contained `static/dashboard.html` served
 by the Node process. There is no CDN or runtime frontend build.
 
+## Upgrading
+
+Pull a new version, run `bun run build`, and restart any running `jit serve`:
+MCP servers are spawned long-lived by the client, so new code takes effect only
+when the client restarts the server. The index stores metadata and vectors,
+not bodies — an older build reading that index can answer `found: true` with
+empty content and no warning. On the new build a plain restart fixes it; no
+reindex is needed unless the embedding provider, model, or dimensions changed.
+
 ## Connect your agent
 
 Add JIT to your MCP client. For Claude Desktop, Cursor, or any client that uses
@@ -94,7 +102,7 @@ Restart the client. The agent now sees one tool:
 
 | Tool | What it does |
 |---|---|
-| `JIT_FIND(intent)` | Load the one skill that fits a concrete multi-step task. Returns the skill body, or `{"found": false}` with `near_misses`. |
+| `JIT_FIND(intent)` | Load the skill(s) that fit a concrete multi-step task. Returns the skill body — several when the reranker judges more than one fits — or `{"found": false}` with `near_misses`. |
 
 That is the whole surface. JIT is skills-only: every tool name, description, and
 schema sits in the agent's context for the entire session, so nothing else
@@ -116,7 +124,8 @@ sentence, concrete action plus platform or domain, e.g. "deploy a node app to
 azure". Leave out file paths and task details. Skip it for single-step actions
 you can do directly, or when a skill for this kind of work is already in
 context. On {"found": false} with near_misses, retry once with different
-phrasing, then proceed normally. A hit may list related skills — call again for
+phrasing, then proceed normally. A hit may return several skills when more
+than one fits the same intent, and may list related skills — call again for
 the next domain. Checking is the default, skipping is the exception: a lookup is
 cheap, a missed skill is expensive.
 ```
@@ -171,8 +180,8 @@ A single-file React SPA served by the Node process.
   the break-even index size, index composition, and heaviest entries.
 - **Skills** — list, read, enable/disable, index a path, transfer, and remove.
 - **MCP** — connect, disconnect, import a client config, add a server manually.
-- **Search** — live retrieval with the effective score, cosine, rerank
-  and the threshold, plus a confidence slider.
+- **Search** — live retrieval: the reranker's picks, or cosine scores against
+  the confidence slider on the cosine-only fallback.
 - **Settings** — local/cloud embeddings, the reranker, confidence threshold, dashboard auth,
   import/export, clear.
 
@@ -208,10 +217,13 @@ Imports are explicit, read-only on the source side, and shown before they run.
    top candidates kept. Each skill is embedded from its name, its description, and
    the opening prose of its body (up to 500 characters, with headings, banners,
    tables, lists, and code skipped), so wording that only appears in the body is
-   still findable.
+   still findable. The index stores metadata and vectors only — bodies are read
+   from the skill files just for the entries actually returned, so keep indexed
+   skills where they were indexed.
 3. **Rerank (the decision layer)** — any OpenAI-compatible chat-completions
-   endpoint re-scores the top vector candidates. When an endpoint is configured,
-   every lookup is reranked — the model decides which skill wins; an
+   endpoint reads the top vector candidates and *selects* the ones that fit the
+   intent — up to three, or none. When an endpoint is configured, every lookup
+   is reranked and its verdict is the answer, including "none of these fit"; an
    unconfigured install falls back to cosine and says so in the response.
 4. **Confidence, and the threshold** — a vector match is not judged on its raw
    cosine alone. Two unrelated skills already score around `0.56`, because every
@@ -222,9 +234,10 @@ Imports are explicit, read-only on the source side, and shown before they run.
    stands above the rest of *that query's* scores — so a match has to clear the
    threshold on both. The number shown as confidence is that same pair reduced
    to one value, which is why a high cosine that does not stand out still reads
-   as a low confidence. A reranked candidate is judged on its rerank score
-   alone. A small index, too small to have a meaningful spread, falls back to
-   the raw cosine. The default threshold is `0.60`.
+   as a low confidence. Reranked results carry no confidence — the reranker's
+   choice is categorical, so the threshold gates only the cosine fallback. A
+   small index, too small to have a meaningful spread, falls back to the raw
+   cosine. The default threshold is `0.60`.
 5. **Two-tier result** — a candidate above the threshold returns one skill body.
    Below it, `JIT_FIND` returns `{"found": false}` with up to
    three `near_misses` (names), so the agent can retry once with a sharper
@@ -255,7 +268,7 @@ the file and are never written back.
 | `JIT_HOST` | Dashboard bind address | `127.0.0.1` |
 | `JIT_PORT` | Dashboard port | `3000` |
 | `JIT_CONFIDENCE_THRESHOLD` | Minimum confidence to return a match; a vector match clears it on both its raw score and its standing above the query's other scores (0–1) | `0.60` |
-| `JIT_TOP_K` | Candidates retrieved before rerank | `20` |
+| `JIT_TOP_K` | Candidates retrieved before rerank | `10` |
 | `JIT_DISABLE_EMBEDDINGS` | Disable embedding requests; retrieval returns an unavailable warning | unset |
 | `JIT_EMBEDDING_PROVIDER` | `local` or `openai-compatible` | `local` |
 | `JIT_EMBEDDING_MODEL` | Local Transformers.js model | `Xenova/bge-small-en-v1.5` |
@@ -281,8 +294,7 @@ embeddings send indexed text and search queries to the configured endpoint;
 configure that only when you accept the data handling and possible costs. If
 embeddings are unavailable, JIT returns no match rather than changing retrieval
 semantics. JIT does not choose or contact a cloud provider unless you configure
-one.
-configuration of its own and leaves that to the environment you run it in.
+one, and keeps no configuration of its own beyond what you set in Settings.
 
 Auth is opt-in. When `JIT_API_KEY` is set (or a key is saved in Settings),
 `/api/*` requires `Authorization: Bearer <key>` or `X-API-Key: <key>`. The
@@ -364,8 +376,10 @@ src/mcp-server.ts (stdio) ──► src/mcp/client.ts ──► stdio / HTTP / S
 ```
 
 - **Storage** — one plain file, no database. `index.json` is the source of
-  truth: every skill, its body, and its base64 embedding, replaced atomically on
-  each write. A content hash keeps the index self-consistent.
+  truth: every skill's metadata and its base64 embedding, replaced atomically
+  on each write. Bodies are not stored — they are read from the skill files at
+  lookup time (only rows imported without a path keep their body in the file).
+  A content hash keeps the index self-consistent.
 - **Retrieval cache** — the corpus is keyed on the index file's mtime/size, so
   a dashboard edit is visible to a separately running `jit serve` immediately.
 - **Concurrency** — the dashboard is async; the MCP client owns one connection
