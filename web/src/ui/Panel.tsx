@@ -32,7 +32,13 @@ export function PageHead({
   );
 }
 
-/** A bordered surface. Everything on a page sits on one of these. */
+/**
+ * A bordered surface. Everything on a page sits on one of these.
+ *
+ * Three things make it read as a lit pane rather than a filled rectangle: the
+ * gradient ring (`edge`), the top-light (`surface`), and the ambient shadow
+ * (`lift`). Panels are translucent over the aurora, so the backdrop tints them.
+ */
 export function Panel({
   className,
   children,
@@ -41,7 +47,7 @@ export function Panel({
   return (
     <section
       className={cx(
-        "surface overflow-hidden rounded-2xl border border-line bg-panel/80",
+        "surface edge lift relative overflow-hidden rounded-2xl border border-line bg-panel/70 backdrop-blur-xl",
         className,
       )}
       {...props}
@@ -55,17 +61,20 @@ export function PanelHead({
   title,
   hint,
   actions,
+  tone = "accent",
   className,
 }: {
   title: ReactNode;
   hint?: ReactNode;
   actions?: ReactNode;
+  /** Tints the header's catch-light rule. `bad` marks a destructive pane. */
+  tone?: "accent" | "bad";
   className?: string;
 }) {
   return (
     <div
       className={cx(
-        "flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line px-5 py-3.5",
+        "relative flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line px-5 py-3.5",
         className,
       )}
     >
@@ -78,6 +87,14 @@ export function PanelHead({
       {actions ? (
         <div className="flex flex-wrap items-center gap-2">{actions}</div>
       ) : null}
+      {/* The rule under a header catches the light at its left edge. */}
+      <span
+        aria-hidden="true"
+        className={cx(
+          "pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r via-transparent to-transparent",
+          tone === "bad" ? "from-bad/40" : "from-accent/25",
+        )}
+      />
     </div>
   );
 }

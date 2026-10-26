@@ -38,13 +38,13 @@ export function Slider({
       disabled={disabled}
       onValueChange={([next]) => onValueChange(next ?? min)}
     >
-      <SliderPrimitive.Track className="relative h-1 w-full grow overflow-hidden rounded-full bg-line">
-        <SliderPrimitive.Range className="absolute h-full bg-accent" />
+      <SliderPrimitive.Track className="relative h-1 w-full grow overflow-hidden rounded-full bg-line/80 shadow-[0_1px_2px_0_rgb(0_0_0/0.5)_inset]">
+        <SliderPrimitive.Range className="absolute h-full bg-gradient-to-r from-accent-2/70 to-accent" />
       </SliderPrimitive.Track>
       <SliderPrimitive.Thumb
         id={id}
         aria-label={ariaLabel}
-        className="block size-3.5 rounded-full border border-line-2 bg-ink shadow-sm transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+        className="block size-3.5 rounded-full border border-line-2 bg-ink shadow-[0_1px_3px_0_rgb(0_0_0/0.6)] transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
       />
     </SliderPrimitive.Root>
   );

@@ -38,7 +38,7 @@ export function Dialog({
         <DialogPrimitive.Content
           aria-labelledby={labelledBy}
           className={cx(
-            "fixed left-1/2 top-1/2 z-[60] flex max-h-[min(46rem,calc(100dvh-2rem))] w-[min(46rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-line-2 bg-panel text-ink shadow-2xl shadow-black/70 outline-none",
+            "surface edge lift fixed left-1/2 top-1/2 z-[60] flex max-h-[min(46rem,calc(100dvh-2rem))] w-[min(46rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-line-2 bg-panel/85 text-ink backdrop-blur-2xl outline-none",
             "data-[state=open]:animate-dialog data-[state=closed]:animate-dialog-out",
             className,
           )}
@@ -62,10 +62,10 @@ export function DialogHead({
   children?: ReactNode;
 }) {
   return (
-    <header className="flex items-start justify-between gap-5 border-b border-line px-6 py-5">
+    <header className="relative flex items-start justify-between gap-5 border-b border-line px-6 py-5">
       <div className="min-w-0">
         {kicker ? <div className="kicker">{kicker}</div> : null}
-        <DialogPrimitive.Title className="mt-1.5 text-lg text-ink">
+        <DialogPrimitive.Title className="mt-2 text-lg text-ink">
           {title}
         </DialogPrimitive.Title>
         {children ? (
@@ -86,6 +86,11 @@ export function DialogHead({
           </svg>
         </IconButton>
       ) : null}
+      {/* The same top-lit rule that runs under a panel head. */}
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-accent/25 via-transparent to-transparent"
+      />
     </header>
   );
 }
@@ -114,7 +119,7 @@ export function DialogFoot({
   return (
     <footer
       className={cx(
-        "flex flex-wrap items-center justify-end gap-2 border-t border-line bg-inset/50 px-6 py-4",
+        "flex flex-wrap items-center justify-end gap-2 border-t border-line bg-inset/40 px-6 py-4 backdrop-blur",
         className,
       )}
     >

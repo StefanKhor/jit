@@ -36,7 +36,7 @@ export function SkillDialog({
 
             <section className="space-y-2">
               <h3 className="kicker">Body</h3>
-              <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-xl border border-line bg-inset p-3.5 font-mono text-xs leading-relaxed text-ink-2">
+              <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-xl border border-line bg-inset/80 p-3.5 font-mono text-xs leading-relaxed text-ink-2 shadow-[0_1px_2px_0_rgb(0_0_0/0.4)_inset]">
                 {detail.body || "(empty)"}
               </pre>
             </section>

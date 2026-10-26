@@ -46,7 +46,7 @@ export function Th({
     <th
       scope="col"
       className={cx(
-        "border-b border-line px-4 py-2.5 text-left text-[10px] font-medium uppercase tracking-[0.14em] text-ink-3",
+        "border-b border-line bg-inset/40 px-5 py-2.5 text-left font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-ink-3",
         className,
       )}
       {...props}
@@ -63,7 +63,7 @@ export function Td({
 }: TdHTMLAttributes<HTMLTableCellElement>) {
   return (
     <td
-      className={cx("border-b border-line/60 px-4 py-3 align-middle", className)}
+      className={cx("border-b border-line/60 px-5 py-3 align-middle", className)}
       {...props}
     >
       {children}
@@ -75,7 +75,7 @@ export function Tr({ className, ...props }: HTMLAttributes<HTMLTableRowElement>)
   return (
     <tr
       className={cx(
-        "transition-colors last:[&>td]:border-b-0 hover:bg-raised/40",
+        "transition-colors last:[&>td]:border-b-0 hover:bg-raised/50",
         className,
       )}
       {...props}

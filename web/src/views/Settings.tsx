@@ -422,7 +422,7 @@ export function Settings() {
                 </div>
               </form>
 
-              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line-2 pt-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-5">
                 <p className="max-w-sm text-xs leading-relaxed text-ink-3">
                   Rebuild all stored vectors after changing the provider, model, endpoint, or dimensions. This sends existing skill contents to the selected provider.
                 </p>
@@ -449,7 +449,7 @@ export function Settings() {
             />
             <PanelBody className="space-y-5">
               <p className="text-xs leading-relaxed text-ink-3">
-                Re-scores the top vector candidates with any OpenAI-compatible
+                Selects among the top vector candidates with any OpenAI-compatible
                 chat-completions endpoint — the model decides which skill wins.
                 When an endpoint and model are configured, every lookup is
                 reranked; until then JIT falls back to cosine and says so. For
@@ -525,17 +525,18 @@ export function Settings() {
           </Panel>
 
           <Panel>
-            <PanelHead title="Retrieval threshold" hint="recall vs precision" />
+            <PanelHead title="Retrieval threshold" hint="cosine fallback only" />
             <PanelBody className="space-y-5">
               <p className="text-xs leading-relaxed text-ink-3">
-                JIT returns a match only when the score clears this bar. Lower it
-                to catch more (more false positives), raise it to return only
-                confident matches. Weigh the effect against the Search view.
+                Applies to the cosine fallback. JIT returns a match only when its
+                similarity clears this bar — lower it to catch more (more false
+                positives), raise it to return only confident matches. Reranked
+                results are chosen by the model and ignore this bar.
               </p>
               <form className="space-y-5" onSubmit={saveThreshold}>
                 <Field
                   label="Confidence threshold"
-                  hint="Rerank scores and cosine similarity are 0–1. Default 0.6."
+                  hint="Cosine similarity is 0–1. Default 0.6; unused when a reranker is configured."
                 >
                   <div className="flex items-center gap-4">
                     <Slider
@@ -660,8 +661,8 @@ export function Settings() {
             </dl>
           </Panel>
 
-          <Panel className="border-bad/30">
-            <PanelHead title="Danger zone" hint="cannot be undone" />
+          <Panel>
+            <PanelHead tone="bad" title="Danger zone" hint="cannot be undone" />
             <PanelBody className="space-y-5">
               <p className="text-xs leading-relaxed text-ink-3">
                 Remove every item from the JIT index. JIT-owned skill files and

@@ -158,7 +158,7 @@ export function Skills() {
       />
 
       {ctx.skillSources ? (
-        <div className="flex flex-wrap items-center gap-x-8 gap-y-2 rounded-xl border border-line bg-inset/50 px-5 py-3.5">
+        <div className="surface flex flex-wrap items-center gap-x-8 gap-y-2 rounded-xl border border-line bg-inset/50 px-5 py-3.5">
           <Stat
             label="Local"
             value={fmt(ctx.skillSources.local)}

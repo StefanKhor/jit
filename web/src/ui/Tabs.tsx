@@ -39,7 +39,7 @@ export function TabList({
     <TabsPrimitive.List
       aria-label={label}
       className={cx(
-        "inline-flex items-center gap-1 rounded-full border border-line bg-inset p-0.5",
+        "inline-flex items-center gap-1 rounded-full border border-line bg-inset/80 p-0.5 shadow-[0_1px_2px_0_rgb(0_0_0/0.35)_inset]",
         className,
       )}
     >
@@ -61,8 +61,8 @@ export function Tab({
     <TabsPrimitive.Trigger
       value={value}
       className={cx(
-        "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1 text-xs text-ink-3 transition-colors hover:text-ink-2",
-        "data-[state=active]:bg-raised data-[state=active]:text-ink",
+        "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1 text-xs text-ink-3 transition-all hover:text-ink-2",
+        "data-[state=active]:bg-gradient-to-b data-[state=active]:from-raised data-[state=active]:to-raised/50 data-[state=active]:text-ink data-[state=active]:shadow-[0_1px_0_0_color-mix(in_oklab,var(--color-ivory)_8%,transparent)_inset,0_10px_18px_-14px_#000]",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30",
         className,
       )}

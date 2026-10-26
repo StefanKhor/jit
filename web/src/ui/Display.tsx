@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 
 import { fmt } from "../format";
 import { cx } from "./cx";
@@ -30,10 +30,7 @@ export function Wordmark({
     <span
       role="img"
       aria-label="JIT"
-      className={cx(
-        "inline-flex items-center gap-1.5 text-ink",
-        className,
-      )}
+      className={cx("inline-flex items-center gap-1.5 text-ink", className)}
     >
       <span className="relative inline-block align-middle">
         <pre aria-hidden="true" className={`${ASCII_LOGO_STYLE} invisible static`}>
@@ -134,6 +131,99 @@ export function Stat({
   );
 }
 
+/**
+ * A proportional arc — a value drawn as a fraction of a ring.
+ *
+ * The stroke is a gradient, and the arc draws itself in on mount, which makes a
+ * number that only changes by a fraction of a percent still read as a movement.
+ */
+type RingTone = "accent" | "accent-2" | "ok" | "warn" | "bad";
+
+const RING_STOPS: Record<RingTone, [string, string]> = {
+  accent: ["var(--color-accent-2)", "var(--color-accent)"],
+  "accent-2": ["var(--color-accent-3)", "var(--color-accent-2)"],
+  ok: ["var(--color-accent)", "var(--color-ok)"],
+  warn: ["var(--color-warn)", "var(--color-accent)"],
+  bad: ["var(--color-bad)", "var(--color-warn)"],
+};
+
+export function Ring({
+  value,
+  size = 132,
+  thickness = 8,
+  tone = "accent",
+  children,
+  className,
+  label,
+}: {
+  /** Fraction of the ring to fill, 0–1. */
+  value: number;
+  size?: number;
+  thickness?: number;
+  tone?: RingTone;
+  children?: ReactNode;
+  className?: string;
+  label?: string;
+}) {
+  const id = useId();
+  const ratio = Math.max(0, Math.min(1, Number(value) || 0));
+  const radius = 50 - thickness / 2;
+  const circumference = 2 * Math.PI * radius;
+  const filled = circumference * ratio;
+  const [from, to] = RING_STOPS[tone];
+
+  return (
+    <div
+      className={cx("relative shrink-0", className)}
+      style={{ width: size, height: size }}
+    >
+      <svg
+        viewBox="0 0 100 100"
+        className="size-full -rotate-90"
+        role="img"
+        aria-label={label}
+      >
+        <defs>
+          <linearGradient id={id} x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor={from} />
+            <stop offset="100%" stopColor={to} />
+          </linearGradient>
+        </defs>
+        <circle
+          cx="50"
+          cy="50"
+          r={radius}
+          fill="none"
+          stroke="var(--color-line-2)"
+          strokeWidth={thickness}
+          strokeOpacity={0.55}
+        />
+        <circle
+          cx="50"
+          cy="50"
+          r={radius}
+          fill="none"
+          stroke={`url(#${id})`}
+          strokeWidth={thickness}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={circumference - filled}
+          style={{
+            ["--draw-from" as string]: `${circumference}`,
+            ["--draw-to" as string]: `${circumference - filled}`,
+          }}
+          className="motion-safe:animate-draw"
+        />
+      </svg>
+      {children ? (
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          {children}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /** A hairline progress track, used for ratios and token budgets. */
 export function Meter({
   value,
@@ -195,7 +285,7 @@ export function Spinner({ className }: { className?: string }) {
 
 export function Kbd({ children }: { children: ReactNode }) {
   return (
-    <kbd className="num rounded border border-line-2 bg-raised px-1.5 py-0.5 text-[10px] text-ink-3">
+    <kbd className="num surface rounded-md border border-line-2 bg-raised px-1.5 py-0.5 text-[10px] text-ink-3">
       {children}
     </kbd>
   );

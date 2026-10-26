@@ -13,19 +13,21 @@ const button = cva(
   {
     variants: {
       variant: {
-        primary: "bg-ivory text-canvas hover:bg-ivory/90",
-        accent: "glow-accent bg-accent text-accent-ink hover:bg-accent/90",
+        primary:
+          "bg-ivory text-canvas shadow-[0_1px_0_0_rgba(255,255,255,0.5)_inset,0_8px_20px_-12px_rgba(255,255,255,0.4)] hover:bg-ivory/90",
+        accent:
+          "bg-gradient-to-b from-accent to-accent/85 text-accent-ink glow-accent hover:from-accent/90 hover:to-accent/75",
         outline:
-          "border border-line-2 text-ink hover:border-ink-3/60 hover:bg-raised",
+          "border border-line-2 bg-panel/50 text-ink backdrop-blur hover:border-ink-3/60 hover:bg-raised",
         ghost: "text-ink-2 hover:bg-raised hover:text-ink",
         danger: "border border-bad/30 text-bad hover:border-bad/55 hover:bg-bad/10",
       },
       size: {
-        sm: "h-7 rounded-md px-2.5 text-xs",
-        md: "h-9 rounded-lg px-3.5 text-sm",
+        sm: "h-7 rounded-lg px-2.5 text-xs",
+        md: "h-9 rounded-xl px-3.5 text-sm",
         lg: "h-11 rounded-xl px-5 text-sm",
-        icon: "size-9 rounded-lg",
-        "icon-sm": "size-7 rounded-md",
+        icon: "size-9 rounded-xl",
+        "icon-sm": "size-7 rounded-lg",
       },
     },
     defaultVariants: { variant: "outline", size: "md" },

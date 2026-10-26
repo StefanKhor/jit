@@ -27,7 +27,7 @@ export function Menu({
     <MenuPrimitive.Root>
       <MenuPrimitive.Trigger
         aria-label={label}
-        className="inline-flex size-7 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 data-[state=open]:bg-raised data-[state=open]:text-ink"
+        className="inline-flex size-7 items-center justify-center rounded-lg text-ink-3 transition-colors hover:bg-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 data-[state=open]:bg-raised data-[state=open]:text-ink"
       >
         <span aria-hidden="true" className="flex flex-col items-center gap-[3px]">
           <span className="size-[3px] rounded-full bg-current" />
@@ -39,7 +39,7 @@ export function Menu({
         <MenuPrimitive.Content
           align={align}
           sideOffset={6}
-          className="z-[70] min-w-44 overflow-hidden rounded-xl border border-line-2 bg-panel p-1 text-ink shadow-2xl shadow-black/60 data-[state=open]:animate-overlay"
+          className="surface edge lift z-[70] min-w-44 overflow-hidden rounded-xl border border-line-2 bg-panel/90 p-1 text-ink backdrop-blur-xl data-[state=open]:animate-overlay"
         >
           {items.map((item, index) =>
             "separator" in item ? (

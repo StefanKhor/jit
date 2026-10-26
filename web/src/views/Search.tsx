@@ -244,7 +244,7 @@ function SearchOutput({ data }: { data: SearchResponse }) {
                   <summary className="cursor-pointer text-xs text-ink-3">
                     Skill body
                   </summary>
-                  <pre className="mt-3 max-h-96 overflow-auto rounded-lg border border-line bg-inset p-3 font-mono text-xs text-ink-2">
+                  <pre className="mt-3 max-h-96 overflow-auto rounded-xl border border-line bg-inset/80 p-3.5 font-mono text-xs leading-relaxed text-ink-2 shadow-[0_1px_2px_0_rgb(0_0_0/0.4)_inset]">
                     {result.content}
                   </pre>
                 </details>

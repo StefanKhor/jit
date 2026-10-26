@@ -27,7 +27,7 @@ export function Segmented<T extends string>({
       role="tablist"
       aria-label={label}
       className={cx(
-        "inline-flex items-center gap-0.5 rounded-full border border-line bg-inset p-0.5",
+        "inline-flex items-center gap-0.5 rounded-full border border-line bg-inset/80 p-0.5 shadow-[0_1px_2px_0_rgb(0_0_0/0.35)_inset]",
         className,
       )}
     >
@@ -41,9 +41,9 @@ export function Segmented<T extends string>({
             aria-selected={active}
             onClick={() => onChange(option.value)}
             className={cx(
-              "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1 text-xs transition-colors",
+              "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1 text-xs transition-all",
               active
-                ? "bg-raised text-ink"
+                ? "bg-gradient-to-b from-raised to-raised/50 text-ink shadow-[0_1px_0_0_color-mix(in_oklab,var(--color-ivory)_8%,transparent)_inset,0_10px_18px_-14px_#000]"
                 : "text-ink-3 hover:text-ink-2",
             )}
           >

@@ -57,8 +57,8 @@ export function Select({
         id={id}
         aria-label={ariaLabel}
         className={cx(
-          "inline-flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-line-2 bg-inset px-3 text-left text-sm text-ink transition-colors",
-          "hover:border-ink-3/50 focus:border-accent/60 focus:outline-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/15",
+          "inline-flex h-9 w-full items-center justify-between gap-2 rounded-xl border border-line-2 bg-inset/80 px-3 text-left text-sm text-ink transition-all",
+          "shadow-[0_1px_2px_0_rgb(0_0_0/0.4)_inset] hover:border-ink-3/50 focus:border-accent/60 focus:bg-inset focus:outline-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/15",
           "data-[placeholder]:text-ink-3 disabled:cursor-not-allowed disabled:opacity-50",
           className,
         )}
@@ -72,7 +72,7 @@ export function Select({
         <SelectPrimitive.Content
           position="popper"
           sideOffset={6}
-          className="z-[70] max-h-72 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-xl border border-line-2 bg-panel text-ink shadow-2xl shadow-black/60 data-[state=open]:animate-overlay"
+          className="surface edge lift z-[70] max-h-72 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-xl border border-line-2 bg-panel/90 text-ink backdrop-blur-xl data-[state=open]:animate-overlay"
         >
           <SelectPrimitive.Viewport className="p-1">
             {options.map((option) => (

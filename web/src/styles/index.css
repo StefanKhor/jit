@@ -3,27 +3,33 @@
 /* ---------------------------------------------------------------------------
    JIT — design tokens.
 
-   One dark theme. Every colour and motion value in the dashboard comes from
-   this block. Nothing downstream hardcodes a hex.
+   One dark theme. Every colour, shadow, and motion value in the dashboard comes
+   from this block. Nothing downstream hardcodes a hex.
+
+   The palette is one accent (lime) plus two supporting signals, used only where
+   data needs to be told apart: sky for "the other side of the comparison",
+   violet for depth. Everything else is the neutral ramp, stepped by lightness.
 --------------------------------------------------------------------------- */
 @theme {
-  /* Surfaces — a warm near-black that steps up by lightness, never by hue. */
-  --color-canvas: #0a0a0b;
-  --color-inset: #0c0c0e;
-  --color-panel: #101013;
-  --color-raised: #17171b;
-  --color-line: #1d1d21;
-  --color-line-2: #2b2b31;
+  /* Surfaces — near-black that lifts toward blue as it rises. */
+  --color-canvas: #070709;
+  --color-inset: #0a0a0e;
+  --color-panel: #0d0d12;
+  --color-raised: #14141b;
+  --color-line: #1b1b23;
+  --color-line-2: #292934;
 
   /* Ink */
-  --color-ink: #ededec;
-  --color-ink-2: #9b9b98;
-  --color-ink-3: #67676a;
+  --color-ink: #f1f1ef;
+  --color-ink-2: #a2a2ac;
+  --color-ink-3: #6a6a76;
 
   /* Signal — the only chromatic voice. Used sparingly, for what is live. */
-  --color-ivory: #f2f1ec;
+  --color-ivory: #f4f3ee;
   --color-accent: #c9f24d;
-  --color-accent-ink: #101302;
+  --color-accent-ink: #0e1200;
+  --color-accent-2: #7dd3fc;
+  --color-accent-3: #c4b5fd;
   --color-ok: #5bd68d;
   --color-warn: #e6b055;
   --color-bad: #f0705f;
@@ -42,6 +48,8 @@
   --animate-dialog-out: dialog-out 0.14s ease-in;
   --animate-rise: rise-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
   --animate-sheen: sheen 7s linear infinite;
+  --animate-aurora: aurora 34s ease-in-out infinite alternate;
+  --animate-draw: draw 1.4s cubic-bezier(0.22, 1, 0.36, 1) both;
 
   @keyframes view-in {
     from {
@@ -115,6 +123,27 @@
       transform: translateX(320%);
     }
   }
+
+  /* The backdrop drifts, so a still page still breathes. */
+  @keyframes aurora {
+    from {
+      transform: translate3d(-1.5%, -1%, 0) scale(1.02);
+    }
+    to {
+      transform: translate3d(1.5%, 1.5%, 0) scale(1.06);
+    }
+  }
+
+  /* Arcs and rules draw themselves in on mount. Both ends are variables, so the
+     same keyframe serves a half-filled ring and a full-width rule. */
+  @keyframes draw {
+    from {
+      stroke-dashoffset: var(--draw-from, 1000);
+    }
+    to {
+      stroke-dashoffset: var(--draw-to, 0);
+    }
+  }
 }
 
 @layer base {
@@ -130,10 +159,23 @@
   body {
     @apply m-0 h-full bg-canvas font-sans text-sm leading-normal text-ink antialiased;
     text-rendering: optimizeLegibility;
+    font-synthesis-weight: none;
   }
 
-  /* The console backdrop: a faint instrument grid, faded out below the fold. */
+  /* A fine film grain over the whole canvas. Static, tiled, barely there — it
+     is what stops a large flat black from reading as an empty screen. */
   body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.4;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.35'/%3E%3C/svg%3E");
+  }
+
+  /* The instrument grid: a faint coordinate field, faded out below the fold. */
+  body::after {
     content: "";
     position: fixed;
     inset: 0;
@@ -150,8 +192,8 @@
         color-mix(in oklab, var(--color-ivory) 3.5%, transparent) 1px,
         transparent 1px
       );
-    background-size: 56px 56px;
-    opacity: 0.55;
+    background-size: 64px 64px;
+    opacity: 0.5;
     -webkit-mask-image: radial-gradient(
       140% 90% at 50% -15%,
       #000 0%,
@@ -160,30 +202,43 @@
     mask-image: radial-gradient(140% 90% at 50% -15%, #000 0%, transparent 72%);
   }
 
-  /* Two distant signal blooms — accent above, info below — never a flat field. */
-  body::after {
-    content: "";
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 0;
-    background:
-      radial-gradient(
-        85% 50% at 6% -10%,
-        color-mix(in oklab, var(--color-accent) 8%, transparent),
-        transparent 62%
-      ),
-      radial-gradient(
-        75% 55% at 102% 112%,
-        color-mix(in oklab, var(--color-info) 7%, transparent),
-        transparent 62%
-      );
-  }
-
   #root {
     position: relative;
     z-index: 1;
     height: 100%;
+  }
+
+  /* The aurora: three distant blooms that drift behind everything. Kept on the
+     app root rather than the body so it sits above the grain but below content. */
+  #root::before {
+    content: "";
+    position: fixed;
+    inset: -22%;
+    pointer-events: none;
+    z-index: -1;
+    background:
+      radial-gradient(
+        36% 34% at 10% 2%,
+        color-mix(in oklab, var(--color-accent) 17%, transparent),
+        transparent 68%
+      ),
+      radial-gradient(
+        40% 36% at 92% 8%,
+        color-mix(in oklab, var(--color-accent-2) 13%, transparent),
+        transparent 68%
+      ),
+      radial-gradient(
+        54% 48% at 66% 108%,
+        color-mix(in oklab, var(--color-accent-3) 13%, transparent),
+        transparent 72%
+      );
+    will-change: transform;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    #root::before {
+      animation: var(--animate-aurora);
+    }
   }
 
   h1,
@@ -254,6 +309,17 @@
   font-weight: 500;
 }
 
+/* A figure that carries the page. Optical tracking and a hint of compression,
+   so a number at 9rem reads as a mark rather than as very large body text. */
+@utility figure {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: -0.06em;
+  line-height: 0.82;
+  font-weight: 500;
+}
+
 /* Fine, monospaced rule used to separate dense blocks. */
 @utility hairline {
   border-color: var(--color-line);
@@ -263,8 +329,8 @@
 @utility surface {
   background-image: linear-gradient(
     180deg,
-    color-mix(in oklab, var(--color-ivory) 4%, transparent),
-    transparent 44%
+    color-mix(in oklab, var(--color-ivory) 5%, transparent),
+    transparent 46%
   );
 }
 
@@ -273,6 +339,57 @@
   box-shadow:
     0 0 0 1px color-mix(in oklab, var(--color-accent) 40%, transparent),
     0 0 24px -10px color-mix(in oklab, var(--color-accent) 70%, transparent);
+}
+
+/* A 1px top-lit border, drawn as a gradient ring rather than a flat stroke.
+   The whole visual difference between a flat rectangle and a lit panel. */
+@utility edge {
+  position: relative;
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    border-radius: inherit;
+    padding: 1px;
+    pointer-events: none;
+    background: linear-gradient(
+      170deg,
+      color-mix(in oklab, var(--color-ivory) 16%, transparent),
+      color-mix(in oklab, var(--color-ivory) 3%, transparent) 34%,
+      transparent 62%
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask-composite: exclude;
+  }
+}
+
+/* Ambient depth under a raised surface. Two stops: a tight contact shadow and
+   a wide, soft one. Never a single hard drop shadow. */
+@utility lift {
+  box-shadow:
+    0 1px 0 0 color-mix(in oklab, var(--color-ivory) 4%, transparent) inset,
+    0 1px 2px -1px rgb(0 0 0 / 0.6),
+    0 24px 48px -32px rgb(0 0 0 / 0.9);
+}
+
+/* Gradient ink, clipped to the glyphs. Reserved for the headline figure. */
+@utility ink-gradient {
+  background-image: linear-gradient(
+    168deg,
+    var(--color-ivory) 0%,
+    var(--color-accent) 58%,
+    color-mix(in oklab, var(--color-accent) 55%, var(--color-accent-2)) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 @media (prefers-reduced-motion: reduce) {

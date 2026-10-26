@@ -150,7 +150,7 @@ export function TransferDialog({
             <Tab value="out">Out of JIT</Tab>
           </TabList>
 
-          <div className="flex items-center gap-6 rounded-xl border border-line bg-inset/50 px-5 py-4">
+          <div className="surface flex items-center gap-6 rounded-xl border border-line bg-inset/50 px-5 py-4">
             <Stat label="Local" value={fmt(local)} hint="indexed in place" />
             <span aria-hidden="true" className="shrink-0 text-ink-3">
               {tab === "in" ? "→" : "←"}

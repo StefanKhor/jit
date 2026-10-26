@@ -3,7 +3,8 @@ import { useJit } from "../state/store";
 import type { Stats } from "../types";
 import { Meta } from "../ui/Badge";
 import { Button } from "../ui/Button";
-import { AnimatedNumber, Empty, Spinner, Stat } from "../ui/Display";
+import { cx } from "../ui/cx";
+import { AnimatedNumber, Empty, Ring, Spinner } from "../ui/Display";
 import { Panel, PanelBody, PanelHead } from "../ui/Panel";
 
 /** The one-line thesis of the product, above the fold. */
@@ -14,7 +15,9 @@ function Hero() {
       <h1 className="display mt-4 text-[2.5rem] text-ink sm:text-[3.25rem] lg:text-[4rem]">
         Load one skill,
         <br />
-        <span className="text-ink-3">not one hundred.</span>
+        <span className="bg-gradient-to-br from-ink-3 to-ink-3/40 bg-clip-text text-transparent">
+          not one hundred.
+        </span>
       </h1>
       <p className="mt-6 max-w-lg text-sm leading-relaxed text-ink-2">
         Every agent keeps a list of what it could do — names and descriptions,
@@ -25,80 +28,222 @@ function Hero() {
   );
 }
 
-/** The three headline figures, separated by true hairlines. */
-function Figures({ stats }: { stats: Stats }) {
+/**
+ * The headline band: the one number the product is arguing for, at the scale it
+ * deserves, next to the two quantities it is the ratio of.
+ *
+ * The ring encodes the same fact geometrically — JIT's schema is a sliver of the
+ * catalog it replaces — so the claim survives even if the numeral is skimmed.
+ */
+function Savings({ stats }: { stats: Stats }) {
   const tokens = stats.tokens;
   const jit = Number(tokens?.jit || 0);
   const catalog = Number(tokens?.catalog || 0);
-  // How many times lighter JIT is at rest — a ratio reads as a claim, where a
-  // percentage reads as a rounding error.
+  const saved = Number(tokens?.saved || 0);
+  const body = Number(tokens?.average_item || 0);
+  const breakEven = Number(tokens?.break_even || 0);
+  const total = stats.total || 0;
+
+  // A ratio reads as a claim; a percentage reads as a rounding error.
   const multiple = jit > 0 ? catalog / jit : 0;
   const lighter = multiple >= 1;
   const overhead = Math.max(0, jit - catalog);
-  const breakEven = Number(tokens?.break_even || 0);
-  const total = stats.total || 0;
-  const belowBreakEven = breakEven > 0 && total > 0 && total < breakEven;
+  const share = catalog > 0 ? Math.min(1, jit / catalog) : 0;
+  // The ring shows the share of the resting context that JIT takes out.
+  const reclaimed = lighter ? 1 - share : share;
+  const headline = lighter ? multiple : multiple ? 1 / multiple : 0;
 
-  const cells = [
+  const rows = [
+    {
+      key: "catalog",
+      label: "Plain skills",
+      note: "every name + description",
+      value: catalog,
+      width: 100,
+      bar: "bg-gradient-to-r from-info/70 to-info",
+      min: 0,
+    },
+    {
+      key: "jit",
+      label: "JIT",
+      note: "one fixed tool schema",
+      value: jit,
+      width: pct(jit, catalog || 1),
+      bar: "bg-gradient-to-r from-accent-2 via-accent to-accent",
+      min: 4,
+    },
+  ];
+
+  return (
+    <Panel className="motion-safe:animate-rise">
+      {/* A signal wash behind the figure — the one place the accent is allowed
+          to be atmospheric rather than an edge. Drawn as a gradient rather than
+          a blurred shape so the rounded corners clip it cleanly. */}
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(58% 84% at 2% 0%, color-mix(in oklab, var(--color-accent) 12%, transparent), transparent 68%), radial-gradient(52% 70% at 66% 118%, color-mix(in oklab, var(--color-accent-3) 9%, transparent), transparent 70%)",
+        }}
+      />
+
+      <PanelBody className="relative flex flex-col gap-9 py-8 lg:flex-row lg:items-center lg:gap-14 lg:py-11">
+        <div className="flex shrink-0 justify-center lg:justify-start">
+          <Ring
+            value={reclaimed}
+            size={288}
+            thickness={10}
+            tone={lighter ? "accent" : "warn"}
+            label={
+              lighter
+                ? `JIT uses ${Math.round(share * 1000) / 10}% of the tokens a plain catalog would`
+                : `JIT uses ${Math.round(share * 1000) / 10}% more tokens than a plain catalog`
+            }
+          >
+            <span className="flex items-start">
+              <AnimatedNumber
+                value={headline}
+                decimals={1}
+                className="figure ink-gradient text-[3.6rem] md:text-[4.2rem]"
+              />
+              <span className="figure mt-1 text-[1.9rem] text-accent/70 md:text-[2.2rem]">
+                ×
+              </span>
+            </span>
+            <span className="kicker mt-2 !text-accent/70">
+              {lighter ? "smaller" : "larger"}
+            </span>
+          </Ring>
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="kicker">
+            {lighter ? "Context saved" : "Standing overhead"}
+          </div>
+          <p className="mt-3 max-w-xl text-sm leading-relaxed text-ink-2">
+            Before a task begins, JIT holds{" "}
+            <span className="num text-ink">{fmt(jit)}</span> tokens where a plain
+            catalog of the same {fmt(total)}{" "}
+            {total === 1 ? "entry" : "entries"} holds{" "}
+            <span className="num text-ink">{fmt(catalog)}</span>.
+          </p>
+
+          <div className="mt-7 space-y-5">
+            {rows.map((row) => (
+              <div key={row.key}>
+                <div className="flex items-baseline justify-between gap-4">
+                  <span className="flex min-w-0 items-baseline gap-2">
+                    <span className="text-sm text-ink">{row.label}</span>
+                    <span className="hidden truncate text-xs text-ink-3 sm:inline">
+                      {row.note}
+                    </span>
+                  </span>
+                  <span className="num shrink-0 text-sm text-ink">
+                    {fmt(row.value)}
+                    <span className="ml-1 text-[11px] text-ink-3">tok</span>
+                  </span>
+                </div>
+                <div className="mt-2.5 h-2.5 overflow-hidden rounded-full bg-line/70">
+                  <div
+                    className={cx("h-full rounded-full", row.bar)}
+                    style={{
+                      width: `${row.width}%`,
+                      minWidth: row.min ? `${row.min}px` : undefined,
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <p className="mt-7 border-t border-line pt-5 text-sm leading-relaxed">
+            {lighter ? (
+              <>
+                <span className="num text-accent">{fmt(saved)}</span> tokens stay
+                out of context on every turn — and the gap widens with each entry
+                added, because the catalog grows and the schema does not.
+              </>
+            ) : (
+              <>
+                At rest, JIT carries <span className="num text-warn">{fmt(overhead)}</span>{" "}
+                more tokens than a plain catalog — a net cost until the catalog
+                passes <span className="num text-ink-2">{fmt(breakEven)}</span>{" "}
+                entries.
+              </>
+            )}
+          </p>
+
+          <p className="mt-3 flex items-start gap-2.5 text-xs leading-relaxed text-ink-3">
+            <span
+              aria-hidden="true"
+              className="mt-1.5 size-1.5 shrink-0 rounded-full bg-accent-2/70"
+            />
+            <span>
+              Both approaches fetch the same{" "}
+              <span className="num text-ink-2">~{fmt(body)}</span>-token skill body
+              on demand, so the body is not part of this count.
+            </span>
+          </p>
+        </div>
+      </PanelBody>
+    </Panel>
+  );
+}
+
+/** Quiet supporting figures, on one hairline-separated strip. */
+function Supporting({ stats }: { stats: Stats }) {
+  const tokens = stats.tokens;
+  const figures = [
     {
       key: "indexed",
       label: "Indexed",
       value: <AnimatedNumber value={stats.total || 0} />,
       unit: "entries",
-      hint: `${fmt(stats.enabled || 0)} enabled`,
+      hint: `${fmt(stats.enabled || 0)} enabled · ${fmt(stats.disabled || 0)} off`,
     },
     {
-      key: "rest",
-      label: "Context at rest",
-      value: <AnimatedNumber value={jit} />,
+      key: "body",
+      label: "Average body",
+      value: <AnimatedNumber value={tokens?.average_item || 0} />,
       unit: "tok",
-      hint: `${fmt(catalog)} for a plain catalog`,
+      hint: "loaded only on a hit",
     },
     {
-      key: "reduction",
-      label: lighter ? "Context saved" : "Overhead",
-      value: (
-        <AnimatedNumber
-          value={lighter ? multiple : multiple ? 1 / multiple : 0}
-          decimals={1}
-        />
-      ),
-      unit: "×",
-      hint: `${fmt(lighter ? tokens?.saved || 0 : overhead)} tokens ${
-        lighter ? "kept out of context" : "over a catalog"
-      }`,
+      key: "largest",
+      label: "Largest body",
+      value: <AnimatedNumber value={stats.largest || 0} />,
+      unit: "tok",
+      hint: `${fmt(stats.body_tokens || 0)} tok across the index`,
+    },
+    {
+      key: "break",
+      label: "Break-even",
+      value: <AnimatedNumber value={tokens?.break_even || 0} />,
+      unit: "entries",
+      hint: "where JIT starts to win",
     },
   ];
 
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line lg:grid-cols-3">
-        {cells.map((cell) => (
-          <div key={cell.key} className="bg-panel p-5 md:p-6">
-            <Stat
-              size="lg"
-              label={cell.label}
-              value={cell.value}
-              unit={cell.unit}
-              hint={cell.hint}
-            />
+    <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line lg:grid-cols-4">
+      {figures.map((figure) => (
+        <div
+          key={figure.key}
+          className="surface bg-panel/60 p-5 backdrop-blur-xl"
+        >
+          <div className="kicker">{figure.label}</div>
+          <div className="mt-2.5 flex items-baseline gap-1.5">
+            <span className="num display text-3xl leading-none text-ink">
+              {figure.value}
+            </span>
+            <span className="text-xs text-ink-3">{figure.unit}</span>
           </div>
-        ))}
-      </div>
-      {belowBreakEven ? (
-        <p className="flex items-start gap-2.5 text-xs leading-relaxed text-ink-3">
-          <span aria-hidden="true" className="mt-1.5 size-1.5 shrink-0 rounded-full bg-warn" />
-          <span>
-            Below the <span className="num text-ink-2">{fmt(breakEven)}</span>-entry
-            break-even. JIT's{" "}
-            <span className="num text-ink-2">{fmt(jit)}</span>-token tool schema is
-            smaller than a catalog only once there are more entries than that — at{" "}
-            {fmt(total)} {total === 1 ? "entry" : "entries"} a plain catalog (
-            <span className="num text-ink-2">{fmt(catalog)}</span> tok) is the lighter
-            resting context. JIT wins at {fmt(breakEven)} entries or more.
-          </span>
-        </p>
-      ) : null}
+          <div className="mt-2.5 text-xs leading-relaxed text-ink-3">
+            {figure.hint}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -112,10 +257,7 @@ function EmbeddingCoverage({ stats }: { stats: Stats }) {
   const embedded = Math.min(total, Number(coverage.embedded || 0));
   const missing = Math.max(0, total - embedded);
   const ratio = total ? embedded / total : 0;
-  const percentage = Math.round(ratio * 100);
-  const radius = 38;
-  const circumference = 2 * Math.PI * radius;
-  const embeddedLength = circumference * ratio;
+  const complete = total > 0 && missing === 0;
 
   return (
     <Panel>
@@ -123,53 +265,24 @@ function EmbeddingCoverage({ stats }: { stats: Stats }) {
         title="Embedding coverage"
         hint="vectors available for semantic retrieval"
       />
-      <PanelBody className="flex flex-wrap items-center gap-6">
-        <svg
-          viewBox="0 0 100 100"
-          role="img"
-          aria-label={`${embedded} of ${total} indexed skills have embedding vectors`}
-          className="size-28 shrink-0"
+      <PanelBody className="flex flex-wrap items-center gap-7">
+        <Ring
+          value={ratio}
+          size={132}
+          thickness={9}
+          tone={complete ? "ok" : missing ? "warn" : "accent"}
+          label={`${embedded} of ${total} indexed skills have embedding vectors`}
         >
-          <circle
-            cx="50"
-            cy="50"
-            r={radius}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="9"
-            className="text-line-2"
-          />
-          <circle
-            cx="50"
-            cy="50"
-            r={radius}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="9"
-            strokeLinecap="round"
-            strokeDasharray={`${embeddedLength} ${circumference}`}
-            transform="rotate(-90 50 50)"
-            className="text-accent"
-          />
-          <text
-            x="50"
-            y="47"
-            textAnchor="middle"
-            className="num fill-ink text-[18px] font-semibold"
-          >
-            {percentage}%
-          </text>
-          <text
-            x="50"
-            y="62"
-            textAnchor="middle"
-            className="num fill-ink-3 text-[7px]"
-          >
-            {fmt(embedded)} / {fmt(total)} skills
-          </text>
-        </svg>
+          <span className="num figure text-2xl text-ink">
+            {Math.round(ratio * 100)}
+            <span className="text-sm text-ink-3">%</span>
+          </span>
+          <span className="num mt-1 text-[10px] text-ink-3">
+            {fmt(embedded)}/{fmt(total)}
+          </span>
+        </Ring>
 
-        <div className="min-w-52 flex-1 space-y-3">
+        <div className="min-w-52 flex-1 space-y-3.5">
           <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs">
             <span className="inline-flex items-center gap-2 text-ink-2">
               <span className="size-2 rounded-full bg-accent" />
@@ -188,101 +301,6 @@ function EmbeddingCoverage({ stats }: { stats: Stats }) {
                 : "Index skills while the embedding model is available to build semantic vectors."}
           </p>
         </div>
-      </PanelBody>
-    </Panel>
-  );
-}
-
-/**
- * The comparison that carries the whole product: what each approach keeps in
- * the context window before any task runs. The body a task loads is identical
- * on both sides, so it is shown as shared rather than counted.
- */
-function StandingContext({ stats }: { stats: Stats }) {
-  const tokens = stats.tokens;
-  const jit = Number(tokens?.jit || 0);
-  const catalog = Number(tokens?.catalog || 0);
-  const body = Number(tokens?.average_item || 0);
-  const scale = Math.max(jit, catalog, 1);
-  const delta = jit - catalog;
-  const rows = [
-    {
-      key: "catalog",
-      label: "Plain skills",
-      note: "every name + description",
-      value: catalog,
-      bar: "bg-info",
-    },
-    {
-      key: "jit",
-      label: "JIT",
-      note: "one fixed tool schema",
-      value: jit,
-      bar: "bg-accent",
-    },
-  ];
-
-  return (
-    <Panel>
-      <PanelHead title="Context at rest" hint="before an agent asks for anything" />
-      <PanelBody className="space-y-6">
-        <div className="space-y-4">
-          {rows.map((row) => (
-            <div key={row.key}>
-              <div className="flex items-baseline justify-between gap-4">
-                <span className="flex min-w-0 items-baseline gap-2">
-                  <span className="text-sm text-ink">{row.label}</span>
-                  <span className="hidden truncate text-xs text-ink-3 sm:inline">
-                    {row.note}
-                  </span>
-                </span>
-                <span className="num shrink-0 text-sm text-ink">
-                  {fmt(row.value)}
-                  <span className="ml-1 text-[11px] text-ink-3">tok</span>
-                </span>
-              </div>
-              <div className="mt-2 h-2 overflow-hidden rounded-full bg-line">
-                <div
-                  className={`h-full rounded-full ${row.bar}`}
-                  style={{ width: `${pct(row.value, scale)}%` }}
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="rounded-xl border border-line bg-inset/60 p-4">
-          <div className="flex items-baseline justify-between gap-4">
-            <span className="text-xs text-ink-2">The skill body</span>
-            <span className="num text-xs text-ink-3">
-              ~{fmt(body)} tok · on demand
-            </span>
-          </div>
-          <div
-            aria-hidden="true"
-            className="mt-2.5 h-2 rounded-full border border-dashed border-line-2"
-          />
-          <p className="mt-2.5 text-xs leading-relaxed text-ink-3">
-            Fetched only when a task needs it — by both approaches. It is identical
-            on each side, so it is not part of the comparison.
-          </p>
-        </div>
-
-        <p className="border-t border-line pt-5 text-sm leading-relaxed">
-          {delta > 0 ? (
-            <>
-              At rest, JIT carries <span className="num text-warn">{fmt(delta)}</span>{" "}
-              more tokens than a plain catalog — a net cost until the catalog grows
-              past it.
-            </>
-          ) : (
-            <>
-              At rest, JIT carries{" "}
-              <span className="num text-accent">{fmt(-delta)}</span> fewer tokens than
-              a plain catalog.
-            </>
-          )}
-        </p>
       </PanelBody>
     </Panel>
   );
@@ -331,6 +349,8 @@ function BreakEven({ stats }: { stats: Stats }) {
   // The lines truly meet at schema / perEntry; the integer count is the rounded
   // headline figure.
   const cross = schema / perEntry;
+  const catalogLine = `M ${x(0)} ${y(0)} L ${x(maxN)} ${y(catalogAtMax)}`;
+  const schemaLine = `M ${x(0)} ${y(schema)} L ${x(maxN)} ${y(schema)}`;
 
   return (
     <Panel>
@@ -345,21 +365,38 @@ function BreakEven({ stats }: { stats: Stats }) {
           role="img"
           aria-label={`Cost per task by index size. A plain catalog grows past JIT's ${fmt(schema)}-token schema at about ${fmt(breakEven)} entries.`}
         >
+          <defs>
+            <linearGradient id="be-catalog" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="var(--color-info)" stopOpacity="0.35" />
+              <stop offset="100%" stopColor="var(--color-info)" />
+            </linearGradient>
+            <linearGradient id="be-schema" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="var(--color-accent-2)" stopOpacity="0.5" />
+              <stop offset="100%" stopColor="var(--color-accent)" />
+            </linearGradient>
+            <linearGradient id="be-win" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="var(--color-accent)" stopOpacity="0.16" />
+              <stop offset="100%" stopColor="var(--color-accent)" stopOpacity="0" />
+            </linearGradient>
+            <linearGradient id="be-lose" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="var(--color-bad)" stopOpacity="0.12" />
+              <stop offset="100%" stopColor="var(--color-bad)" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+
           <rect
             x={x(0)}
             y={y(maxY)}
             width={Math.max(0, x(cross) - x(0))}
             height={y(0) - y(maxY)}
-            fill="var(--color-bad)"
-            fillOpacity={0.045}
+            fill="url(#be-lose)"
           />
           <rect
             x={x(cross)}
             y={y(maxY)}
             width={Math.max(0, x(maxN) - x(cross))}
             height={y(0) - y(maxY)}
-            fill="var(--color-accent)"
-            fillOpacity={0.05}
+            fill="url(#be-win)"
           />
 
           {[0, 0.25, 0.5, 0.75, 1].map((t) => {
@@ -407,24 +444,45 @@ function BreakEven({ stats }: { stats: Stats }) {
             strokeDasharray="3 3"
           />
 
-          <line
-            x1={x(0)}
-            y1={y(0)}
-            x2={x(maxN)}
-            y2={y(catalogAtMax)}
-            stroke="var(--color-info)"
+          {/* Both lines draw themselves in, giving the crossing a moment. */}
+          <path
+            d={catalogLine}
+            fill="none"
+            stroke="url(#be-catalog)"
             strokeWidth={2}
+            strokeLinecap="round"
+            pathLength={100}
+            strokeDasharray={100}
+            style={{
+              ["--draw-from" as string]: "100",
+              ["--draw-to" as string]: "0",
+            }}
+            className="motion-safe:animate-draw"
           />
-          <line
-            x1={x(0)}
-            y1={y(schema)}
-            x2={x(maxN)}
-            y2={y(schema)}
-            stroke="var(--color-accent)"
+          <path
+            d={schemaLine}
+            fill="none"
+            stroke="url(#be-schema)"
             strokeWidth={2}
+            strokeLinecap="round"
+            pathLength={100}
+            strokeDasharray={100}
+            style={{
+              ["--draw-from" as string]: "100",
+              ["--draw-to" as string]: "0",
+            }}
+            className="motion-safe:animate-draw"
           />
 
           <circle cx={x(cross)} cy={y(schema)} r={4} fill="var(--color-accent)" />
+          <circle
+            cx={x(cross)}
+            cy={y(schema)}
+            r={9}
+            fill="none"
+            stroke="var(--color-accent)"
+            strokeOpacity={0.3}
+          />
           <circle
             cx={x(total)}
             cy={y(total * perEntry)}
@@ -505,8 +563,18 @@ function Composition({ stats }: { stats: Stats }) {
       title: "By state",
       note: total ? `${fmt(stats.enabled || 0)} of ${fmt(total)} enabled` : "empty",
       items: [
-        { key: "enabled", label: "Enabled", count: stats.enabled || 0, seg: "bg-ok" },
-        { key: "disabled", label: "Disabled", count: stats.disabled || 0, seg: "bg-line-2" },
+        {
+          key: "enabled",
+          label: "Enabled",
+          count: stats.enabled || 0,
+          seg: "bg-gradient-to-r from-ok/70 to-ok",
+        },
+        {
+          key: "disabled",
+          label: "Disabled",
+          count: stats.disabled || 0,
+          seg: "bg-line-2",
+        },
       ],
     },
   ];
@@ -524,7 +592,7 @@ function Composition({ stats }: { stats: Stats }) {
               <span className="text-xs text-ink-2">{group.title}</span>
               <span className="num text-[11px] text-ink-3">{group.note}</span>
             </div>
-            <div className="mt-3 flex h-1.5 overflow-hidden rounded-full bg-line">
+            <div className="mt-3 flex h-2 overflow-hidden rounded-full bg-line">
               {group.items
                 .filter((item) => item.count > 0)
                 .map((item) => (
@@ -568,6 +636,9 @@ function Heaviest({ stats }: { stats: Stats }) {
             <div key={`${item.name}-${index}`} className="px-5 py-3.5">
               <div className="flex items-baseline justify-between gap-4">
                 <span className="flex min-w-0 items-center gap-2">
+                  <span className="num w-4 shrink-0 text-[10px] text-ink-3">
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
                   <span className="truncate text-sm text-ink" title={item.name}>
                     {item.name}
                   </span>
@@ -578,7 +649,7 @@ function Heaviest({ stats }: { stats: Stats }) {
               </div>
               <div className="mt-2.5 h-1 overflow-hidden rounded-full bg-line">
                 <div
-                  className="h-full rounded-full bg-accent/70"
+                  className="h-full rounded-full bg-gradient-to-r from-accent/40 to-accent"
                   style={{ width: `${pct(item.tokens, max)}%` }}
                 />
               </div>
@@ -611,11 +682,11 @@ export function Overview() {
   const total = stats.total || 0;
 
   return (
-    <div className="space-y-10">
+    <div className="space-y-8">
       <Hero />
 
-      <Figures stats={stats} />
-      <EmbeddingCoverage stats={stats} />
+      <Savings stats={stats} />
+      <Supporting stats={stats} />
 
       {total === 0 ? (
         <Panel className="border-dashed bg-panel/60">
@@ -639,7 +710,7 @@ export function Overview() {
           <BreakEven stats={stats} />
         </div>
         <div className="lg:col-span-2">
-          <StandingContext stats={stats} />
+          <EmbeddingCoverage stats={stats} />
         </div>
       </div>
 

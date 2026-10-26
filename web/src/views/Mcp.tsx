@@ -305,7 +305,7 @@ export function Mcp() {
                 No servers found in client configs.
               </p>
             ) : (
-              <div className="divide-y divide-line overflow-hidden rounded-md border border-line">
+              <div className="surface divide-y divide-line overflow-hidden rounded-xl border border-line">
                 {imports.map((server, index) => {
                   const detail = `${server.command || server.url || "MCP server"} · ${server.source}${
                     server.managed ? " · already managed" : ""

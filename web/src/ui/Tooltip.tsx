@@ -22,7 +22,7 @@ export function Tooltip({
           <TooltipPrimitive.Content
             side={side}
             sideOffset={6}
-            className="z-[80] max-w-xs rounded-lg border border-line-2 bg-raised px-2 py-1 text-xs text-ink-2 shadow-xl shadow-black/50 data-[state=delayed-open]:animate-overlay"
+            className="surface edge z-[80] max-w-xs rounded-xl border border-line-2 bg-panel/90 px-2.5 py-1.5 text-xs text-ink-2 shadow-xl shadow-black/60 backdrop-blur-xl data-[state=delayed-open]:animate-overlay"
           >
             {label}
           </TooltipPrimitive.Content>

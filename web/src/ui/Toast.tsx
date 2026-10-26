@@ -12,7 +12,7 @@ export function Toast({ toast }: { toast: ToastMessage | null }) {
       {toast ? (
         <div
           className={cx(
-            "pointer-events-auto flex max-w-lg animate-view items-start gap-2.5 rounded-xl border bg-panel/95 px-4 py-3 text-sm shadow-2xl shadow-black/60 backdrop-blur",
+            "surface edge lift pointer-events-auto flex max-w-lg animate-view items-start gap-2.5 rounded-xl border bg-panel/80 px-4 py-3.5 text-sm backdrop-blur-xl",
             toast.kind === "error" ? "border-bad/40 text-bad" : "border-line-2 text-ink",
           )}
         >

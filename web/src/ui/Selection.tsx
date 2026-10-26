@@ -99,7 +99,7 @@ export function SelectionBar({
     <div className="flex flex-wrap items-center gap-1.5">
       <span
         className={cx(
-          "inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10",
+          "glow-accent inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10",
           "px-2.5 py-1 text-[11px] font-medium text-accent",
         )}
       >

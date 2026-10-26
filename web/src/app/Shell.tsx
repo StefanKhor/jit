@@ -14,8 +14,8 @@ function clockText(): string {
 }
 
 /**
- * The frame: a fixed console rail on the left — wordmark, sections, and a live
- * readout — with a slim signal bar over the content. No numbering, no icons.
+ * The frame: a glass rail on the left — wordmark, sections, and a live readout —
+ * with a slim signal bar over the content. No numbering, no icons.
  */
 export function Shell({ children }: { children: ReactNode }) {
   const ctx = useJit();
@@ -35,11 +35,17 @@ export function Shell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-full">
-      {/* The console rail — primary navigation, fixed to the viewport. */}
+      {/* The rail — primary navigation, fixed to the viewport, translucent over
+          the aurora so the backdrop tints it as the page scrolls. */}
       <aside
         aria-label="Console"
-        className="fixed inset-y-0 left-0 z-40 hidden w-[236px] flex-col border-r border-line bg-panel/60 backdrop-blur-xl md:flex"
+        className="fixed inset-y-0 left-0 z-40 hidden w-[236px] flex-col border-r border-line bg-panel/40 backdrop-blur-2xl md:flex"
       >
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-y-0 right-0 w-px bg-gradient-to-b from-accent/25 via-line to-transparent"
+        />
+
         <button
           type="button"
           onClick={() => ctx.setView("overview")}
@@ -63,9 +69,9 @@ export function Shell({ children }: { children: ReactNode }) {
                 aria-current={active ? "page" : undefined}
                 onClick={() => ctx.setView(view)}
                 className={cx(
-                  "group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+                  "group relative flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition-all duration-200",
                   active
-                    ? "bg-raised text-ink"
+                    ? "bg-gradient-to-r from-raised to-raised/40 text-ink shadow-[0_1px_0_0_color-mix(in_oklab,var(--color-ivory)_6%,transparent)_inset]"
                     : "text-ink-3 hover:bg-raised/50 hover:text-ink-2",
                 )}
               >
@@ -118,7 +124,7 @@ export function Shell({ children }: { children: ReactNode }) {
 
       {/* Content column, offset by the rail on wide screens. */}
       <div className="flex min-h-full flex-col md:pl-[236px]">
-        <header className="sticky top-0 z-30 border-b border-line bg-canvas/70 backdrop-blur-xl">
+        <header className="sticky top-0 z-30 border-b border-line bg-canvas/60 backdrop-blur-2xl">
           <div className="flex h-14 items-center gap-3 px-5 md:px-8">
             <button
               type="button"
@@ -186,7 +192,9 @@ export function Shell({ children }: { children: ReactNode }) {
                   onClick={() => ctx.setView(view)}
                   className={cx(
                     "shrink-0 rounded-full px-3 py-1.5 text-xs transition-colors",
-                    active ? "bg-raised text-ink" : "text-ink-3 hover:text-ink-2",
+                    active
+                      ? "bg-raised text-ink"
+                      : "text-ink-3 hover:text-ink-2",
                   )}
                 >
                   {viewLabels[view]}

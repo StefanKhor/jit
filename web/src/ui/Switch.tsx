@@ -26,8 +26,8 @@ export function Switch({
       disabled={disabled}
       aria-label={ariaLabel}
       className={cx(
-        "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-line-2 bg-inset transition-colors",
-        "data-[state=checked]:border-accent data-[state=checked]:bg-accent",
+        "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-line-2 bg-inset/80 shadow-[0_1px_2px_0_rgb(0_0_0/0.4)_inset] transition-all",
+        "data-[state=checked]:border-accent data-[state=checked]:bg-accent data-[state=checked]:shadow-[0_0_14px_-2px_color-mix(in_oklab,var(--color-accent)_70%,transparent)]",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30",
         "disabled:cursor-not-allowed disabled:opacity-40",
         className,

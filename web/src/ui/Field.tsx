@@ -11,8 +11,9 @@ import { cx } from "./cx";
 import { Switch } from "./Switch";
 
 const CONTROL =
-  "w-full rounded-lg border border-line-2 bg-inset px-3 text-ink transition-colors " +
-  "placeholder:text-ink-3 hover:border-ink-3/50 focus:border-accent/60 focus:outline-none " +
+  "w-full rounded-xl border border-line-2 bg-inset/80 px-3 text-ink transition-all " +
+  "shadow-[0_1px_2px_0_rgb(0_0_0/0.4)_inset] " +
+  "placeholder:text-ink-3 hover:border-ink-3/50 focus:border-accent/60 focus:bg-inset focus:outline-none " +
   "focus-visible:outline-none focus:ring-2 focus:ring-accent/15 " +
   "disabled:cursor-not-allowed disabled:opacity-50";
 
@@ -125,7 +126,7 @@ export function ToggleRow({
   return (
     <label
       className={cx(
-        "flex cursor-pointer items-start justify-between gap-4 rounded-lg border border-line bg-panel px-4 py-3 transition-colors hover:border-line-2",
+        "surface edge flex cursor-pointer items-start justify-between gap-4 rounded-xl border border-line bg-panel/60 px-4 py-3 transition-colors hover:border-line-2 hover:bg-panel/90",
         disabled && "cursor-not-allowed opacity-50",
         className,
       )}
