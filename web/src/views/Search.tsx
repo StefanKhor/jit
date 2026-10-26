@@ -303,21 +303,22 @@ function SearchOutput({ data }: { data: SearchResponse }) {
       <Panel>
         <PanelHead
           title="Ranked candidates"
-          hint="score · cosine · picked"
+          hint={data.reranked ? "cosine · picked" : "score · cosine"}
         />
         <TableWrap>
           <Table className="table-fixed">
             <thead>
               <tr>
                 <Th>Entry</Th>
-                <Th className="num w-20 text-right">Score</Th>
+                {data.reranked ? null : (
+                  <Th className="num w-20 text-right">Score</Th>
+                )}
                 <Th className="num hidden w-20 text-right md:table-cell">
                   Cosine
                 </Th>
-                <Th className="hidden w-20 text-right md:table-cell">
-                  Picked
+                <Th className="w-24">
+                  {data.reranked ? "Picked" : "Threshold"}
                 </Th>
-                <Th className="w-24">Threshold</Th>
               </tr>
             </thead>
             <tbody>
@@ -333,23 +334,37 @@ function SearchOutput({ data }: { data: SearchResponse }) {
                       </span>
                     </div>
                   </Td>
-                  <Td className="num text-right">
-                    <span className="font-medium text-ink">
-                      {Number(candidate.score).toFixed(3)}
-                    </span>
-                  </Td>
+                  {data.reranked ? null : (
+                    <Td className="num text-right">
+                      <span className="font-medium text-ink">
+                        {Number(candidate.score).toFixed(3)}
+                      </span>
+                    </Td>
+                  )}
                   <Td className="num hidden text-right text-ink-2 md:table-cell">
                     {Number(candidate.cosine).toFixed(3)}
                   </Td>
-                  <Td className="hidden text-right text-ink-2 md:table-cell">
-                    {candidate.picked ? "yes" : "—"}
-                  </Td>
                   <Td>
+                    {/* A reranked choice is categorical, so there is one bit to
+                        show; cosine is the only path with a score to compare
+                        against the threshold. */}
                     <span className="inline-flex items-center gap-1.5 text-xs text-ink-2">
                       <StatusDot
-                        tone={candidate.passes_threshold ? "ok" : "neutral"}
+                        tone={
+                          (data.reranked
+                            ? candidate.picked
+                            : candidate.passes_threshold)
+                            ? "ok"
+                            : "neutral"
+                        }
                       />
-                      {candidate.passes_threshold ? "pass" : "below"}
+                      {data.reranked
+                        ? candidate.picked
+                          ? "picked"
+                          : "—"
+                        : candidate.passes_threshold
+                          ? "pass"
+                          : "below"}
                     </span>
                   </Td>
                 </Tr>
