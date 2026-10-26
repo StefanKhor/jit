@@ -95,13 +95,17 @@ export function registerFind(server: McpServer): void {
       if (evaluation.results.length > 0) {
         // Minimal agent-facing payload: the skills themselves — one, or several
         // when the reranker judged that more than one fits the same intent —
-        // plus related names for multi-part tasks. Ranking notes stay on the
-        // dashboard response, where a human reads them.
+        // plus related names for multi-part tasks. Each skill carries its path
+        // because half the catalog is a directory tree, not a single file: a
+        // body that says "read references/x.md" or "run scripts/y.py" can only
+        // be followed if the agent knows where the skill lives. Ranking notes
+        // stay on the dashboard response, where a human reads them.
         const primary = evaluation.results[0];
         return textResult({
           found: true,
           skills: evaluation.results.map((result) => ({
             name: result.name,
+            path: result.path,
             content: result.content,
           })),
           ...(primary?.related ? { related: primary.related } : {}),

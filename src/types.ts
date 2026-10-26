@@ -190,6 +190,10 @@ export interface SearchResult {
   name: string;
   description: string;
   content: string;
+  // Where the skill lives. A skill is a directory, not just this body: half the
+  // catalog references sibling files (scripts/, references/, assets/) by a path
+  // relative to this one, so a body handed over without it cannot be followed.
+  path: string;
   // Absent when a reranker decided: it made a categorical choice, so there is
   // no confidence number to report.
   confidence?: number;

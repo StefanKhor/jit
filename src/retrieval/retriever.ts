@@ -295,6 +295,7 @@ export async function evaluate(
           name: candidate.name,
           description: candidate.description,
           content: candidate.body,
+          path: candidate.path,
           reranked: true,
         }))
     : cosineResult(candidates, threshold, cosineConfidence, debug);
@@ -356,6 +357,7 @@ function cosineResult(
     name: best.name,
     description: best.description,
     content: best.body,
+    path: best.path,
     confidence: Number(confidence.toFixed(4)),
     reranked: false,
   };

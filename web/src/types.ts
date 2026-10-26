@@ -142,6 +142,8 @@ export interface SearchResult {
   name: string;
   description: string;
   content: string;
+  /** Where the skill lives; sibling files are referenced relative to it. */
+  path: string;
   confidence?: number;
   reranked: boolean;
   related?: string[];
