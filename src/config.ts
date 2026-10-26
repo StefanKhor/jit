@@ -75,7 +75,16 @@ function envNumber(
   return integer ? Math.round(bounded) : bounded;
 }
 
-export const TOP_K_RETRIEVE = envNumber("JIT_TOP_K", 20, 1, 1000, true);
+/**
+ * How many vector hits are pulled before the decision layer sees them. This is
+ * the ceiling on what the reranker can rescue, so it cannot be tiny — but the
+ * ranking has no useful tail: on a 94-skill index the right skill is either in
+ * the top few or not in the list at all (recall@5 and recall@20 were identical,
+ * with the only misses at rank 40+). Ten keeps the rerank prompt small without
+ * giving up a match. Raise it with JIT_TOP_K if a larger catalog behaves
+ * differently.
+ */
+export const TOP_K_RETRIEVE = envNumber("JIT_TOP_K", 10, 1, 1000, true);
 
 const MAX_EMBEDDING_DIM = 16384;
 
