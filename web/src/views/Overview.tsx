@@ -30,7 +30,10 @@ function Figures({ stats }: { stats: Stats }) {
   const tokens = stats.tokens;
   const jit = Number(tokens?.jit || 0);
   const catalog = Number(tokens?.catalog || 0);
-  const reduction = Number(tokens?.reduction_pct || 0);
+  // How many times lighter JIT is at rest — a ratio reads as a claim, where a
+  // percentage reads as a rounding error.
+  const multiple = jit > 0 ? catalog / jit : 0;
+  const lighter = multiple >= 1;
   const overhead = Math.max(0, jit - catalog);
   const breakEven = Number(tokens?.break_even || 0);
   const total = stats.total || 0;
@@ -53,16 +56,16 @@ function Figures({ stats }: { stats: Stats }) {
     },
     {
       key: "reduction",
-      label: reduction < 0 ? "Overhead" : "Context saved",
+      label: lighter ? "Context saved" : "Overhead",
       value: (
         <AnimatedNumber
-          value={reduction < 0 ? Math.abs(reduction) : reduction}
+          value={lighter ? multiple : multiple ? 1 / multiple : 0}
           decimals={1}
         />
       ),
-      unit: "%",
-      hint: `${fmt(reduction < 0 ? overhead : tokens?.saved || 0)} tokens ${
-        reduction < 0 ? "over a catalog" : "kept out of context"
+      unit: "×",
+      hint: `${fmt(lighter ? tokens?.saved || 0 : overhead)} tokens ${
+        lighter ? "kept out of context" : "over a catalog"
       }`,
     },
   ];

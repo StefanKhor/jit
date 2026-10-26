@@ -55,7 +55,6 @@ export interface Stats {
     average_item: number;
     largest_item: number;
     saved: number;
-    reduction_pct: number;
     // Entries required before JIT's tool schema beats a catalog of every entry
     // (schema / average catalog entry). Below this the index is a net cost.
     break_even: number;

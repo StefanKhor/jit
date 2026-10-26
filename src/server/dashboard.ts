@@ -336,9 +336,6 @@ export function createApp(): Hono {
     const jitTokens = schemaTokens;
     const catalogTokens = stats.catalog_tokens;
     const saved = Math.max(0, catalogTokens - jitTokens);
-    const reduction = catalogTokens
-      ? Number(((1 - jitTokens / catalogTokens) * 100).toFixed(1))
-      : 0;
     const averageCatalog = stats.total
       ? Math.floor(stats.catalog_tokens / stats.total)
       : 0;
@@ -351,7 +348,6 @@ export function createApp(): Hono {
         average_item: stats.average_body,
         largest_item: stats.largest,
         saved,
-        reduction_pct: reduction,
         break_even: breakEven,
       },
     });

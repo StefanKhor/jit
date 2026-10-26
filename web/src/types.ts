@@ -60,7 +60,6 @@ export interface Stats {
     average_item: number;
     largest_item: number;
     saved: number;
-    reduction_pct: number;
     break_even: number;
   };
 }
