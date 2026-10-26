@@ -14,6 +14,7 @@ import matter from "gray-matter";
 import {
   DEFAULT_SKILL_PATHS,
   embeddingSignature,
+  JIT_SKILLS_DIR,
   MAX_SKILL_BYTES,
 } from "./config.js";
 import { embedTexts } from "./embedding.js";
@@ -89,11 +90,10 @@ export function discoverSkills(paths: string[] = DEFAULT_SKILL_PATHS): string[] 
       if (entry.isSymbolicLink()) continue;
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        if (
-          depth >= MAX_SCAN_DEPTH ||
-          entry.name.startsWith(".") ||
-          SKIP_DIRS.has(entry.name)
-        ) {
+        // Skip by name, not by leading dot: a configured root can legitimately
+        // hold a hidden folder of skills — ~/.codex/skills/.system is one — and
+        // SKIP_DIRS already names the VCS and build directories worth avoiding.
+        if (depth >= MAX_SCAN_DEPTH || SKIP_DIRS.has(entry.name)) {
           continue;
         }
         walk(full, depth + 1);
@@ -277,15 +277,22 @@ export async function indexItems(
       current: { content_hash: string; embedding: Float32Array | null } | undefined;
     }> = [];
 
-    // One id, one row. Two scan roots can hold the same skill id, and without
-    // this both copies are embedded and written in the same pass, so the row
-    // that survives flips between them on every reindex: the indexed body and
-    // vector for that id then depend on when the scan last ran.
+    // One id, one row. Several scan roots can hold the same skill id, and
+    // without this both copies are embedded and written in the same pass, so
+    // the row that survives flips between them on every reindex: the indexed
+    // body and vector for that id then depend on when the scan last ran.
     //
-    // The last occurrence in the order given wins. That is deterministic but
-    // arbitrary — a scan reaches skills sorted by path, so the rule is really
-    // "the lexically last path" — which is why the clash is reported instead of
-    // resolved quietly: it is for the user to say which copy should stand.
+    // The user's own file wins over JIT's managed copy under ~/.jit/skills, so a
+    // skill that also sits in a local root is indexed in place and reported as
+    // that local file. JIT's copy is the fallback for a skill that lives nowhere
+    // else, which is the reason that directory is scanned at all. Two copies of
+    // the same kind keep the first seen. The clash is reported either way,
+    // naming the copy that was kept, so the choice is never silent.
+    const jitRoot = path.resolve(JIT_SKILLS_DIR);
+    const isManagedCopy = (item: IndexItem): boolean => {
+      const resolved = path.resolve(expandHome(item.path || ""));
+      return resolved === jitRoot || resolved.startsWith(jitRoot + path.sep);
+    };
     const unique = new Map<string, IndexItem>();
     for (const raw of items) {
       const id = String(raw.id || raw.name || "").trim();
@@ -293,20 +300,26 @@ export async function indexItems(
         errors.push("item without id/name skipped");
         continue;
       }
-      const previous = unique.get(id);
-      if (previous) {
-        errors.push(
-          `duplicate skill id "${id}": ${previous.path || "(no path)"} and ${
-            raw.path || "(no path)"
-          }`,
-        );
-      }
-      unique.set(id, {
+      const candidate: IndexItem = {
         ...raw,
         id,
         body: raw.body || "",
         path: raw.path || "",
-      });
+      };
+      const previous = unique.get(id);
+      if (!previous) {
+        unique.set(id, candidate);
+        continue;
+      }
+      const preferCandidate = isManagedCopy(previous) && !isManagedCopy(candidate);
+      const kept = preferCandidate ? candidate : previous;
+      const dropped = preferCandidate ? previous : candidate;
+      errors.push(
+        `duplicate skill id "${id}": keeping ${kept.path || "(no path)"}, ignoring ${
+          dropped.path || "(no path)"
+        }`,
+      );
+      if (preferCandidate) unique.set(id, candidate);
     }
 
     for (const item of unique.values()) {
