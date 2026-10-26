@@ -128,20 +128,6 @@ export function discoverSkills(paths: string[] = DEFAULT_SKILL_PATHS): string[] 
   return [...found].sort();
 }
 
-function asList(value: unknown): string[] {
-  if (value === null || value === undefined) return [];
-  if (typeof value === "string") {
-    return value
-      .split(",")
-      .map((part) => part.trim())
-      .filter(Boolean);
-  }
-  if (Array.isArray(value)) {
-    return value.map((part) => String(part).trim()).filter(Boolean);
-  }
-  return [String(value).trim()].filter(Boolean);
-}
-
 export function parseSkillText(
   text: string,
   sourcePath = "",
@@ -170,17 +156,10 @@ export function parseSkillText(
     String(meta.description || "").trim() ||
     body.slice(0, 120).replace(/\n/g, " ").trim() ||
     "No description";
-  const whenToUse = String(
-    meta.when_to_use || meta["when-to-use"] || "",
-  ).trim();
-
   return {
     id: name,
     name: title || name,
     description,
-    when_to_use: whenToUse || description,
-    categories: asList(meta.categories),
-    aliases: asList(meta.aliases),
     body,
     path: sourcePath,
   };
@@ -195,12 +174,7 @@ export function parseSkillFile(file: string): IndexItem {
 }
 
 export function buildEmbeddingText(item: IndexItem): string {
-  return [
-    item.name.replace(/[-_]/g, " "),
-    item.when_to_use,
-    item.description,
-    (item.aliases || []).join(" "),
-  ]
+  return [item.name.replace(/[-_]/g, " "), item.description]
     .filter(Boolean)
     .join(" | ");
 }
@@ -209,9 +183,6 @@ export function contentHash(item: IndexItem): string {
   const payload = {
     name: item.name,
     description: item.description,
-    when_to_use: item.when_to_use,
-    categories: item.categories || [],
-    aliases: item.aliases || [],
     body: item.body || "",
     // Path is part of the identity: moving a skill between a local folder and
     // JIT's own storage must update the indexed location even when the text is
@@ -251,8 +222,6 @@ export async function indexItems(
     for (const raw of items) {
       const item: IndexItem = {
         ...raw,
-        categories: raw.categories || [],
-        aliases: raw.aliases || [],
         body: raw.body || "",
         path: raw.path || "",
       };

@@ -30,9 +30,6 @@ interface Row {
   id: string;
   name: string;
   description: string;
-  when_to_use: string;
-  categories: string[];
-  aliases: string[];
   body: string;
   path: string;
   enabled: boolean;
@@ -72,10 +69,6 @@ function catalogTokens(row: Row): number {
   return estimateTokens(row.name) + estimateTokens(row.description) + 12;
 }
 
-function asStringList(value: unknown): string[] {
-  return Array.isArray(value) ? value.map(String) : [];
-}
-
 function byName(a: Row, b: Row): number {
   if (a.name === b.name) return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
   return a.name < b.name ? -1 : 1;
@@ -110,9 +103,6 @@ function asRow(value: unknown): Row | null {
     id,
     name: String(row.name ?? id),
     description: String(row.description ?? ""),
-    when_to_use: String(row.when_to_use ?? ""),
-    categories: asStringList(row.categories),
-    aliases: asStringList(row.aliases),
     body: String(row.body ?? ""),
     path: String(row.path ?? ""),
     enabled: row.enabled !== false,
@@ -208,9 +198,6 @@ function rowToItem(row: Row, includeBody = true): StoredItem {
     id: row.id,
     name: row.name,
     description: row.description,
-    when_to_use: row.when_to_use,
-    categories: row.categories,
-    aliases: row.aliases,
     body: includeBody ? row.body : "",
     path: row.path,
     enabled: row.enabled,
@@ -261,9 +248,7 @@ export function listItems(): ListItem[] {
     id: row.id,
     name: row.name,
     description: row.description,
-    categories: row.categories,
     path: row.path,
-    aliases: row.aliases,
     enabled: row.enabled,
     tokens: estimateTokens(row.body),
     catalog_tokens: catalogTokens(row),
@@ -275,7 +260,6 @@ export function getStats(): Stats {
   const file = readIndex();
   const embeddingsCurrent =
     file.embedding_signature === embeddingSignature();
-  const categories = new Map<string, number>();
   const heaviest: Array<{ name: string; tokens: number }> = [];
   let enabled = 0;
   let disabled = 0;
@@ -291,9 +275,6 @@ export function getStats(): Stats {
     catalog += catalogTokens(row);
     if (body > largest) largest = body;
     if (row.embedding !== null) embedded += 1;
-    for (const name of row.categories) {
-      categories.set(name, (categories.get(name) || 0) + 1);
-    }
     heaviest.push({ name: row.name, tokens: body });
   }
   const total = file.items.length;
@@ -307,9 +288,6 @@ export function getStats(): Stats {
     average_body: total ? Math.floor(bodyTokens / total) : 0,
     largest,
     heaviest: heaviest.slice(0, 6),
-    categories: [...categories.entries()]
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-      .map(([name, count]) => ({ name, count })),
     embedding_coverage: {
       total,
       embedded: embeddingsCurrent ? embedded : 0,
@@ -332,9 +310,6 @@ export function upsertItems(rows: UpsertRow[], signature?: string): void {
       id: item.id,
       name: item.name,
       description: item.description || "",
-      when_to_use: item.when_to_use || "",
-      categories: item.categories || [],
-      aliases: item.aliases || [],
       body: item.body || "",
       path: item.path || "",
       enabled: existing ? existing.enabled : true,

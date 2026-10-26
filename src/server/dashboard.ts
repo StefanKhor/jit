@@ -625,11 +625,6 @@ export function createApp(): Hono {
         id,
         name: String(source.name || id),
         description: String(source.description || ""),
-        when_to_use: String(source.when_to_use || source.description || ""),
-        categories: Array.isArray(source.categories)
-          ? source.categories.map(String)
-          : [],
-        aliases: Array.isArray(source.aliases) ? source.aliases.map(String) : [],
         body: String(source.body || ""),
         path: String(source.path || ""),
       });

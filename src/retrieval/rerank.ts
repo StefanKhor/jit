@@ -42,7 +42,7 @@ export async function rerankCandidates(
     const listing = candidates
       .map(
         (candidate, index) =>
-          `${index + 1}. [${candidate.name}] ${candidate.description} (when: ${candidate.when_to_use})`,
+          `${index + 1}. [${candidate.name}] ${candidate.description}`,
       )
       .join("\n");
     const response = await client.chat.completions.create({

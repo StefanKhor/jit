@@ -587,43 +587,6 @@ function Heaviest({ stats }: { stats: Stats }) {
   );
 }
 
-function Categories({ stats }: { stats: Stats }) {
-  const categories = stats.categories || [];
-  return (
-    <Panel>
-      <PanelHead
-        title="Categories"
-        hint={categories.length ? `${categories.length} declared` : "none declared"}
-      />
-      {categories.length ? (
-        <PanelBody className="flex flex-wrap gap-2">
-          {categories.map((item) => (
-            <span
-              key={item.name}
-              className="inline-flex items-center gap-2 rounded-full border border-line bg-inset px-3 py-1 text-xs"
-            >
-              <span className="text-ink-2">{item.name}</span>
-              <span className="num text-ink-3">{fmt(item.count)}</span>
-            </span>
-          ))}
-        </PanelBody>
-      ) : (
-        <PanelBody>
-          <p className="text-sm leading-relaxed text-ink-3">
-            No categories yet. Add{" "}
-            <code className="num rounded bg-raised px-1.5 py-0.5 text-[11px] text-ink-2">
-              categories:
-            </code>{" "}
-            to skill frontmatter.
-          </p>
-        </PanelBody>
-      )}
-    </Panel>
-  );
-}
-
-
-
 export function Overview() {
   const ctx = useJit();
   const stats = ctx.stats;
@@ -681,8 +644,6 @@ export function Overview() {
         <Heaviest stats={stats} />
         <Composition stats={stats} />
       </div>
-
-      <Categories stats={stats} />
 
       <Meta className="pt-1">
         index {fmt(total)} entries · {fmt(stats.catalog_tokens || 0)} catalog tokens ·{" "}

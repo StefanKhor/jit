@@ -1,13 +1,9 @@
 import { fmt } from "../format";
 import type { SkillDetail } from "../types";
-import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { Dialog, DialogBody, DialogFoot, DialogHead } from "../ui/Dialog";
 
-/**
- * Read-only view of one indexed skill: what it is, when it applies, how it is
- * addressed, and its full body.
- */
+/** Read-only view of one indexed skill: what it is, where it lives, and its body. */
 export function SkillDialog({
   open,
   detail,
@@ -36,35 +32,6 @@ export function SkillDialog({
               <p className="text-sm leading-relaxed text-ink-2">
                 {detail.description}
               </p>
-            ) : null}
-
-            {detail.when_to_use ? (
-              <section className="space-y-2">
-                <h3 className="kicker">When to use</h3>
-                <p className="text-sm leading-relaxed text-ink-2">
-                  {detail.when_to_use}
-                </p>
-              </section>
-            ) : null}
-
-            {detail.categories?.length ? (
-              <section className="space-y-2">
-                <h3 className="kicker">Categories</h3>
-                <div className="flex flex-wrap gap-1.5">
-                  {detail.categories.map((category) => (
-                    <Badge key={category}>{category}</Badge>
-                  ))}
-                </div>
-              </section>
-            ) : null}
-
-            {detail.aliases?.length ? (
-              <section className="space-y-2">
-                <h3 className="kicker">Aliases</h3>
-                <p className="num text-xs leading-relaxed text-ink-2">
-                  {detail.aliases.join(" · ")}
-                </p>
-              </section>
             ) : null}
 
             <section className="space-y-2">

@@ -2,9 +2,6 @@ export interface IndexItem {
   id: string;
   name: string;
   description: string;
-  when_to_use: string;
-  categories: string[];
-  aliases: string[];
   body: string;
   path: string;
   enabled?: boolean;
@@ -21,9 +18,7 @@ export interface ListItem {
   id: string;
   name: string;
   description: string;
-  categories: string[];
   path: string;
-  aliases: string[];
   enabled: boolean;
   /// Full body tokens, fetched on demand.
   tokens: number;
@@ -47,7 +42,6 @@ export interface Stats {
   average_body: number;
   largest: number;
   heaviest: HeaviestItem[];
-  categories: Array<{ name: string; count: number }>;
   embedding_coverage: {
     total: number;
     embedded: number;

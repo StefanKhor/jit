@@ -168,7 +168,7 @@ Being honest about the boundary is part of being production-ready.
 A single-file React SPA served by the Node process.
 
 - **Overview** — context per task vs. a skill catalog, reduction or overhead,
-  the break-even index size, index composition, heaviest entries, and categories.
+  the break-even index size, index composition, and heaviest entries.
 - **Skills** — list, read, enable/disable, index a path, transfer, and remove.
 - **MCP** — connect, disconnect, import a client config, add a server manually.
 - **Search** — live retrieval with the effective score, cosine, rerank
@@ -286,9 +286,6 @@ Standard `SKILL.md` with YAML frontmatter. No conversion needed:
 ---
 name: linear-create-issue
 description: Create a new issue in a Linear team
-categories: [project-management, issue-tracking]
-aliases: [file a bug, open a ticket, report an issue]
-when_to_use: User wants to create, file, or report an issue
 ---
 # Linear: Create Issue
 
@@ -299,7 +296,8 @@ The skill id comes from `name` (or the folder/file name if omitted). Default
 scan paths, used only when you explicitly ask JIT to scan:
 
 `~/.skills`, `~/.claude/skills`, `~/.agents/skills`, `~/.codex/skills`,
-`~/.config/opencode/skills`, `./.opencode/skills`, `./skills`.
+`~/.config/opencode/skills`, `./.opencode/skills`, `./skills`, and JIT's own
+`~/.jit/skills`.
 
 ## MCP servers
 

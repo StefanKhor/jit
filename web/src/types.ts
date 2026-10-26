@@ -50,7 +50,6 @@ export interface Stats {
   average_body: number;
   largest: number;
   heaviest: Array<{ name: string; tokens: number }>;
-  categories: Array<{ name: string; count: number }>;
   embedding_coverage: {
     total: number;
     embedded: number;
@@ -70,9 +69,7 @@ export interface SkillListItem {
   id: string;
   name: string;
   description: string;
-  categories: string[];
   path: string;
-  aliases: string[];
   enabled: boolean;
   /** Full body tokens, fetched on demand. */
   tokens: number;
@@ -86,9 +83,6 @@ export interface SkillDetail {
   id: string;
   name: string;
   description: string;
-  when_to_use: string;
-  categories: string[];
-  aliases: string[];
   body: string;
   path: string;
   enabled: boolean;

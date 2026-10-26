@@ -238,7 +238,6 @@ export function Skills() {
                     <SelectAll selection={sel} label="Select all skills" />
                   </Th>
                   <Th>Name</Th>
-                  <Th className="hidden w-[130px] md:table-cell">Category</Th>
                   <Th
                     className="num hidden w-[84px] text-right sm:table-cell"
                     title="Body tokens — the full skill text, fetched on demand"
@@ -257,7 +256,6 @@ export function Skills() {
               </thead>
               <tbody>
                 {ctx.skills.map((skill) => {
-                  const category = skill.categories?.[0] || "—";
                   const managed = Boolean(skill.managed);
                   const action = managed ? "Uninstall" : "Unindex";
                   const actionTitle = managed
@@ -311,11 +309,6 @@ export function Skills() {
                         >
                           {description}
                         </p>
-                      </Td>
-                      <Td className="hidden md:table-cell">
-                        <span className="block min-w-0 truncate" title={category}>
-                          <Badge tone="neutral">{category}</Badge>
-                        </span>
                       </Td>
                       <Td
                         className="num hidden text-right text-ink-2 sm:table-cell"
