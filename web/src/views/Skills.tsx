@@ -3,7 +3,6 @@ import { useState, type FormEvent } from "react";
 import { fmt, summary } from "../format";
 import { useJit } from "../state/store";
 import type { BulkResult } from "../types";
-import { NewSkillDialog } from "../dialogs/NewSkillDialog";
 import { Badge, StatusDot } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { cx } from "../ui/cx";
@@ -19,7 +18,6 @@ export function Skills() {
   const [busy, setBusy] = useState(false);
   const [busyId, setBusyId] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
-  const [createOpen, setCreateOpen] = useState(false);
   const sel = useSelection(ctx.skills.map((skill) => skill.id));
 
   const addPath = async (event: FormEvent) => {
@@ -154,12 +152,7 @@ export function Skills() {
           </span>
         }
         description="Only what you import is indexed. JIT never scans your skill folders on startup. Transfer copies files in or out; indexing a path leaves the file where it lives."
-        actions={
-          <>
-            <Button onClick={() => setCreateOpen(true)}>New skill</Button>
-            <Button onClick={() => ctx.openTransfer("in")}>Transfer</Button>
-          </>
-        }
+        actions={<Button onClick={() => ctx.openTransfer("in")}>Transfer</Button>}
       />
 
       {ctx.skillSources ? (
@@ -381,8 +374,6 @@ export function Skills() {
           </TableWrap>
         </Panel>
       )}
-
-      <NewSkillDialog open={createOpen} onClose={() => setCreateOpen(false)} />
     </div>
   );
 }

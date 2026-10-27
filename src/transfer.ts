@@ -2,11 +2,9 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  rmSync,
   rmdirSync,
   statSync,
   unlinkSync,
-  writeFileSync,
 } from "node:fs";
 import path from "node:path";
 
@@ -47,45 +45,6 @@ function skillDirName(itemId: unknown): string {
     throw new Error("skill name must be a simple file name");
   }
   return name;
-}
-
-/** Create a brand-new skill in JIT's managed folder and index it. The file on
- *  disk stays the source of truth — same as every other skill, so the index
- *  keeps only the metadata and vector, and the body is served from the file. */
-export async function createSkill(
-  rawName: string,
-  description: string,
-  rawBody: string,
-): Promise<TransferResult> {
-  const name = skillDirName(rawName);
-  const body = String(rawBody || "").trim();
-  if (!body) throw new Error("skill body is required");
-  const dir = path.join(JIT_SKILLS_DIR, name);
-  if (existsSync(dir)) {
-    throw new Error(`a skill named ${name} already exists in JIT`);
-  }
-  // JSON.stringify produces a quoted, escaped scalar that is valid YAML, so a
-  // description with colons or quotes cannot break the frontmatter.
-  const frontmatter =
-    "---\n" +
-    `name: ${JSON.stringify(name)}\n` +
-    `description: ${JSON.stringify(description.trim() || name)}\n` +
-    "---\n\n";
-  const text = frontmatter + body + "\n";
-  if (Buffer.byteLength(text, "utf8") > MAX_SKILL_BYTES) {
-    throw new Error(`skill exceeds ${MAX_SKILL_BYTES} bytes`);
-  }
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(path.join(dir, "SKILL.md"), text, "utf8");
-  try {
-    return await indexSkillsInPlace(dir);
-  } catch (error) {
-    // Indexing failed (usually embeddings unavailable): do not leave a half
-    // state — the file exists but nothing is retrievable. Roll the file back
-    // so "create" is all-or-nothing.
-    rmSync(dir, { recursive: true, force: true });
-    throw error;
-  }
 }
 
 function discover(rawPath: string | undefined): string[] {
