@@ -15,23 +15,47 @@ agent reads both, then runs the tool on that server itself
 
 ## Quick start
 
-Requires **Node.js 24** (runtime) and **Bun** (package manager).
+Requires **Node.js 24+**. npm is the package manager — bun is optional.
 
 ```bash
+# Use it (recommended)
+npm i -g jit-mcp
+jit dashboard          # portal on http://localhost:3000
+
+# Or try it without installing
+npx jit-mcp dashboard
+
+# Or from source
 git clone https://github.com/StefanKhor/jit.git
 cd jit
-bun install
-bun run build
-bun run start
+npm install
+npm run build
+npm run start
 ```
 
-Open <http://localhost:3000>. For development: `bun run dev`
+The first dashboard run downloads the local embedding model (~30 MB, one
+time) into `~/.jit/models`; every run after that is fully offline.
+
+Open <http://localhost:3000>. For development: `npm run dev`
 (dashboard on :5173, API on :3000).
 
 ## Connect your agent
 
 Add JIT to your MCP client — Claude Desktop, Cursor, or any client using the
-standard shape:
+standard shape. When installed globally, use the `jit` binary directly:
+
+```json
+{
+  "mcpServers": {
+    "jit": {
+      "command": "jit",
+      "args": ["serve"]
+    }
+  }
+}
+```
+
+Or from a source checkout:
 
 ```json
 {
@@ -58,8 +82,8 @@ For OpenCode:
 }
 ```
 
-If you ran `bun link` in the repo, `"command": "jit"` and `"args": ["serve"]`
-also work.
+If you ran `npm link` in the repo (or `npm i -g jit-mcp` once published),
+`"command": "jit"` and `"args": ["serve"]` also work.
 
 Restart the client. The agent sees two tools:
 

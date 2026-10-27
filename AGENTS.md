@@ -32,15 +32,15 @@ JIT is a local Node.js/TypeScript app with an MCP server and a React dashboard. 
 
 ## Development and checks
 
-Requires Node.js 24+ (runtime) and Bun (package manager). Install with `bun install`; run `bun run dev` for the API and Vite dashboard.
+Requires Node.js 24+ (runtime); npm is the package manager (bun optional). Install with `npm install`; run `npm run dev` for the API and Vite dashboard.
 
-- `bun run typecheck` — server and web TypeScript checks.
-- `bun run build` — server and single-file dashboard production builds.
-- `bun run check` — typecheck and build; preferred final verification.
+- `npm run typecheck` — server and web TypeScript checks.
+- `npm run build` — server and single-file dashboard production builds.
+- `npm run check` — typecheck and build; preferred final verification.
 
 ## Working style
 
 - Follow nearby code patterns and keep changes scoped to the request.
 - Update docs when user-facing behavior or configuration changes.
-- Before finishing, run `bun run check`; report anything not run and why.
+- Before finishing, run `npm run check`; report anything not run and why.
 - Do not commit unless asked. Do not discard or overwrite unrelated work in the working tree.

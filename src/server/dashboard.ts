@@ -157,7 +157,7 @@ let dashboardCache: string | null = null;
 function dashboardHtml(): string {
   if (dashboardCache !== null) return dashboardCache;
   if (!existsSync(DASHBOARD_HTML)) {
-    return "<h1>Dashboard asset missing. Run <code>bun run build</code>.</h1>";
+    return "<h1>Dashboard asset missing. Run <code>npm run build</code>.</h1>";
   }
   dashboardCache = readFileSync(DASHBOARD_HTML, "utf8");
   return dashboardCache;

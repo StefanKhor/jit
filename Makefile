@@ -1,25 +1,25 @@
 .PHONY: install dev build start serve typecheck check clean
 
 install:
-	bun install
+	npm install
 
 dev:
-	bun run dev
+	npm run dev
 
 build:
-	bun run build
+	npm run build
 
 start:
-	bun run start
+	npm run start
 
 serve:
-	bun run serve
+	npm run serve
 
 typecheck:
-	bun run typecheck
+	npm run typecheck
 
 check:
-	bun run check
+	npm run check
 
 clean:
-	bun run clean
+	npm run clean
