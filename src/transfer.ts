@@ -238,6 +238,11 @@ export async function exportSkills(
   if (existsSync(dest) && !statSync(dest).isDirectory()) {
     throw new Error("destination is not a folder");
   }
+  // Create the destination only once at least one selection can resolve: a
+  // request where every id fails must not leave an empty folder tree behind.
+  if (!ids.some((rawId) => getItem(String(rawId || "").trim()))) {
+    throw new Error("none of the selected skills exist in the index");
+  }
   mkdirSync(dest, { recursive: true });
 
   const exported: Array<{ id: string; path: string }> = [];

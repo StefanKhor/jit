@@ -56,8 +56,11 @@ jobs:
         run: docker build --build-arg JIT_SKIP_MODEL_WARMUP=1 -t jit:ci .
 
       - name: Smoke-test the image
+        # The bind guard refuses 0.0.0.0 without an API key — deliberate, and
+        # exactly what a production container should do. The smoke test gets a
+        # throwaway key; /api/health is pre-auth, so the curl needs no header.
         run: |
-          docker run -d --name jit-ci -p 3000:3000 jit:ci
+          docker run -d --name jit-ci -p 3000:3000 -e JIT_API_KEY=ci-smoke-key jit:ci
           curl --fail --silent --show-error --retry 20 --retry-delay 2 \
             --retry-connrefused http://127.0.0.1:3000/api/health
           docker exec jit-ci ls /app/dist /app/static

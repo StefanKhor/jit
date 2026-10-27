@@ -33,7 +33,10 @@ export const STATIC_DIR = path.join(PACKAGE_ROOT, "static");
 export const DASHBOARD_HTML = path.join(STATIC_DIR, "dashboard.html");
 
 export const INDEX_DIR = path.resolve(
-  (process.env.JIT_HOME || path.join(homedir(), ".jit")).replace(/^~(?=$|\/)/, homedir()),
+  (process.env.JIT_HOME || path.join(homedir(), ".jit")).replace(
+    /^~(?=[\\/]|$)/,
+    homedir(),
+  ),
 );
 /** The whole index: skills, bodies, and base64 embeddings. Single writer. */
 export const INDEX_FILE = path.join(INDEX_DIR, "index.json");
@@ -42,7 +45,7 @@ export const MCP_CONFIG = path.join(INDEX_DIR, "mcp.json");
 export const JIT_SKILLS_DIR = path.join(INDEX_DIR, "skills");
 export const MODEL_CACHE_DIR = path.resolve(
   (process.env.JIT_MODEL_CACHE || path.join(INDEX_DIR, "models")).replace(
-    /^~(?=$|\/)/,
+    /^~(?=[\\/]|$)/,
     homedir(),
   ),
 );
@@ -222,15 +225,32 @@ export function readJsonFile<T>(file: string, fallback: T): T {
 }
 
 function readStoredConfig(): Partial<Config> {
-  const parsed = readJsonFile<unknown>(CONFIG_FILE, {});
+  // Fail closed like readIndex: a corrupt config must not silently become the
+  // defaults — that would turn auth off — and the next save would overwrite
+  // the file for good, taking the stored credentials and endpoints with it.
+  let raw: string;
+  try {
+    raw = readFileSync(CONFIG_FILE, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    throw error;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(
+      `config.json is corrupt; fix or remove it, then restart: ${CONFIG_FILE}`,
+    );
+  }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     return {};
   }
-  const raw = parsed as Record<string, unknown>;
+  const rawRecord = parsed as Record<string, unknown>;
   const stored: Record<string, unknown> = {};
   for (const key of CONFIG_KEYS) {
-    if (!(key in raw)) continue;
-    const value = CONFIG_FIELDS[key].parse?.(raw[key]);
+    if (!(key in rawRecord)) continue;
+    const value = CONFIG_FIELDS[key].parse?.(rawRecord[key]);
     if (value !== undefined) stored[key] = value;
   }
   return stored as Partial<Config>;
@@ -309,11 +329,25 @@ export function getEmbeddingSettings(
   }
   return {
     provider: "local",
+    // The built-in local model runs offline; it never takes a key, even if a
+    // stale embedding_api_key is still stored in the config.
     apiKey: "",
     apiBase: "",
     model: config.embedding_local_model,
     dimensions: config.embedding_local_dim,
   };
+}
+
+/** True when the embeddings dimension was deliberately configured — config.json
+ *  or the JIT_EMBEDDING_API_DIM env — as opposed to riding the built-in
+ *  default. `dimensions` is an OpenAI extension that strict OpenAI-compatible
+ *  servers reject as an unknown field, so the client only sends it when it was
+ *  actually pinned. */
+export function embeddingDimExplicit(): boolean {
+  if (process.env.JIT_EMBEDDING_API_DIM) return true;
+  // Read the raw stored config: a user-pinned value equal to the default is
+  // still pinned, and loadConfig() would have merged it away.
+  return readStoredConfig().embedding_api_dim !== undefined;
 }
 
 export function embeddingSignature(): string {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { fmt, summary } from "../format";
 import { useJit } from "../state/store";
@@ -36,6 +36,9 @@ export function TransferDialog({
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState("");
   const [deletingId, setDeletingId] = useState("");
+  // Mirrors `path` so an in-flight scan can tell whether the user has moved on.
+  const pathRef = useRef(path);
+  pathRef.current = path;
 
   useEffect(() => {
     if (!open) return;
@@ -59,13 +62,18 @@ export function TransferDialog({
   const jit = ctx.skills.filter((skill) => skill.managed).length;
 
   const scan = async () => {
+    // The response must match the path the user is looking at now: editing the
+    // path clears the results, and a slow scan for the old path landing later
+    // would silently repopulate the picker with stale entries.
+    const requested = path;
     setScanning(true);
     setScanError("");
     try {
       const result = await ctx.api<DiscoverSkillsResult>("/api/skills/discover", {
         method: "POST",
-        body: JSON.stringify({ path }),
+        body: JSON.stringify({ path: requested }),
       });
+      if (pathRef.current !== requested) return;
       setDiscovered(result);
       // Preselect what is not indexed yet; entries already in JIT are opt-in
       // because importing them again needs overwrite.
@@ -77,6 +85,7 @@ export function TransferDialog({
         ),
       );
     } catch (caught) {
+      if (pathRef.current !== requested) return;
       setScanError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setScanning(false);
@@ -206,7 +215,13 @@ export function TransferDialog({
 
         <Tabs
           value={tab}
-          onValueChange={(next) => setTab(next === "out" ? "out" : "in")}
+          onValueChange={(next) => {
+            setTab(next === "out" ? "out" : "in");
+            // Selections are direction-specific: ids picked for import must
+            // not leak into the export list (and its destructive side), or
+            // the other way around.
+            setSelected(new Set());
+          }}
           className="space-y-5"
         >
           <TabList label="Transfer direction">
@@ -359,7 +374,7 @@ export function TransferDialog({
                         size="sm"
                         variant="ghost"
                         disabled={deletingId === skill.id}
-                        onClick={() => void removeSkill(skill.id, skill.managed)}
+                        onClick={() => void removeSkill(skill.id, skill.managed === true)}
                       >
                         {deletingId === skill.id ? "Removing…" : "Delete"}
                       </Button>

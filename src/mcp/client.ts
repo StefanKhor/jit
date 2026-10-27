@@ -37,6 +37,38 @@ function stringEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   return result;
 }
 
+// stdio MCP servers are third-party processes. They get the variables a child
+// process plausibly needs to run, plus config.env — never JIT's whole process
+// environment, which carries the embedding and rerank API keys.
+const CHILD_ENV_KEYS = [
+  "PATH",
+  "PATHEXT",
+  "HOME",
+  "USERPROFILE",
+  "USERNAME",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "USER",
+  "SHELL",
+  "TERM",
+  "LANG",
+  "LC_ALL",
+  "TZ",
+  "TEMP",
+  "TMP",
+  "TMPDIR",
+  "SYSTEMROOT",
+  "SYSTEMDRIVE",
+  "WINDIR",
+  "COMSPEC",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "PROGRAMFILES",
+  "PROGRAMFILES(X86)",
+  "COMMONPROGRAMFILES",
+  "OS",
+];
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -385,8 +417,13 @@ export class MCPClientManager {
     try {
       const config = state.config;
       if (config.command) {
+        const inherited: Record<string, string> = {};
+        for (const key of CHILD_ENV_KEYS) {
+          const value = process.env[key];
+          if (typeof value === "string") inherited[key] = value;
+        }
         const env = {
-          ...stringEnv(process.env),
+          ...inherited,
           ...(config.env || {}),
         };
         transport = new StdioClientTransport({

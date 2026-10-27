@@ -3,8 +3,10 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import {
   atomicWriteFile,
   embeddingSignature,
+  getEmbeddingSettings,
   INDEX_FILE,
 } from "../config.js";
+import { logger } from "../logger.js";
 import { readSkillBody } from "../skill-text.js";
 import type {
   IndexItem,
@@ -92,10 +94,29 @@ function encodeVector(vector: Float32Array | null): string | null {
   ).toString("base64");
 }
 
+// Warn once per wrong-dimension vector shape seen, not per row per read.
+const dimMismatchWarned = new Set<number>();
+
 function decodeVector(value: unknown): Float32Array | null {
   if (typeof value !== "string" || !value) return null;
   const decoded = Buffer.from(value, "base64");
   if (decoded.byteLength === 0 || decoded.byteLength % 4 !== 0) return null;
+  // A truncated payload decodes into a wrong-dimension vector that cosine
+  // similarity silently scores as 0 — the item just vanishes from retrieval.
+  // Treat it like a missing vector instead, and say so once per shape.
+  const floats = decoded.byteLength / 4;
+  const expected = getEmbeddingSettings().dimensions;
+  if (floats !== expected) {
+    if (!dimMismatchWarned.has(floats)) {
+      dimMismatchWarned.add(floats);
+      logger.warn(
+        "index holds a %d-dim vector where the active embedding dimension is %d; treating it as missing (reindex to repair)",
+        floats,
+        expected,
+      );
+    }
+    return null;
+  }
   // Copy into an aligned buffer: `Buffer.from(base64)` may hand back a view
   // into Node's shared pool, whose byteOffset is not safe for a Float32Array.
   const bytes = new Uint8Array(decoded.byteLength);

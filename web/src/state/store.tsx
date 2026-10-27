@@ -309,7 +309,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const tag = document.activeElement?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       if (loginRequired || booting) return;
-      if (document.querySelector("dialog[open]")) return;
+      // The dialogs are Radix (div[role=dialog]), not native <dialog> — check
+      // both so the shortcut never switches views behind an open modal.
+      if (document.querySelector("dialog[open], [role='dialog']")) return;
       event.preventDefault();
       setViewState("search");
     };

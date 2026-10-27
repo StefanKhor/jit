@@ -48,6 +48,9 @@ export async function rerankCandidates(
       // but the SDK requires a non-empty string.
       apiKey: settings.rerank_api_key || "local-no-key",
       timeout: 20_000,
+      // No stacked SDK retries on top of the timeout: the reranker already
+      // has a cosine fallback, and a stalled endpoint must not hold lookups.
+      maxRetries: 0,
     });
     const listing = candidates
       .map(

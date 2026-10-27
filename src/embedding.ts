@@ -5,7 +5,11 @@ import {
   type FeatureExtractionPipeline,
 } from "@huggingface/transformers";
 
-import { getEmbeddingSettings, MODEL_CACHE_DIR } from "./config.js";
+import {
+  embeddingDimExplicit,
+  getEmbeddingSettings,
+  MODEL_CACHE_DIR,
+} from "./config.js";
 import { logger } from "./logger.js";
 import { isLocalEndpoint } from "./net.js";
 
@@ -128,11 +132,19 @@ async function embedWithApi(texts: string[]): Promise<Float32Array[]> {
     baseURL: settings.apiBase,
     apiKey: settings.apiKey || "local-no-key",
     timeout: 45_000,
+    // The SDK's default retries stack on top of the timeout, so an unreachable
+    // endpoint stalls a 64-item batch for minutes. Fail fast instead: the
+    // caller already retries the batch at a higher level.
+    maxRetries: 0,
   });
   const response = await client.embeddings.create({
     model: settings.model,
     input: texts,
-    dimensions: settings.dimensions,
+    // `dimensions` is an OpenAI extension that strict OpenAI-compatible
+    // servers reject as an unknown field. Send it only when the dimension was
+    // explicitly configured; otherwise the model's native size flows through
+    // and the length check below still catches a mismatch.
+    ...(embeddingDimExplicit() ? { dimensions: settings.dimensions } : {}),
   });
   if (response.data.length !== texts.length) {
     throw new Error("embeddings API returned an unexpected number of vectors");

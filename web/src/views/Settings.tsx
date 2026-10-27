@@ -264,20 +264,27 @@ export function Settings() {
     ? "Set by JIT_API_KEY in the environment."
     : "Changes take effect immediately. This browser keeps the new key.";
 
+  // Status badges describe what the server is actually running, so they are
+  // derived from the saved config — not the draft form, where typing a key
+  // would otherwise flip "configured" before anything is persisted.
+  const savedRerankBase = (config?.rerank_api_base || "").trim();
+  const savedRerankModel = (config?.rerank_model || "").trim();
+  const savedEmbeddingBase = (config?.embedding_api_base || "").trim();
+  const savedEmbeddingModel = (config?.embedding_api_model || "").trim();
   const localRerankEndpoint = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::|\/|$)/i.test(
-    rerankBase.trim(),
+    savedRerankBase,
   );
   const rerankConfigured = Boolean(
-    rerankBase.trim() && rerankModel.trim() && (hasKey || localRerankEndpoint),
+    savedRerankBase && savedRerankModel && (hasKey || localRerankEndpoint),
   );
   const rerankState = rerankConfigured ? "active" : "not configured";
   const localEmbeddingEndpoint = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::|\/|$)/i.test(
-    embeddingBase.trim(),
+    savedEmbeddingBase,
   );
   const cloudEmbeddingConfigured = Boolean(
-    embeddingBase.trim() &&
-      embeddingModel.trim() &&
-      (hasEmbeddingKey || embeddingKey.trim() || localEmbeddingEndpoint),
+    savedEmbeddingBase &&
+      savedEmbeddingModel &&
+      (hasEmbeddingKey || localEmbeddingEndpoint),
   );
   const embeddingState = embeddingProvider === "local"
     ? "built in · local"

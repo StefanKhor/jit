@@ -343,6 +343,19 @@ export function createApp(): Hono {
       }
     }
     if (!loadConfig().api_key) {
+      // A direct remote client can send any Host header it likes — including
+      // Host: 127.0.0.1 — so the header checks below are not enough on their
+      // own. Keyless requests must also arrive over a loopback socket. This is
+      // what keeps the surface closed even if the key is later cleared at
+      // runtime while the server stays bound beyond loopback.
+      const remote = (
+        c.env as { incoming?: { socket?: { remoteAddress?: string } } }
+      ).incoming?.socket?.remoteAddress;
+      // Node reports IPv4-mapped IPv6 peers as ::ffff:a.b.c.d.
+      const peer = (remote || "").replace(/^::ffff:/i, "").toLowerCase();
+      if (!peer || !["127.0.0.1", "::1"].includes(peer)) {
+        return c.json({ error: "remote access requires an API key" }, 403);
+      }
       // DNS rebinding arrives with an attacker-chosen Host header.
       const host = c.req.header("host") || "";
       let hostname = "";
@@ -504,10 +517,11 @@ export function createApp(): Hono {
   // importing. Read-only over the requested path (or the usual skill folders).
   app.post("/api/skills/discover", async (c) => {
     let body: Record<string, unknown> = {};
-    try {
+    // The body is optional — an absent one scans the usual folders. A present
+    // but malformed or oversized one is a client bug, not an absence: surface
+    // it instead of silently scanning the defaults.
+    if (Number(c.req.header("content-length") || 0) > 0) {
       body = await readJson(c);
-    } catch {
-      // The body is optional; an empty one scans the usual folders.
     }
     try {
       return c.json(discoverTransferable(String(body.path || "").trim()));
@@ -526,19 +540,28 @@ export function createApp(): Hono {
     const copy = boolValue(body.copy, true);
     const overwrite = boolValue(body.overwrite, false);
     // Optional selection from the discovery picker; absent means transfer
-    // everything the scan finds.
-    const only = Array.isArray(body.ids)
-      ? new Set(
-          body.ids.map((value: unknown) => String(value).trim()).filter(Boolean),
-        )
-      : undefined;
-    if (only && only.size > 500) {
-      throw new HttpError(413, "too many ids; split the request");
+    // everything the scan finds. A present-but-malformed ids must fail loud:
+    // falling back to "everything" would import on a client bug.
+    let only: Set<string> | undefined;
+    if (body.ids !== undefined) {
+      if (!Array.isArray(body.ids)) {
+        throw new HttpError(400, "ids must be a list of skill ids");
+      }
+      only = new Set(
+        body.ids.map((value: unknown) => String(value).trim()).filter(Boolean),
+      );
+      if (only.size > 500) {
+        throw new HttpError(413, "too many ids; split the request");
+      }
     }
     try {
       return c.json(await transferSkills(rawPath, copy, overwrite, only));
     } catch (error) {
-      throw new HttpError(400, error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      throw new HttpError(
+        message.includes("path not found") ? 404 : 400,
+        message,
+      );
     }
   });
 

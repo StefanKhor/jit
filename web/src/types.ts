@@ -54,7 +54,7 @@ export interface Stats {
     total: number;
     embedded: number;
   };
-  tokens: {
+  tokens?: {
     jit: number;
     catalog: number;
     average_item: number;
@@ -75,7 +75,7 @@ export interface SkillListItem {
   /** What this entry's name and description cost in a plain catalog. */
   catalog_tokens: number;
   has_embedding: boolean;
-  managed: boolean;
+  managed?: boolean;
 }
 
 /**
