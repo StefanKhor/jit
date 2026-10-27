@@ -82,13 +82,15 @@ export async function rerankCandidates(
         },
       ],
       temperature: 0,
-      // Small, but enough headroom that a thinking model can finish its
-      // reasoning and still emit the JSON array; 32 left reasoning models
-      // truncated before the answer.
-      max_tokens: 256,
+      // Enough headroom for a thinking model to finish its reasoning and
+      // still emit the JSON array. A too-small budget is exactly the
+      // "sometimes works, sometimes empty" failure: the model thinks a
+      // variable amount, and an overrun means no answer at all.
+      max_tokens: 2048,
     });
-    const message = response.choices[0]?.message as
-      | (Record<string, unknown> | undefined);
+    const choice = response.choices[0];
+    const finishReason = choice?.finish_reason ?? "unknown";
+    const message = choice?.message as Record<string, unknown> | undefined;
     // Reasoning models answer in `content`, but some OpenAI-compatible
     // servers put the visible text in `reasoning_content` instead.
     const raw = String(
@@ -103,7 +105,12 @@ export async function rerankCandidates(
     if (start === -1 || end <= start) {
       return {
         selected,
-        error: `rerank response unparseable — raw: ${snippet}`,
+        error:
+          `rerank response unparseable (finish_reason: ${finishReason}) — ` +
+          `raw: ${snippet}` +
+          (finishReason === "length"
+            ? " — the model hit the token limit while thinking and never answered"
+            : ""),
         configured: true,
         sent: candidates.length,
         ms: performance.now() - started,
@@ -113,7 +120,9 @@ export async function rerankCandidates(
     if (!Array.isArray(parsed)) {
       return {
         selected,
-        error: `rerank response unparseable — raw: ${snippet}`,
+        error:
+          `rerank response unparseable (finish_reason: ${finishReason}) — ` +
+          `raw: ${snippet}`,
         configured: true,
         sent: candidates.length,
         ms: performance.now() - started,
