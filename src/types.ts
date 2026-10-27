@@ -222,6 +222,23 @@ export interface SearchResponse {
   elapsed_ms: number;
 }
 
+export interface DiscoveredSkill {
+  id: string;
+  name: string;
+  path: string;
+  description: string;
+  /** Already indexed; importing again needs overwrite to replace a JIT copy. */
+  in_jit: boolean;
+  /** Set when the file could not be parsed as a skill. */
+  error?: string;
+}
+
+export interface DiscoverSkillsResult {
+  found: number;
+  truncated: boolean;
+  skills: DiscoveredSkill[];
+}
+
 export interface TransferResult {
   mode?: "copy" | "link";
   found?: number;

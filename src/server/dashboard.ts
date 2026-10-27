@@ -41,6 +41,7 @@ import {
 import { jitSchemaTokens } from "../mcp-server.js";
 import { evaluate } from "../retrieval/retriever.js";
 import {
+  discoverTransferable,
   exportSkills,
   indexSkillsInPlace,
   removeSkillCopy,
@@ -499,13 +500,43 @@ export function createApp(): Hono {
     return c.json(await indexSkillsInPlace());
   });
 
+  // Discovery for the transfer picker: what a scan would find, without
+  // importing. Read-only over the requested path (or the usual skill folders).
+  app.post("/api/skills/discover", async (c) => {
+    let body: Record<string, unknown> = {};
+    try {
+      body = await readJson(c);
+    } catch {
+      // The body is optional; an empty one scans the usual folders.
+    }
+    try {
+      return c.json(discoverTransferable(String(body.path || "").trim()));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new HttpError(
+        message.includes("path not found") ? 404 : 400,
+        message,
+      );
+    }
+  });
+
   app.post("/api/skills/transfer", async (c) => {
     const body = await readJson(c);
     const rawPath = String(body.path || "").trim();
     const copy = boolValue(body.copy, true);
     const overwrite = boolValue(body.overwrite, false);
+    // Optional selection from the discovery picker; absent means transfer
+    // everything the scan finds.
+    const only = Array.isArray(body.ids)
+      ? new Set(
+          body.ids.map((value: unknown) => String(value).trim()).filter(Boolean),
+        )
+      : undefined;
+    if (only && only.size > 500) {
+      throw new HttpError(413, "too many ids; split the request");
+    }
     try {
-      return c.json(await transferSkills(rawPath, copy, overwrite));
+      return c.json(await transferSkills(rawPath, copy, overwrite, only));
     } catch (error) {
       throw new HttpError(400, error instanceof Error ? error.message : String(error));
     }

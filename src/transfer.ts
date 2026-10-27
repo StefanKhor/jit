@@ -23,7 +23,10 @@ import {
   parseSkillText,
 } from "./indexer.js";
 import { logger } from "./logger.js";
+import { listItems } from "./storage/store.js";
 import type {
+  DiscoveredSkill,
+  DiscoverSkillsResult,
   ExportSkillsResult,
   IndexItem,
   TransferResult,
@@ -55,6 +58,49 @@ function discover(rawPath: string | undefined): string[] {
   return files;
 }
 
+const DISCOVER_LIMIT = 500;
+
+/**
+ * List the skills a transfer would find, without importing anything: the
+ * picker the dashboard shows before "Into JIT" runs. Unreadable files are
+ * listed too, with the reason, instead of silently disappearing.
+ */
+export function discoverTransferable(
+  rawPath?: string,
+): DiscoverSkillsResult {
+  const files = discover(rawPath);
+  const indexed = new Set(listItems().map((item) => item.id));
+  const skills: DiscoveredSkill[] = [];
+  let truncated = false;
+  for (const file of files) {
+    if (skills.length >= DISCOVER_LIMIT) {
+      truncated = true;
+      break;
+    }
+    const base = path.basename(path.dirname(file));
+    try {
+      const parsed = parseSkillFile(file);
+      skills.push({
+        id: parsed.id,
+        name: parsed.name,
+        path: file,
+        description: parsed.description || "",
+        in_jit: indexed.has(parsed.id),
+      });
+    } catch (error) {
+      skills.push({
+        id: base,
+        name: base,
+        path: file,
+        description: "",
+        in_jit: indexed.has(base),
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return { found: files.length, truncated, skills };
+}
+
 function inside(parent: string, child: string): boolean {
   const relative = path.relative(parent, child);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
@@ -74,6 +120,7 @@ async function indexParsed(
 export async function copySkillsToJit(
   rawPath?: string,
   overwrite = false,
+  only?: Set<string>,
 ): Promise<TransferResult> {
   const files = discover(rawPath);
   const copied: string[] = [];
@@ -83,6 +130,7 @@ export async function copySkillsToJit(
   for (const file of files) {
     try {
       const source = parseSkillFile(file);
+      if (only && !only.has(source.id)) continue;
       const itemId = skillDirName(source.id);
       const destination = path.join(JIT_SKILLS_DIR, itemId, "SKILL.md");
 
@@ -130,13 +178,16 @@ export async function copySkillsToJit(
 
 export async function indexSkillsInPlace(
   rawPath?: string,
+  only?: Set<string>,
 ): Promise<TransferResult> {
   const files = discover(rawPath);
   const items: IndexItem[] = [];
   const errors: string[] = [];
   for (const file of files) {
     try {
-      items.push(parseSkillFile(file));
+      const parsed = parseSkillFile(file);
+      if (only && !only.has(parsed.id)) continue;
+      items.push(parsed);
     } catch (error) {
       errors.push(
         `${path.basename(file)}: ${
@@ -161,10 +212,11 @@ export async function transferSkills(
   rawPath?: string,
   copy = true,
   overwrite = false,
+  only?: Set<string>,
 ): Promise<TransferResult> {
   return copy
-    ? copySkillsToJit(rawPath, overwrite)
-    : indexSkillsInPlace(rawPath);
+    ? copySkillsToJit(rawPath, overwrite, only)
+    : indexSkillsInPlace(rawPath, only);
 }
 
 export async function exportSkills(

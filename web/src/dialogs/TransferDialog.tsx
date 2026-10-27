@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { fmt, summary } from "../format";
 import { useJit } from "../state/store";
+import type { DiscoverSkillsResult } from "../types";
 import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { Dialog, DialogBody, DialogFoot, DialogHead } from "../ui/Dialog";
@@ -29,6 +30,12 @@ export function TransferDialog({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [discovered, setDiscovered] = useState<DiscoverSkillsResult | null>(
+    null,
+  );
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState("");
+  const [deletingId, setDeletingId] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -38,11 +45,12 @@ export function TransferDialog({
     setOverwrite(false);
     setDest("~/jit-skills");
     setExportOverwrite(false);
-    setSelected(
-      new Set(ctx.skills.filter((skill) => skill.managed).map((skill) => skill.id)),
-    );
+    setSelected(new Set());
     setError("");
     setBusy(false);
+    setDiscovered(null);
+    setScanError("");
+    setDeletingId("");
     // Skills are refreshed before the dialog opens; do not reset the form when
     // a background refresh lands while the user is selecting entries.
   }, [open, initialTab]);
@@ -50,7 +58,63 @@ export function TransferDialog({
   const local = ctx.skills.filter((skill) => !skill.managed).length;
   const jit = ctx.skills.filter((skill) => skill.managed).length;
 
+  const scan = async () => {
+    setScanning(true);
+    setScanError("");
+    try {
+      const result = await ctx.api<DiscoverSkillsResult>("/api/skills/discover", {
+        method: "POST",
+        body: JSON.stringify({ path }),
+      });
+      setDiscovered(result);
+      // Preselect what is not indexed yet; entries already in JIT are opt-in
+      // because importing them again needs overwrite.
+      setSelected(
+        new Set(
+          result.skills
+            .filter((skill) => !skill.error && !skill.in_jit)
+            .map((skill) => skill.id),
+        ),
+      );
+    } catch (caught) {
+      setScanError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const removeSkill = async (id: string, managed: boolean) => {
+    const ok = await ctx.confirmAction(
+      managed ? "Uninstall this skill?" : "Unindex this skill?",
+      managed
+        ? `"${id}" is a JIT-owned copy. This deletes the copy and removes it from the index. Your original file, if any, is untouched.`
+        : `"${id}" will be removed from the JIT index. The source file is not touched.`,
+      managed ? "Uninstall" : "Unindex",
+    );
+    if (!ok) return;
+    setDeletingId(id);
+    try {
+      await ctx.api(
+        `/api/skills/${encodeURIComponent(id)}${managed ? "?purge=1" : ""}`,
+        { method: "DELETE" },
+      );
+      ctx.toast(managed ? `Uninstalled ${id}.` : `${id} unindexed.`);
+      await ctx.refreshAll();
+    } catch (caught) {
+      ctx.toast(
+        caught instanceof Error ? caught.message : String(caught),
+        "error",
+      );
+    } finally {
+      setDeletingId("");
+    }
+  };
+
   const transferIn = async () => {
+    if (selected.size === 0) {
+      setError("Scan and select at least one skill.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -63,7 +127,7 @@ export function TransferDialog({
         errors?: string[];
       }>("/api/skills/transfer", {
         method: "POST",
-        body: JSON.stringify({ path, copy, overwrite }),
+        body: JSON.stringify({ path, copy, overwrite, ids: [...selected] }),
       });
       const errors = result.errors || [];
       if (errors.length) {
@@ -163,16 +227,94 @@ export function TransferDialog({
               label="Source path optional"
               hint="A skill file or a folder. Empty scans the usual local skill folders."
             >
-              <Input
-                type="text"
-                className="num"
-                placeholder="Leave empty for the usual skill folders"
-                spellCheck={false}
-                autoComplete="off"
-                value={path}
-                onChange={(event) => setPath(event.target.value)}
-              />
+              <div className="flex gap-2">
+                <Input
+                  type="text"
+                  className="num"
+                  placeholder="Leave empty for the usual skill folders"
+                  spellCheck={false}
+                  autoComplete="off"
+                  value={path}
+                  onChange={(event) => {
+                    setPath(event.target.value);
+                    // Stale results would invite importing from a folder the
+                    // user is no longer looking at.
+                    setDiscovered(null);
+                  }}
+                />
+                <Button
+                  variant="outline"
+                  disabled={scanning}
+                  onClick={() => void scan()}
+                >
+                  {scanning ? "Scanning…" : discovered ? "Rescan" : "Scan"}
+                </Button>
+              </div>
             </Field>
+
+            {scanError ? (
+              <p className="text-xs text-bad" role="alert">
+                {scanError}
+              </p>
+            ) : null}
+
+            {discovered === null ? (
+              <p className="text-sm text-ink-3">
+                Scan first to choose which skills to import.
+              </p>
+            ) : discovered.skills.length === 0 ? (
+              <p className="text-sm text-ink-3">No skill files found there.</p>
+            ) : (
+              <div className="max-h-56 overflow-y-auto rounded-xl border border-line">
+                {discovered.skills.map((skill) => (
+                  <label
+                    key={skill.path}
+                    className="flex cursor-pointer items-start gap-3 border-b border-line/60 px-4 py-3 transition-colors last:border-b-0 hover:bg-raised/40"
+                  >
+                    <Checkbox
+                      className="mt-0.5"
+                      checked={selected.has(skill.id)}
+                      disabled={Boolean(skill.error)}
+                      onChange={(event) => {
+                        setSelected((current) => {
+                          const next = new Set(current);
+                          if (event.target.checked) next.add(skill.id);
+                          else next.delete(skill.id);
+                          return next;
+                        });
+                      }}
+                    />
+                    <span className="min-w-0">
+                      <span className="flex items-center gap-2 text-sm text-ink">
+                        <span className="truncate">{skill.name}</span>
+                        {skill.error ? (
+                          <Badge tone="bad">unreadable</Badge>
+                        ) : skill.in_jit ? (
+                          <Badge tone="info">in JIT</Badge>
+                        ) : null}
+                      </span>
+                      <span
+                        className="num mt-1 block truncate text-[11px] text-ink-3"
+                        title={skill.path}
+                      >
+                        {skill.path}
+                      </span>
+                      {skill.error ? (
+                        <span className="mt-1 block text-[11px] text-bad">
+                          {skill.error}
+                        </span>
+                      ) : null}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+            {discovered?.truncated ? (
+              <p className="text-xs text-ink-3">
+                Showing the first 500 of {discovered.found} files.
+              </p>
+            ) : null}
+
             <ToggleRow
               label={`Copy into ${ctx.config?.index_dir || "~/.jit"}/skills`}
               hint="Checked: JIT owns the copy. Unchecked: JIT indexes the file where it lives."
@@ -184,6 +326,48 @@ export function TransferDialog({
               checked={overwrite}
               onCheckedChange={setOverwrite}
             />
+
+            <div className="space-y-2 border-t border-line pt-4">
+              <p className="text-sm font-medium text-ink">
+                Already in JIT{" "}
+                <span className="num text-ink-3">{fmt(ctx.skills.length)}</span>
+              </p>
+              {ctx.skills.length === 0 ? (
+                <p className="text-xs text-ink-3">Nothing indexed yet.</p>
+              ) : (
+                <div className="max-h-56 overflow-y-auto rounded-xl border border-line">
+                  {ctx.skills.map((skill) => (
+                    <div
+                      key={skill.id}
+                      className="flex items-center gap-3 border-b border-line/60 px-4 py-2.5 last:border-b-0"
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-2 text-sm text-ink">
+                          <span className="truncate">{skill.name}</span>
+                          <Badge tone={skill.managed ? "accent" : "neutral"}>
+                            {skill.managed ? "JIT copy" : "Local file"}
+                          </Badge>
+                        </span>
+                        <span
+                          className="num mt-0.5 block truncate text-[11px] text-ink-3"
+                          title={skill.path || ""}
+                        >
+                          {skill.id}
+                        </span>
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={deletingId === skill.id}
+                        onClick={() => void removeSkill(skill.id, skill.managed)}
+                      >
+                        {deletingId === skill.id ? "Removing…" : "Delete"}
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </TabPanel>
 
           <TabPanel value="out" className="space-y-4">
@@ -261,13 +445,18 @@ export function TransferDialog({
         </Button>
         <Button
           variant="primary"
-          disabled={busy}
+          disabled={
+            busy ||
+            (tab === "in" && (discovered === null || selected.size === 0))
+          }
           onClick={() => void (tab === "in" ? transferIn() : transferOut())}
         >
           {tab === "in"
             ? busy
               ? "Working…"
-              : "Import"
+              : discovered
+                ? `Import ${selected.size} selected`
+                : "Scan to import"
             : busy
               ? "Exporting…"
               : "Export selected"}
