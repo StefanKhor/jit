@@ -241,17 +241,6 @@ src/mcp-server.ts (stdio) --> src/mcp/client.ts --> stdio / HTTP / SSE
   checked delete paths, `0600` secret files, constant-time key compares,
   cross-site browser writes rejected.
 
-## NixOS
-
-If the local ONNX runtime cannot find `libstdc++.so.6`:
-
-```bash
-export JIT_LD_LIBRARY_PATH=/nix/store/.../usr/lib64
-```
-
-The CLI re-execs itself once with that directory on the loader path; elsewhere
-it is a no-op.
-
 ## Hackathon
 
 Built for the Nebius x NVIDIA Global AI Hackathon. In Settings, select **Use
