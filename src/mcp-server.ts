@@ -21,15 +21,15 @@ const CALL_HINT =
 // condition, not a one-time "start of task" cue: a trigger the agent meets once
 // decays as the session grows, while one it re-meets on every domain shift keeps
 // firing. Keep it short — a long block is diluted the further back it sits.
-const INSTRUCTIONS = `JIT is a just-in-time skill index: it loads the one skill you need, when you need it, instead of keeping every skill in context.
+const INSTRUCTIONS = `JIT is a just-in-time index of skills and MCP tools: it loads the procedure you need, when you need it, instead of keeping every procedure in context.
 
-Call JIT_FIND at the start of any multi-step task — and again whenever the work shifts to a new kind of task: a new platform, domain, or unfamiliar tool. Not only the first task of a session; the mid-session switch is the one that is easy to miss. Skip it only for a single-step action you can do directly, or a task whose skill is already in context. One cheap lookup beats improvising a procedure that already exists; if you are unsure a skill exists, that is the reason to check.
+Call JIT_FIND before starting a multi-step task, and again whenever the work shifts to a new platform, domain, or unfamiliar tool — the mid-session shift is the one that is easy to miss. Skip it only for a single-step action you can do directly, or work whose procedure is already in context. One cheap lookup beats improvising a procedure that already exists; unsure a skill exists is the reason to check.
 
-One intent per call. Work that spans several domains is several lookups, not one: call JIT_FIND separately for each intent. Packing multiple intents into a single query blurs the match and returns the wrong skill.
+One intent per call, phrased as a search query: one sentence, concrete action plus platform or domain — "deploy a node app to azure", "automate posting a twitter thread". No file paths or task details; they dilute the match. Work spanning several domains is several calls.
 
-Phrase the intent as a search query, not a task brief: one sentence, concrete action plus platform or domain — "deploy a node app to azure", "automate posting a twitter thread". Leave out file paths and task details; they dilute the match. Returns the skill body, or {"found": false} with near_misses; retry once with different phrasing, then proceed — a miss is normal, not an error. A hit may return several skills when more than one fits the same intent; read them all before starting. A hit can also be an MCP tool: its content names the server that owns it and the arguments it takes — call that tool on its server directly; JIT indexes and routes tools, it does not run them.
+A hit returns the procedure to follow: one skill, or several when more than one fits — read them all before starting. A hit can also be an MCP tool: its content names the owning server and the arguments it takes — call that tool on its server directly; JIT indexes and routes tools, it does not run them. {"found": false} with near_misses is normal, not an error: retry once with different phrasing, then proceed.
 
-When you already know exactly which skill you need — a name from near_misses or related, or one you loaded earlier and lost from context — call JIT_RUN with that exact name to load it directly, without searching.`;
+When you already know the exact skill name — from near_misses, related, or one you loaded earlier and lost from context — call JIT_RUN with that name to load it directly, without searching.`;
 
 function textResult(payload: unknown, isError = false) {
   return {
@@ -50,7 +50,8 @@ function createServer(): McpServer {
 
 export function findDescription(): string {
   return (
-    "Load the one skill that fits the work you are about to start. Call " +
+    "Load the procedure that fits the work you are about to start — a " +
+    "skill body, or the right MCP tool from a connected server. Call " +
     "it before any multi-step task, and again whenever the work shifts " +
     "to a new domain or an unfamiliar tool — not only the first task of " +
     "a session. One intent per call: work spanning several domains is " +
