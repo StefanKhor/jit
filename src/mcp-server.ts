@@ -101,14 +101,29 @@ export function registerFind(server: McpServer): void {
         // be followed if the agent knows where the skill lives. Ranking notes
         // stay on the dashboard response, where a human reads them.
         const primary = evaluation.results[0];
+        const skills = evaluation.results.map((result) => ({
+          name: result.name,
+          path: result.path,
+          content: result.content,
+        }));
+        // A body is read from disk at serving time, so an empty content means
+        // the file moved or was deleted since indexing. Say so in-band — an
+        // unmarked empty procedure would be indistinguishable from a genuine
+        // empty skill, and the path the agent could fall back to is exactly
+        // the file that is gone.
+        const missing = skills.filter((skill) => !skill.content).length;
         return textResult({
           found: true,
-          skills: evaluation.results.map((result) => ({
-            name: result.name,
-            path: result.path,
-            content: result.content,
-          })),
+          skills,
           ...(primary?.related ? { related: primary.related } : {}),
+          ...(missing > 0
+            ? {
+                note:
+                  `${missing} of ${skills.length} skill bodies are unavailable ` +
+                  "(file moved or deleted since indexing). Reindex those skills " +
+                  "from the dashboard; do not follow the empty procedures.",
+              }
+            : {}),
           hint: CALL_HINT,
         });
       }

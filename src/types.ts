@@ -122,6 +122,10 @@ export interface McpClientLike {
     options?: { timeout?: number },
   ): Promise<unknown>;
   close(): Promise<void>;
+  /** Set by the manager to detect a transport dying on its own. */
+  onclose?: (() => void) | undefined;
+  /** Set by the manager to record transport-level errors. */
+  onerror?: ((error: unknown) => void) | undefined;
 }
 
 export type McpStatus = "disconnected" | "connecting" | "connected" | "error";
@@ -134,6 +138,12 @@ export interface McpServerState {
   tools: McpTool[];
   status: McpStatus;
   error: string | null;
+  /**
+   * Bumped by disconnect() so an in-flight openConnection() can tell that its
+   * target went away mid-connect and tear the client down instead of
+   * overwriting the disconnect.
+   */
+  connectGen?: number;
 }
 
 export interface McpTool {

@@ -378,6 +378,7 @@ export class MCPClientManager {
   ): Promise<boolean> {
     state.status = "connecting";
     state.error = null;
+    const connectGen = state.connectGen ?? 0;
     let client: Client | null = null;
     let transport: Transport | null = null;
 
@@ -427,11 +428,57 @@ export class MCPClientManager {
         timeout,
         `tool discovery timed out after ${Math.round(timeout / 1000)}s`,
       );
+      // A disconnect() or removeServer() may have landed while the connection
+      // and tool discovery were in flight. Only close() escalates a hung stdio
+      // child to SIGKILL, so reacting to that staleness here — rather than
+      // assigning into a torn-down state — is what keeps the child from
+      // leaking and a removed server from reporting "connected".
+      if (
+        this.servers.get(state.name) !== state ||
+        (state.connectGen ?? 0) !== connectGen
+      ) {
+        if (this.servers.get(state.name) === state) {
+          state.status = "disconnected";
+          state.error = null;
+        }
+        try {
+          await withTimeout(
+            client.close(),
+            5_000,
+            "MCP client close timed out",
+          );
+        } catch {
+          // Best effort.
+        }
+        logger.info(
+          "MCP server %s was disconnected mid-connect; closed orphan client",
+          state.name,
+        );
+        return false;
+      }
       state.client = client as unknown as McpClientLike;
       state.transport = transport;
       state.tools = (listing.tools || []) as McpTool[];
       state.status = "connected";
       state.error = null;
+      // Surface transport death: without this, a crashed stdio child or a
+      // dropped HTTP/SSE server keeps reporting "connected" forever — and
+      // connect() would trust that status instead of reconnecting. The guard
+      // makes a deliberate disconnect (which nulls state.client first) a no-op.
+      const live = state.client;
+      live.onclose = () => {
+        if (state.client !== live) return;
+        state.client = null;
+        state.transport = null;
+        state.tools = [];
+        state.status = "error";
+        state.error = "connection closed by server";
+      };
+      live.onerror = (error) => {
+        if (state.client !== live) return;
+        state.status = "error";
+        state.error = error instanceof Error ? error.message : String(error);
+      };
       return true;
     } catch (error) {
       state.status = "error";
@@ -458,6 +505,10 @@ export class MCPClientManager {
   async disconnect(name: string): Promise<void> {
     const state = this.servers.get(name);
     if (!state) return;
+    // Invalidate any in-flight connect() for this server: openConnection
+    // re-checks this generation after its awaits and closes the client
+    // instead of overwriting this disconnect with a live one.
+    state.connectGen = (state.connectGen ?? 0) + 1;
     const client = state.client;
     state.client = null;
     state.transport = null;

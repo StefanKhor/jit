@@ -186,7 +186,8 @@ A single-file React SPA served by the Node process.
   import/export, clear.
 
 The first-run panel is skippable. The dashboard listens on `127.0.0.1` by
-default. Use `--host 0.0.0.0` only behind a trusted proxy.
+default. Use `--host 0.0.0.0` only behind a trusted proxy — and JIT refuses a
+non-loopback bind unless an API key is configured (set `JIT_API_KEY` first).
 
 ### Removal semantics
 
@@ -386,7 +387,8 @@ src/mcp-server.ts (stdio) ──► src/mcp/client.ts ──► stdio / HTTP / S
   per server, deduplicates concurrent connects, and times out hung connections.
 - **Security** — the API is local by default, request bodies are size-limited,
   paths are resolved and checked before JIT-owned files are deleted, secrets are
-  written with `0600` permissions, and keys are compared in constant time.
+  written with `0600` permissions, keys are compared in constant time, and
+  cross-site browser requests and non-JSON API writes are rejected.
 
 ## NixOS
 

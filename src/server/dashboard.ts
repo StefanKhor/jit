@@ -177,6 +177,10 @@ function setSecurityHeaders(c: Context): void {
 
 const MAX_EMBEDDING_DIM = 16384;
 
+// Addresses that only ever reach the dashboard from the machine itself. Used
+// both for the bind guard in startDashboard and for the keyless Host check.
+const LOOPBACK_ADDRS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
 const EMBEDDING_UPDATE_KEYS = [
   "embedding_local_model",
   "embedding_api_key",
@@ -315,6 +319,51 @@ export function createApp(): Hono {
       : c.req.header("x-api-key") || "";
     if (!safeEqual(supplied, expected)) {
       return c.json({ error: "unauthorized" }, 401);
+    }
+    return next();
+  });
+
+  // Browser hardening. With a key configured, auth already blocks cross-site
+  // abuse: an attacker page cannot attach Authorization/X-Api-Key without a
+  // CORS preflight this server never answers. Keyless installs are
+  // loopback-bound (startDashboard refuses anything else), so for them the
+  // checks below only have to hold for browsers talking to their own
+  // localhost; curl and other API clients are unaffected.
+  app.use("/api/*", async (c, next) => {
+    const method = c.req.method.toUpperCase();
+    // Every cross-site form POST carries one of the "simple" content types,
+    // the dashboard always sends application/json, and bodyless calls send no
+    // content type at all. Rejecting the rest makes drive-by form POSTs
+    // harmless without affecting non-browser clients.
+    if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS") {
+      const type = c.req.header("content-type")?.split(";")[0]?.trim().toLowerCase();
+      if (type && type !== "application/json") {
+        return c.json({ error: "content-type must be application/json" }, 415);
+      }
+    }
+    if (!loadConfig().api_key) {
+      // DNS rebinding arrives with an attacker-chosen Host header.
+      const host = c.req.header("host") || "";
+      let hostname = "";
+      try {
+        hostname = new URL(`http://${host}`).hostname;
+      } catch {
+        // An unparseable Host is rejected by the loopback check below.
+      }
+      if (!LOOPBACK_ADDRS.has(hostname)) {
+        return c.json({ error: "unexpected host header" }, 403);
+      }
+      // Browsers label cross-site requests with a foreign Origin.
+      const origin = c.req.header("origin");
+      if (origin) {
+        try {
+          if (new URL(origin).host !== host) {
+            return c.json({ error: "cross-origin request rejected" }, 403);
+          }
+        } catch {
+          return c.json({ error: "invalid origin header" }, 403);
+        }
+      }
     }
     return next();
   });
@@ -710,6 +759,16 @@ export function startDashboard(
   host = DEFAULT_HOST,
   port = DEFAULT_PORT,
 ): ReturnType<typeof serve> {
+  // The management API can rewrite config, purge the index, read indexed
+  // files back and spawn user-defined MCP servers. Binding it beyond loopback
+  // without a key hands all of that to anyone who can reach the port.
+  if (!LOOPBACK_ADDRS.has(host) && !loadConfig().api_key) {
+    throw new Error(
+      `refusing to bind the dashboard to ${host}: no API key is configured. ` +
+        "Set JIT_API_KEY (or api_key in Settings) before exposing the " +
+        "management API beyond loopback.",
+    );
+  }
   const app = createApp();
   const server = serve(
     { fetch: app.fetch, hostname: host, port },

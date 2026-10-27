@@ -6,6 +6,7 @@ import { cx } from "./cx";
 export function Slider({
   value,
   onValueChange,
+  onValueCommit,
   min = 0,
   max = 100,
   step = 1,
@@ -16,6 +17,7 @@ export function Slider({
 }: {
   value: number;
   onValueChange: (value: number) => void;
+  onValueCommit?: (value: number) => void;
   min?: number;
   max?: number;
   step?: number;
@@ -37,6 +39,9 @@ export function Slider({
       step={step}
       disabled={disabled}
       onValueChange={([next]) => onValueChange(next ?? min)}
+      onValueCommit={
+        onValueCommit ? ([next]) => onValueCommit(next ?? min) : undefined
+      }
     >
       <SliderPrimitive.Track className="relative h-1 w-full grow overflow-hidden rounded-full bg-line/80 shadow-[0_1px_2px_0_rgb(0_0_0/0.5)_inset]">
         <SliderPrimitive.Range className="absolute h-full bg-gradient-to-r from-accent-2/70 to-accent" />

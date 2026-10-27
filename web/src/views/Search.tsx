@@ -48,6 +48,7 @@ export function Search() {
   };
 
   const saveThreshold = async (value: number) => {
+    const previous = threshold;
     setThreshold(value);
     try {
       await ctx.saveConfig({ confidence_threshold: value });
@@ -56,6 +57,9 @@ export function Search() {
         caught instanceof Error ? caught.message : String(caught),
         "error",
       );
+      // Undo the optimistic value so the slider cannot silently disagree with
+      // the threshold that is actually saved.
+      setThreshold(previous);
     }
   };
 
@@ -80,7 +84,8 @@ export function Search() {
             min={0.2}
             max={0.95}
             step={0.05}
-            onValueChange={(value) => void saveThreshold(value)}
+            onValueChange={setThreshold}
+            onValueCommit={(value) => void saveThreshold(value)}
           />
           <p className="text-xs leading-relaxed text-ink-3">
             Below this, JIT returns nothing rather than guessing. Lower it for

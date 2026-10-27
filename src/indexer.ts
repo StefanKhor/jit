@@ -328,10 +328,30 @@ export async function indexItems(
     const rows: UpsertRow[] = [];
     let addedNow = 0;
     let updatedNow = 0;
+    // Entries that already existed when indexing started may have been removed
+    // — a dashboard delete or /api/clear — while embeddings were in flight.
+    // Re-check against the index at write time so they are not resurrected;
+    // brand-new entries have nothing to resurrect and are always kept.
+    const live = pending.some((entry) => entry.current) ? getExisting() : null;
+    const deletedInFlight = new Set<string>();
+    if (live) {
+      for (const entry of pending) {
+        if (entry.current && !live.has(entry.item.id)) {
+          deletedInFlight.add(entry.item.id);
+        }
+      }
+    }
+    if (deletedInFlight.size > 0) {
+      logger.info(
+        "skipping %d entries deleted while indexing was running",
+        deletedInFlight.size,
+      );
+    }
     for (let index = 0; index < pending.length; index += 1) {
       const entry = pending[index];
       if (!entry) continue;
       const { item, digest, current } = entry;
+      if (deletedInFlight.has(item.id)) continue;
       rows.push({
         item,
         contentHash: digest,
