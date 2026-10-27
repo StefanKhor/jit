@@ -20,6 +20,11 @@ export interface RerankOutcome {
   // layer: whenever an endpoint is configured it always runs, and any skip
   // is reported to the caller instead of silently falling back to cosine.
   error: string | null;
+  // Retrieval-trace fields: whether an endpoint was fully configured, how
+  // many candidates were sent, and how long the call took.
+  configured: boolean;
+  sent: number;
+  ms: number;
 }
 
 export async function rerankCandidates(
@@ -28,6 +33,7 @@ export async function rerankCandidates(
   settings: Config,
 ): Promise<RerankOutcome> {
   const selected: string[] = [];
+  const started = performance.now();
   const hasCredentials =
     Boolean(settings.rerank_api_key) || isLocalEndpoint(settings.rerank_api_base);
   if (!settings.rerank_api_base || !settings.rerank_model || !hasCredentials) {
@@ -35,10 +41,13 @@ export async function rerankCandidates(
       selected,
       error:
         "rerank not configured — ranking by cosine only; set rerank_api_base and rerank_model",
+      configured: false,
+      sent: candidates.length,
+      ms: 0,
     };
   }
   if (candidates.length === 0) {
-    return { selected, error: null };
+    return { selected, error: null, configured: true, sent: 0, ms: 0 };
   }
 
   try {
@@ -79,11 +88,23 @@ export async function rerankCandidates(
     const start = text.indexOf("[");
     const end = text.lastIndexOf("]");
     if (start === -1 || end <= start) {
-      return { selected, error: "rerank response unparseable" };
+      return {
+        selected,
+        error: "rerank response unparseable",
+        configured: true,
+        sent: candidates.length,
+        ms: performance.now() - started,
+      };
     }
     const parsed = JSON.parse(text.slice(start, end + 1)) as unknown;
     if (!Array.isArray(parsed)) {
-      return { selected, error: "rerank response unparseable" };
+      return {
+        selected,
+        error: "rerank response unparseable",
+        configured: true,
+        sent: candidates.length,
+        ms: performance.now() - started,
+      };
     }
     // Numbers are 1-based positions into the listing. Anything out of range is
     // dropped rather than trusted, and the ceiling is enforced here as well as
@@ -104,13 +125,25 @@ export async function rerankCandidates(
       settings.rerank_model,
       settings.rerank_api_base,
     );
-    return { selected, error: null };
+    return {
+      selected,
+      error: null,
+      configured: true,
+      sent: candidates.length,
+      ms: performance.now() - started,
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logger.warn(
       "OpenAI-compatible rerank failed, falling back to cosine: %s",
       message,
     );
-    return { selected, error: message };
+    return {
+      selected,
+      error: message,
+      configured: true,
+      sent: candidates.length,
+      ms: performance.now() - started,
+    };
   }
 }

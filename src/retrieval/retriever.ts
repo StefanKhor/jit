@@ -1,6 +1,7 @@
 import {
   DEFAULT_CONFIG,
   embeddingSignature,
+  getEmbeddingSettings,
   TOP_K_RETRIEVE,
   loadConfig,
 } from "../config.js";
@@ -14,6 +15,7 @@ import {
 } from "../storage/store.js";
 import type {
   NearMiss,
+  RetrievalTrace,
   SearchCandidate,
   SearchResult,
   StoredItem,
@@ -116,6 +118,11 @@ async function rank(
   cosine: Map<string, number>;
   spread: ScoreSpread | null;
   warning?: string;
+  // Retrieval-trace fields: whether the query embedding succeeded, how long it
+  // took, and how many enabled entries actually carried a vector to score.
+  embedded: boolean;
+  embedMs: number;
+  pool: number;
 }> {
   const corpus = loadCorpus();
   if (
@@ -123,11 +130,19 @@ async function rank(
     corpus.items.length === 0 ||
     !corpus.items.some((item) => item.enabled)
   ) {
-    return { candidates: [], cosine: new Map(), spread: null };
+    return {
+      candidates: [],
+      cosine: new Map(),
+      spread: null,
+      embedded: false,
+      embedMs: 0,
+      pool: 0,
+    };
   }
 
   let queryVector: Float32Array | null = null;
   let embeddingError = "";
+  const embedStarted = performance.now();
   try {
     queryVector = await embedQuery(intent);
   } catch (error) {
@@ -138,12 +153,20 @@ async function rank(
       error instanceof Error ? error.message : String(error),
     );
   }
+  const embedMs = performance.now() - embedStarted;
+  // What the vector step would have to score against, whether or not the
+  // embedding succeeded — the trace reports the pool either way.
+  const pool = corpus.items.filter((item) => item.enabled && item.embedding)
+    .length;
 
   if (getEmbeddingSignature() !== embeddingSignature()) {
     return {
       candidates: [],
       cosine: new Map(),
       spread: null,
+      embedded: true,
+      embedMs,
+      pool,
       warning:
         "Embedding retrieval is required, but the index vectors do not match the active embedding provider/model. Rebuild the vector index in Settings.",
     };
@@ -154,6 +177,9 @@ async function rank(
       candidates: [],
       cosine: new Map(),
       spread: null,
+      embedded: false,
+      embedMs,
+      pool,
       warning: `Embedding retrieval is required, but the model is unavailable: ${embeddingError}`,
     };
   }
@@ -185,6 +211,9 @@ async function rank(
       candidates: [],
       cosine,
       spread,
+      embedded: true,
+      embedMs,
+      pool,
       warning:
         "The index has no stored embedding vectors. Reindex the skills to build them.",
     };
@@ -195,7 +224,7 @@ async function rank(
     const item = corpus.byId.get(id);
     if (item) candidates.push(item);
   }
-  return { candidates, cosine, spread };
+  return { candidates, cosine, spread, embedded: true, embedMs, pool };
 }
 
 export interface Evaluation {
@@ -209,6 +238,9 @@ export interface Evaluation {
   threshold: number;
   warning?: string;
   rankingWarning?: string;
+  // Step-by-step account of this retrieval, for the dashboard's flow view.
+  // Never forwarded to agents: JIT_FIND maps its own minimal payload.
+  trace?: RetrievalTrace;
 }
 
 const EMPTY: Evaluation = {
@@ -230,8 +262,40 @@ export async function evaluate(
 
   const ranked = await rank(intent, TOP_K_RETRIEVE);
   const { candidates, cosine, spread } = ranked;
+  const embedSettings = getEmbeddingSettings();
+  const embedStep: RetrievalTrace["embed"] = ranked.embedded
+    ? {
+        provider: embedSettings.provider,
+        model: embedSettings.model,
+        dims: embedSettings.dimensions,
+        ms: Number(ranked.embedMs.toFixed(1)),
+      }
+    : null;
   if (candidates.length === 0) {
-    return { ...empty, warning: ranked.warning };
+    // Nothing survived the vector step (or it never ran): the trace ends
+    // there, with the reason in the warning.
+    const stopTrace: RetrievalTrace = {
+      embed: embedStep,
+      vector: {
+        pool: ranked.pool,
+        top_k: TOP_K_RETRIEVE,
+        kept: 0,
+        spread: null,
+        ...(ranked.warning ? { warning: ranked.warning } : {}),
+      },
+      rerank: {
+        configured: false,
+        ran: false,
+        base: settings.rerank_api_base,
+        model: settings.rerank_model,
+        sent: 0,
+        selected: [],
+        ms: 0,
+      },
+      gate: { mode: "cosine", threshold, spread_used: false, passed: 0 },
+      final: [],
+    };
+    return { ...empty, warning: ranked.warning, trace: stopTrace };
   }
 
   // Reranking is the decision layer: whenever an endpoint is configured it
@@ -333,6 +397,44 @@ export async function evaluate(
     );
   }
 
+  const trace: RetrievalTrace = {
+    embed: embedStep,
+    vector: {
+      pool: ranked.pool,
+      top_k: TOP_K_RETRIEVE,
+      kept: candidates.length,
+      spread: spread
+        ? {
+            mean: Number(spread.mean.toFixed(4)),
+            sd: Number(spread.sd.toFixed(4)),
+          }
+        : null,
+    },
+    rerank: {
+      configured: rerankOutcome.configured,
+      ran: reranked,
+      base: settings.rerank_api_base,
+      model: settings.rerank_model,
+      sent: rerankOutcome.sent,
+      selected: rerankOutcome.selected,
+      ms: Number(rerankOutcome.ms.toFixed(1)),
+      ...(rerankOutcome.error ? { error: rerankOutcome.error } : {}),
+    },
+    gate: {
+      mode: reranked ? "rerank" : "cosine",
+      threshold,
+      spread_used: Boolean(spread),
+      passed: reranked
+        ? rerankOutcome.selected.length
+        : debug.filter((entry) => entry.passes_threshold).length,
+    },
+    final: results.map((result) => ({
+      id: result.id,
+      name: result.name,
+      via: result.reranked ? "rerank" : "cosine",
+    })),
+  };
+
   return {
     results,
     candidates: debug,
@@ -340,6 +442,7 @@ export async function evaluate(
     reranked,
     threshold,
     rankingWarning,
+    trace,
   };
 }
 

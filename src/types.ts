@@ -195,6 +195,49 @@ export interface NearMiss {
   score: number;
 }
 
+/**
+ * Step-by-step account of one retrieval, for the dashboard's flow view. A
+ * debugging aid, never sent to agents: JIT_FIND builds its own minimal
+ * payload and does not forward this.
+ */
+export interface RetrievalTrace {
+  // Null when the query embedding failed — everything downstream was skipped.
+  embed: {
+    provider: string;
+    model: string;
+    dims: number;
+    ms: number;
+  } | null;
+  vector: {
+    // Enabled entries with a stored vector that were scored.
+    pool: number;
+    top_k: number;
+    kept: number;
+    // Spread of the query's own scores; null on a small index.
+    spread: { mean: number; sd: number } | null;
+    warning?: string;
+  };
+  rerank: {
+    configured: boolean;
+    ran: boolean;
+    base: string;
+    model: string;
+    sent: number;
+    selected: string[];
+    ms: number;
+    error?: string;
+  };
+  gate: {
+    mode: "rerank" | "cosine";
+    threshold: number;
+    // False when the index was too small for a meaningful spread, so the raw
+    // cosine alone decided.
+    spread_used: boolean;
+    passed: number;
+  };
+  final: { id: string; name: string; via: "rerank" | "cosine" }[];
+}
+
 export interface SearchResult {
   id: string;
   name: string;

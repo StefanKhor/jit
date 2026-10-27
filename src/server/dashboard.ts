@@ -850,6 +850,7 @@ async function search(intent: string): Promise<Record<string, unknown>> {
       ? { ranking_warning: evaluation.rankingWarning }
       : {}),
     threshold: evaluation.threshold,
+    ...(evaluation.trace ? { trace: evaluation.trace } : {}),
     elapsed_ms: Number((performance.now() - started).toFixed(1)),
   };
 }

@@ -175,7 +175,42 @@ export interface SearchResponse {
   warning?: string;
   ranking_warning?: string;
   threshold: number;
+  trace?: RetrievalTrace;
   elapsed_ms: number;
+}
+
+/** Step-by-step account of one retrieval, shown as the flow view. */
+export interface RetrievalTrace {
+  embed: {
+    provider: string;
+    model: string;
+    dims: number;
+    ms: number;
+  } | null;
+  vector: {
+    pool: number;
+    top_k: number;
+    kept: number;
+    spread: { mean: number; sd: number } | null;
+    warning?: string;
+  };
+  rerank: {
+    configured: boolean;
+    ran: boolean;
+    base: string;
+    model: string;
+    sent: number;
+    selected: string[];
+    ms: number;
+    error?: string;
+  };
+  gate: {
+    mode: "rerank" | "cosine";
+    threshold: number;
+    spread_used: boolean;
+    passed: number;
+  };
+  final: { id: string; name: string; via: "rerank" | "cosine" }[];
 }
 
 export interface DiscoveredSkill {
