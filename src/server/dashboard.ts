@@ -41,6 +41,7 @@ import {
 import { jitSchemaTokens } from "../mcp-server.js";
 import { evaluate } from "../retrieval/retriever.js";
 import {
+  createSkill,
   discoverTransferable,
   exportSkills,
   indexSkillsInPlace,
@@ -506,6 +507,28 @@ export function createApp(): Hono {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new HttpError(message.includes("path not found") ? 404 : 400, message);
+    }
+  });
+
+  // Create a brand-new skill from the portal: JIT writes SKILL.md into its
+  // managed folder and indexes it, so the file on disk stays the source of
+  // truth like every other skill.
+  app.post("/api/skills/create", async (c) => {
+    const body = await readJson(c);
+    const name = String(body.name || "").trim();
+    const skillBody = String(body.body || "");
+    if (!name) throw new HttpError(400, "name required");
+    if (!skillBody.trim()) throw new HttpError(400, "body required");
+    try {
+      return c.json(
+        await createSkill(name, String(body.description || ""), skillBody),
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new HttpError(
+        message.includes("already exists") ? 409 : 400,
+        message,
+      );
     }
   });
 
