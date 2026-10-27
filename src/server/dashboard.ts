@@ -41,6 +41,7 @@ import {
 import { jitSchemaTokens } from "../mcp-server.js";
 import { cloneRepo } from "../repo.js";
 import { readLookups } from "../lookups.js";
+import { buildUsageSummary } from "../usage.js";
 import { rerankCandidates } from "../retrieval/rerank.js";
 import { evaluate } from "../retrieval/retriever.js";
 import {
@@ -763,6 +764,12 @@ export function createApp(): Hono {
   // retrieval trace attached so each entry can be debugged like the Search page.
   app.get("/api/lookups", (c) => {
     return c.json({ lookups: readLookups(100) });
+  });
+
+  // Usage telemetry over the same lookup log: which entries agents actually
+  // routed to, how often, and which indexed entries never get called.
+  app.get("/api/usage", (c) => {
+    return c.json(buildUsageSummary());
   });
 
   // Ping the configured rerank endpoint with a fixed probe through the exact

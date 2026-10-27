@@ -20,6 +20,7 @@ import type {
   Stats,
   ToastKind,
   ToastMessage,
+  UsageSummary,
   View,
 } from "../types";
 
@@ -59,6 +60,7 @@ export interface AppContextValue {
   online: boolean;
   config: PublicConfig | null;
   stats: Stats | null;
+  usage: UsageSummary | null;
   saveConfig: (updates: Record<string, unknown>) => Promise<PublicConfig>;
   setConfig: (config: PublicConfig) => void;
   loadConfig: () => Promise<PublicConfig>;
@@ -115,6 +117,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [health, setHealth] = useState<Health | null>(null);
   const [config, setConfig] = useState<PublicConfig | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [skills, setSkills] = useState<SkillListItem[]>([]);
   const [skillSources, setSkillSources] = useState<SkillSources | null>(null);
   const [mcpServers, setMcpServers] = useState<McpServerSummary[]>([]);
@@ -174,6 +177,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [reportError]);
 
+  const loadUsage = useCallback(async (): Promise<void> => {
+    try {
+      setUsage(await api<UsageSummary>("/api/usage"));
+    } catch (error) {
+      reportError(error);
+    }
+  }, [reportError]);
+
   const loadSkills = useCallback(async (): Promise<SkillListItem[]> => {
     try {
       const data = await api<{ skills: SkillListItem[]; sources?: SkillSources }>(
@@ -200,8 +211,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [reportError]);
 
   const refreshAll = useCallback(async (): Promise<void> => {
-    await Promise.allSettled([loadStats(), loadSkills(), loadMcp()]);
-  }, [loadMcp, loadSkills, loadStats]);
+    await Promise.allSettled([loadStats(), loadSkills(), loadMcp(), loadUsage()]);
+  }, [loadMcp, loadSkills, loadStats, loadUsage]);
 
   const saveConfig = useCallback(
     async (updates: Record<string, unknown>): Promise<PublicConfig> => {
@@ -358,6 +369,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     online,
     config,
     stats,
+    usage,
     saveConfig,
     setConfig,
     loadConfig,

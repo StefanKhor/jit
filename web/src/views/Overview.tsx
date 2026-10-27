@@ -2,7 +2,7 @@ import { useId, type ReactNode } from "react";
 
 import { fmt, pct } from "../format";
 import { useJit } from "../state/store";
-import type { Stats } from "../types";
+import type { Stats, UsageSummary } from "../types";
 import { Meta } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { AnimatedNumber, Empty, Ring, Spinner } from "../ui/Display";
@@ -14,16 +14,18 @@ function Hero() {
     <header className="motion-safe:animate-rise">
       <div className="kicker">Overview</div>
       <h1 className="display mt-4 text-[2.5rem] text-ink sm:text-[3.25rem] lg:text-[4rem]">
-        Load one skill,
+        One fixed tool.
         <br />
-        <span className="bg-gradient-to-br from-ink-3 to-ink-3/40 bg-clip-text text-transparent">
-          not one hundred.
+        <span className="bg-gradient-to-br from-ink to-ink-3/50 bg-clip-text text-transparent">
+          Every skill on demand.
         </span>
       </h1>
       <p className="mt-6 max-w-lg text-sm leading-relaxed text-ink-2">
-        Every agent keeps a list of what it could do — names and descriptions,
-        sitting in the context window. JIT keeps a single fixed tool schema
-        instead, and fetches a skill's body only when a task needs it.
+        A skill catalog rides in every session: each name and description
+        re-read turn after turn, growing with every install. JIT collapses it
+        into one fixed tool call that routes to the tested procedure — skill or
+        MCP tool — when a task needs it, and logs every lookup so you can see
+        what the agent actually used.
       </p>
     </header>
   );
@@ -101,13 +103,14 @@ function HeroRing({
 }
 
 /**
- * The headline band: the one number the product is arguing for, at the scale it
- * deserves, next to the two quantities it is the ratio of.
+ * The initial load, at the scale it deserves: what the agent carries before
+ * any task begins. A plain catalog holds every name and description in
+ * context; JIT holds one fixed tool schema.
  *
- * The ring encodes the same fact geometrically — JIT's schema is a sliver of the
- * catalog it replaces — so the claim survives even if the numeral is skimmed.
+ * The ring encodes the same fact geometrically — JIT's schema is a sliver of
+ * the catalog it replaces — so the claim survives even if the numeral is skimmed.
  */
-function Savings({ stats }: { stats: Stats }) {
+function InitialLoad({ stats }: { stats: Stats }) {
   const tokens = stats.tokens;
   const jit = Number(tokens?.jit || 0);
   const catalog = Number(tokens?.catalog || 0);
@@ -144,8 +147,8 @@ function Savings({ stats }: { stats: Stats }) {
             lighter={lighter}
             label={
               lighter
-                ? `JIT uses ${Math.round(share * 1000) / 10}% of the tokens a plain catalog would`
-                : `JIT uses ${Math.round(share * 1000) / 10}% more tokens than a plain catalog`
+                ? `JIT's initial load is ${Math.round(share * 1000) / 10}% of a plain catalog's`
+                : `JIT's initial load is ${Math.round(share * 1000) / 10}% more than a plain catalog's`
             }
           >
             <span className="flex items-start">
@@ -158,7 +161,7 @@ function Savings({ stats }: { stats: Stats }) {
                 ×
               </span>
             </span>
-            <span className="kicker mt-2 !text-accent/70">
+            <span className={`kicker mt-2 ${lighter ? "!text-accent/70" : "!text-warn/70"}`}>
               {lighter ? "smaller" : "larger"}
             </span>
           </HeroRing>
@@ -166,15 +169,15 @@ function Savings({ stats }: { stats: Stats }) {
             <span className="flex items-center gap-2 text-xs text-ink-2">
               <span
                 aria-hidden="true"
-                className="size-2 rounded-full bg-bad"
+                className={`size-2 rounded-full ${lighter ? "bg-bad" : "bg-info"}`}
               />
-              Plain skills
+              Plain catalog
               <span className="num text-ink">{fmt(catalog)}</span>
             </span>
             <span className="flex items-center gap-2 text-xs text-ink-2">
               <span
                 aria-hidden="true"
-                className="size-2 rounded-full bg-accent"
+                className={`size-2 rounded-full ${lighter ? "bg-accent" : "bg-warn"}`}
               />
               JIT
               <span className="num text-ink">{fmt(jit)}</span>
@@ -183,28 +186,28 @@ function Savings({ stats }: { stats: Stats }) {
         </div>
 
         <div className="min-w-0 flex-1">
-          <div className="kicker">
-            {lighter ? "Context saved" : "Standing overhead"}
-          </div>
+          <div className="kicker">Initial load · before any task begins</div>
           <p className="mt-3 max-w-xl text-sm leading-relaxed text-ink-2">
-            Before a task begins, JIT holds{" "}
-            <span className="num text-ink">{fmt(jit)}</span> tokens where a plain
-            catalog of the same {fmt(total)}{" "}
-            {total === 1 ? "entry" : "entries"} holds{" "}
-            <span className="num text-ink">{fmt(catalog)}</span>.
+            A plain catalog puts every one of this index's {fmt(total)}{" "}
+            {total === 1 ? "entry" : "entries"} — every name and description —
+            into context on load: <span className="num text-ink">{fmt(catalog)}</span>{" "}
+            tokens. JIT's fixed tool schema costs{" "}
+            <span className="num text-ink">{fmt(jit)}</span>, no matter how many
+            entries sit behind it.
           </p>
 
           <p className="mt-7 border-t border-line pt-5 text-sm leading-relaxed">
             {lighter ? (
               <>
                 <span className="num text-accent">{fmt(saved)}</span> tokens stay
-                out of context on every turn — and the gap widens with each entry
-                added, because the catalog grows and the schema does not.
+                out of context before the first task runs — and the gap widens
+                with each entry added, because the catalog grows and the schema
+                does not.
               </>
             ) : (
               <>
-                At rest, JIT carries <span className="num text-warn">{fmt(overhead)}</span>{" "}
-                more tokens than a plain catalog — a net cost until the catalog
+                At this size, JIT carries <span className="num text-warn">{fmt(overhead)}</span>{" "}
+                more tokens than a plain catalog — a net cost until the index
                 passes <span className="num text-ink-2">{fmt(breakEven)}</span>{" "}
                 entries.
               </>
@@ -218,8 +221,8 @@ function Savings({ stats }: { stats: Stats }) {
             />
             <span>
               Both approaches fetch the same{" "}
-              <span className="num text-ink-2">~{fmt(body)}</span>-token skill body
-              on demand, so the body is not part of this count.
+              <span className="num text-ink-2">~{fmt(body)}</span>-token body on
+              demand, so the body is not part of this count.
             </span>
           </p>
         </div>
@@ -231,6 +234,9 @@ function Savings({ stats }: { stats: Stats }) {
 /** Quiet supporting figures, on one hairline-separated strip. */
 function Supporting({ stats }: { stats: Stats }) {
   const tokens = stats.tokens;
+  const perEntryCatalog = stats.total
+    ? Math.floor((stats.catalog_tokens || 0) / stats.total)
+    : 0;
   const figures = [
     {
       key: "indexed",
@@ -240,18 +246,18 @@ function Supporting({ stats }: { stats: Stats }) {
       hint: `${fmt(stats.enabled || 0)} enabled · ${fmt(stats.disabled || 0)} off`,
     },
     {
+      key: "per-entry",
+      label: "Catalog per entry",
+      value: <AnimatedNumber value={perEntryCatalog} />,
+      unit: "tok",
+      hint: "name + description, paid every session",
+    },
+    {
       key: "body",
       label: "Average body",
       value: <AnimatedNumber value={tokens?.average_item || 0} />,
       unit: "tok",
       hint: "loaded only on a hit",
-    },
-    {
-      key: "largest",
-      label: "Largest body",
-      value: <AnimatedNumber value={stats.largest || 0} />,
-      unit: "tok",
-      hint: `${fmt(stats.body_tokens || 0)} tok across the index`,
     },
     {
       key: "break",
@@ -593,106 +599,197 @@ function BreakEven({ stats }: { stats: Stats }) {
   );
 }
 
-function Composition({ stats }: { stats: Stats }) {
-  const total = stats.total || 0;
-  const groups = [
+/**
+ * Usage telemetry from the lookup log: which entries agents actually routed
+ * to, which indexed entries never get called (candidates to disable,
+ * re-describe, or remove), and what agents asked for that the index could not
+ * answer (candidates to install).
+ */
+function Usage({ usage }: { usage: UsageSummary | null }) {
+  const ctx = useJit();
+
+  const windowEmpty = !usage || usage.window === 0;
+  const entries = usage?.entries ?? [];
+  const max = entries.length ? Math.max(...entries.map((entry) => entry.total), 1) : 1;
+  const neverCalled = usage?.never_called ?? [];
+  const missed = usage?.missed_intents ?? [];
+  const span =
+    usage?.span.first && usage.span.last
+      ? usage.span.first.slice(0, 10) === usage.span.last.slice(0, 10)
+        ? usage.span.first.slice(0, 10)
+        : `${usage.span.first.slice(0, 10)} → ${usage.span.last.slice(0, 10)}`
+      : null;
+
+  const summary = [
     {
-      title: "By state",
-      note: total ? `${fmt(stats.enabled || 0)} of ${fmt(total)} enabled` : "empty",
-      items: [
-        {
-          key: "enabled",
-          label: "Enabled",
-          count: stats.enabled || 0,
-          seg: "bg-gradient-to-r from-ok/70 to-ok",
-        },
-        {
-          key: "disabled",
-          label: "Disabled",
-          count: stats.disabled || 0,
-          seg: "bg-line-2",
-        },
-      ],
+      key: "lookups",
+      label: "Lookups",
+      value: <AnimatedNumber value={usage?.window ?? 0} />,
+      unit: "",
+      hint: span ? `logged ${span}` : "from the shared lookup log",
+    },
+    {
+      key: "hit-rate",
+      label: "Hit rate",
+      value: <AnimatedNumber value={usage ? Math.round(usage.hit_rate * 100) : 0} />,
+      unit: "%",
+      hint: `${fmt(usage?.hits ?? 0)} answered · ${fmt(usage?.misses ?? 0)} abstained`,
+    },
+    {
+      key: "finds",
+      label: "JIT_FIND",
+      value: <AnimatedNumber value={usage?.finds ?? 0} />,
+      unit: "",
+      hint: "searches by intent",
+    },
+    {
+      key: "runs",
+      label: "JIT_RUN",
+      value: <AnimatedNumber value={usage?.runs ?? 0} />,
+      unit: "",
+      hint: "loads by exact name",
     },
   ];
 
   return (
     <Panel>
       <PanelHead
-        title="Index composition"
-        hint={`${fmt(total)} ${total === 1 ? "entry" : "entries"}`}
+        title="Usage"
+        hint="what agents actually routed · from the lookup log"
       />
-      <PanelBody className="space-y-7">
-        {groups.map((group) => (
-          <div key={group.title}>
-            <div className="flex items-baseline justify-between gap-4">
-              <span className="text-xs text-ink-2">{group.title}</span>
-              <span className="num text-[11px] text-ink-3">{group.note}</span>
-            </div>
-            <div className="mt-3 flex h-2 overflow-hidden rounded-full bg-line">
-              {group.items
-                .filter((item) => item.count > 0)
-                .map((item) => (
-                  <span
-                    key={item.key}
-                    className={item.seg}
-                    style={{ width: `${pct(item.count, total)}%` }}
-                  />
-                ))}
-            </div>
-            <div className="mt-3.5 flex flex-wrap gap-x-6 gap-y-2 text-xs">
-              {group.items.map((item) => (
-                <span key={item.key} className="flex items-center gap-2">
-                  <span aria-hidden="true" className={`size-2 rounded-full ${item.seg}`} />
-                  <span className="text-ink-3">{item.label}</span>
-                  <span className="num font-medium text-ink">{fmt(item.count)}</span>
+      {windowEmpty ? (
+        <PanelBody className="space-y-4">
+          <Empty title="No agent lookups logged yet.">
+            Connect an agent over MCP and every JIT_FIND / JIT_RUN lands here —
+            which entries get called, how often, and what the index never
+            answered.
+          </Empty>
+          <div className="flex justify-center">
+            <Button variant="outline" onClick={() => ctx.setView("lookups")}>
+              Open Lookups
+            </Button>
+          </div>
+        </PanelBody>
+      ) : (
+        <PanelBody className="space-y-6">
+          <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line lg:grid-cols-4">
+            {summary.map((figure) => (
+              <div key={figure.key} className="surface bg-panel/60 p-4">
+                <div className="kicker">{figure.label}</div>
+                <div className="mt-2 flex items-baseline gap-1.5">
+                  <span className="num display text-2xl leading-none text-ink">
+                    {figure.value}
+                  </span>
+                  <span className="text-xs text-ink-3">{figure.unit}</span>
+                </div>
+                <div className="mt-2 text-xs text-ink-3">{figure.hint}</div>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-2">
+            <div>
+              <div className="flex items-baseline justify-between gap-4">
+                <span className="text-xs font-medium text-ink-2">
+                  Most routed
                 </span>
-              ))}
+                <span className="num text-[11px] text-ink-3">
+                  find + run calls
+                </span>
+              </div>
+              {entries.length === 0 ? (
+                <p className="mt-3 text-xs leading-relaxed text-ink-3">
+                  Lookups happened, but none returned an entry — every query
+                  abstained. Check the Lookups page for what the agents asked.
+                </p>
+              ) : (
+                <div className="mt-3 divide-y divide-line/60">
+                  {entries.map((entry, index) => (
+                    <div
+                      key={`${entry.name}-${index}`}
+                      className="px-1 py-2.5"
+                    >
+                      <div className="flex items-baseline justify-between gap-4">
+                        <span className="truncate text-sm text-ink" title={entry.name}>
+                          {entry.name}
+                        </span>
+                        <span className="num shrink-0 text-xs text-ink-2">
+                          {fmt(entry.total)}
+                        </span>
+                      </div>
+                      <div className="mt-2 flex items-center gap-3">
+                        <div className="h-1 flex-1 overflow-hidden rounded-full bg-line">
+                          <div
+                            className="h-full rounded-full bg-gradient-to-r from-accent/40 to-accent"
+                            style={{ width: `${pct(entry.total, max)}%` }}
+                          />
+                        </div>
+                        <span className="num shrink-0 text-[10px] text-ink-3">
+                          {entry.finds} find{entry.finds === 1 ? "" : "s"} ·{" "}
+                          {entry.runs} run{entry.runs === 1 ? "" : "s"}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-6">
+              <div>
+                <div className="flex items-baseline justify-between gap-4">
+                  <span className="text-xs font-medium text-ink-2">
+                    Never called
+                  </span>
+                  <span className="num text-[11px] text-ink-3">
+                    indexed, never routed
+                  </span>
+                </div>
+                {neverCalled.length === 0 ? (
+                  <p className="mt-3 text-xs leading-relaxed text-ink-3">
+                    Every indexed entry has been routed at least once.
+                  </p>
+                ) : (
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {neverCalled.map((name) => (
+                      <span
+                        key={name}
+                        className="rounded-full border border-line px-2.5 py-1 text-xs text-ink-3"
+                        title="Indexed but never returned to an agent — consider disabling, re-describing, or removing it."
+                      >
+                        {name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {missed.length > 0 ? (
+                <div className="border-t border-line pt-5">
+                  <div className="flex items-baseline justify-between gap-4">
+                    <span className="text-xs font-medium text-ink-2">
+                      Asked for, not answered
+                    </span>
+                    <span className="num text-[11px] text-ink-3">
+                      repeated asks
+                    </span>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {missed.map((item) => (
+                      <span
+                        key={item.intent}
+                        className="rounded-full border border-warn/40 bg-warn/5 px-2.5 py-1 text-xs text-ink-2"
+                        title="The agent searched for this and the gate abstained — a signal for what to install next."
+                      >
+                        {item.intent} <span className="num">×{item.count}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
-        ))}
-      </PanelBody>
-    </Panel>
-  );
-}
-
-function Heaviest({ stats }: { stats: Stats }) {
-  const items = stats.heaviest || [];
-  const max = items.length ? Math.max(...items.map((item) => item.tokens), 1) : 1;
-
-  return (
-    <Panel>
-      <PanelHead title="Heaviest entries" hint="full SKILL.md body · fetched on demand" />
-      {items.length === 0 ? (
-        <Empty title="Nothing indexed.">
-          Install or import entries to see their weight.
-        </Empty>
-      ) : (
-        <div className="divide-y divide-line/60">
-          {items.map((item, index) => (
-            <div key={`${item.name}-${index}`} className="px-5 py-3.5">
-              <div className="flex items-baseline justify-between gap-4">
-                <span className="flex min-w-0 items-center gap-2">
-                  <span className="num w-4 shrink-0 text-[10px] text-ink-3">
-                    {String(index + 1).padStart(2, "0")}
-                  </span>
-                  <span className="truncate text-sm text-ink" title={item.name}>
-                    {item.name}
-                  </span>
-                </span>
-                <span className="num shrink-0 text-xs text-ink-2">
-                  {fmt(item.tokens)}
-                </span>
-              </div>
-              <div className="mt-2.5 h-1 overflow-hidden rounded-full bg-line">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-accent/40 to-accent"
-                  style={{ width: `${pct(item.tokens, max)}%` }}
-                />
-              </div>
-            </div>
-          ))}
-        </div>
+        </PanelBody>
       )}
     </Panel>
   );
@@ -722,7 +819,7 @@ export function Overview() {
     <div className="space-y-8">
       <Hero />
 
-      <Savings stats={stats} />
+      <InitialLoad stats={stats} />
       <Supporting stats={stats} />
 
       {total === 0 ? (
@@ -751,10 +848,7 @@ export function Overview() {
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Heaviest stats={stats} />
-        <Composition stats={stats} />
-      </div>
+      <Usage usage={ctx.usage} />
 
       <Meta className="pt-1">
         index {fmt(total)} entries · {fmt(stats.catalog_tokens || 0)} catalog tokens ·{" "}

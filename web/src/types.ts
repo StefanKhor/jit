@@ -65,6 +65,36 @@ export interface Stats {
   };
 }
 
+/** How often agents routed to one entry, over the lookup log's window. */
+export interface UsageEntry {
+  name: string;
+  /** Times a JIT_FIND returned this entry to an agent. */
+  finds: number;
+  /** Times a JIT_RUN loaded it by name. */
+  runs: number;
+  total: number;
+  last_called: string | null;
+}
+
+export interface UsageSummary {
+  /** Lookup records the summary was computed from. */
+  window: number;
+  total_lookups: number;
+  finds: number;
+  runs: number;
+  hits: number;
+  misses: number;
+  /** hits / total_lookups, 0 when the window is empty. */
+  hit_rate: number;
+  span: { first: string | null; last: string | null };
+  /** Called entries, most-called first. */
+  entries: UsageEntry[];
+  /** Indexed names with zero calls in the window, sorted. */
+  never_called: string[];
+  /** Intents agents asked for that the index could not answer, most repeated first. */
+  missed_intents: Array<{ intent: string; count: number; last: string }>;
+}
+
 export interface SkillListItem {
   id: string;
   name: string;

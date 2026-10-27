@@ -208,12 +208,16 @@ that only when you accept the data handling and possible costs.
 
 A single-file React SPA served by the Node process at <http://localhost:3000>.
 
-- **Overview** — context per task vs. a catalog, the break-even index size,
-  plain files vs. JIT-indexed.
+- **Overview** — the initial load a plain catalog costs vs. JIT's fixed tool
+  schema, the break-even index size, embedding coverage, and usage telemetry:
+  which entries agents actually routed to, which never get called, and what
+  agents asked for that the index could not answer.
 - **Skills** — list, read, enable/disable, transfer, pull from a repo, remove.
 - **MCP** — add or import servers, connect/disconnect, inspect tools, run a
   tool manually.
 - **Search** — live retrieval against the real index.
+- **Lookups** — every JIT_FIND / JIT_RUN any agent made, with its retrieval
+  trace (`GET /api/lookups`, `GET /api/usage` for the rollup).
 - **Settings** — embeddings, reranker, threshold, auth, import/export, clear.
 
 Auth is opt-in: set `JIT_API_KEY` and `/api/*` requires a bearer or
