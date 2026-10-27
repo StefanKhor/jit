@@ -15,6 +15,7 @@ import {
   VERSION,
 } from "../config.js";
 import { logger } from "../logger.js";
+import { removeServerTools, syncServerTools } from "./tools-index.js";
 import type {
   McpImportServer,
   McpServerConfig,
@@ -498,6 +499,23 @@ export class MCPClientManager {
       state.tools = (listing.tools || []) as McpTool[];
       state.status = "connected";
       state.error = null;
+      // The index carries tool entries for this server so JIT_FIND can route
+      // to them. Awaited so a fast disconnect cannot race the write; a failed
+      // sync is logged, never a failed connection.
+      try {
+        await syncServerTools(state.name, state.tools);
+      } catch (error) {
+        logger.warn(
+          "indexing tools for MCP server %s failed: %s",
+          state.name,
+          errorMessage(error),
+        );
+      }
+      if (this.servers.get(state.name) !== state || state.status !== "connected") {
+        // A disconnect landed while tools were being indexed — sweep whatever
+        // the sync just wrote so a removed server leaves no routing entries.
+        removeServerTools(state.name);
+      }
       // Surface transport death: without this, a crashed stdio child or a
       // dropped HTTP/SSE server keeps reporting "connected" forever — and
       // connect() would trust that status instead of reconnecting. The guard
@@ -552,6 +570,9 @@ export class MCPClientManager {
     state.tools = [];
     state.status = "disconnected";
     state.error = null;
+    // A disconnected server's tools can no longer be called, so their index
+    // entries stop routing queries to them. Reconnect re-indexes.
+    removeServerTools(name);
     if (client) {
       try {
         await withTimeout(

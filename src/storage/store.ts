@@ -401,6 +401,18 @@ export function deleteItem(id: string): boolean {
   return true;
 }
 
+/** Remove every entry whose id starts with the prefix — the way a removed MCP
+ *  server's tool entries are swept out ("mcp/context7/..."). */
+export function deleteItemsByPrefix(prefix: string): number {
+  const file = readIndex();
+  const remaining = file.items.filter((row) => !row.id.startsWith(prefix));
+  const removed = file.items.length - remaining.length;
+  if (removed === 0) return 0;
+  file.items = remaining;
+  writeIndex(file);
+  return removed;
+}
+
 export function setEnabled(id: string, enabled: boolean): boolean {
   const file = readIndex();
   const row = file.items.find((item) => item.id === id);

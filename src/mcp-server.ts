@@ -27,7 +27,7 @@ Call JIT_FIND at the start of any multi-step task — and again whenever the wor
 
 One intent per call. Work that spans several domains is several lookups, not one: call JIT_FIND separately for each intent. Packing multiple intents into a single query blurs the match and returns the wrong skill.
 
-Phrase the intent as a search query, not a task brief: one sentence, concrete action plus platform or domain — "deploy a node app to azure", "automate posting a twitter thread". Leave out file paths and task details; they dilute the match. Returns the skill body, or {"found": false} with near_misses; retry once with different phrasing, then proceed — a miss is normal, not an error. A hit may return several skills when more than one fits the same intent; read them all before starting.
+Phrase the intent as a search query, not a task brief: one sentence, concrete action plus platform or domain — "deploy a node app to azure", "automate posting a twitter thread". Leave out file paths and task details; they dilute the match. Returns the skill body, or {"found": false} with near_misses; retry once with different phrasing, then proceed — a miss is normal, not an error. A hit may return several skills when more than one fits the same intent; read them all before starting. A hit can also be an MCP tool: its content names the server that owns it and the arguments it takes — call that tool on its server directly; JIT indexes and routes tools, it does not run them.
 
 When you already know exactly which skill you need — a name from near_misses or related, or one you loaded earlier and lost from context — call JIT_RUN with that exact name to load it directly, without searching.`;
 
