@@ -1,7 +1,7 @@
-# JIT — a search engine for skills
+# JIT — a search engine for agent skills and tools
 
-**An agent describes the task; JIT returns the tested procedure for it — one
-skill body, or a pointer to the MCP tool for the job. Everything stays local.**
+**An agent describes the task; JIT returns the tested procedure — a skill
+body, or the right MCP tool from a connected server. Everything stays local.**
 
 ```
 agent: "deploy a node app to azure"
