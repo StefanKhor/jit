@@ -701,6 +701,55 @@ export function createApp(): Hono {
     return c.json({ disconnected: server });
   });
 
+  // Full tool listing for one server, schemas included — the dashboard's tool
+  // runner renders arg hints from them.
+  app.get("/api/mcp/tools", async (c) => {
+    const server = String(c.req.query("server") || "").trim();
+    if (!server) throw new HttpError(400, "server required");
+    const status = manager.getStatus()[server];
+    if (!status) throw new HttpError(404, "unknown server");
+    if (status.status !== "connected") {
+      throw new HttpError(409, "server is not connected");
+    }
+    return c.json({
+      server,
+      tools: manager.getTools(server).map((tool) => ({
+        name: tool.name,
+        description: tool.description || "",
+        inputSchema: tool.inputSchema || null,
+      })),
+    });
+  });
+
+  // Invoke a tool on a connected MCP server. Unlike JIT_FIND these calls run
+  // external code with real side effects, so the dashboard UI confirms before
+  // sending, and the response is the tool's own result, verbatim.
+  app.post("/api/mcp/call", async (c) => {
+    const body = await readJson(c);
+    const server = String(body.server || "").trim();
+    const tool = String(body.tool || "").trim();
+    if (!server || !tool) {
+      throw new HttpError(400, "server and tool are required");
+    }
+    const args = body.args ?? {};
+    if (!args || typeof args !== "object" || Array.isArray(args)) {
+      throw new HttpError(400, "args must be an object");
+    }
+    try {
+      return c.json(
+        await manager.callTool(server, tool, args as Record<string, unknown>),
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new HttpError(
+        message.startsWith("unknown MCP server") || message.includes("not connected")
+          ? 409
+          : 502,
+        message,
+      );
+    }
+  });
+
   app.get("/api/search", async (c) => {
     const intent = String(c.req.query("intent") || "").trim();
     return c.json(await search(intent));

@@ -115,6 +115,24 @@ export interface McpImportServer {
   managed: boolean;
 }
 
+export interface McpTool {
+  name: string;
+  description?: string;
+  inputSchema?: {
+    type?: string;
+    properties?: Record<string, unknown>;
+    required?: string[];
+    [key: string]: unknown;
+  } | null;
+}
+
+/** A tool's raw result, as the MCP SDK returns it. */
+export interface McpToolCallResult {
+  content?: Array<{ type: string; text?: string; [key: string]: unknown }>;
+  structuredContent?: unknown;
+  isError?: boolean;
+}
+
 export interface ConfigPath {
   path: string;
   exists: boolean;

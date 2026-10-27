@@ -580,6 +580,35 @@ export class MCPClientManager {
     );
   }
 
+  /** Invoke a tool on a connected server and return the raw CallToolResult.
+   *  Unlike JIT_FIND, tool calls run third-party code with real side effects —
+   *  the HTTP layer must gate this behind an explicit user confirmation. */
+  async callTool(
+    serverName: string,
+    toolName: string,
+    args: Record<string, unknown> = {},
+  ): Promise<unknown> {
+    const state = this.servers.get(serverName);
+    if (!state) {
+      throw new Error(`unknown MCP server: ${serverName}`);
+    }
+    if (state.status !== "connected" || !state.client) {
+      throw new Error(`MCP server ${serverName} is not connected`);
+    }
+    if (!state.tools.some((tool) => tool.name === toolName)) {
+      throw new Error(
+        `MCP server ${serverName} does not expose a tool named ${toolName}`,
+      );
+    }
+    // Tools can legitimately run long (builds, queries) — but a wedged server
+    // must not hold the HTTP route forever either.
+    return withTimeout(
+      state.client.callTool({ name: toolName, arguments: args }),
+      120_000,
+      "tool call timed out after 120s",
+    );
+  }
+
   getStatus(): Record<
     string,
     { status: McpStatus; tool_count: number; error: string | null; source?: string }

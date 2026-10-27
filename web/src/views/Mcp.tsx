@@ -2,11 +2,16 @@ import { useState } from "react";
 
 import { fmt } from "../format";
 import { useJit } from "../state/store";
-import type { ConfigPath, McpImportServer } from "../types";
+import type {
+  ConfigPath,
+  McpImportServer,
+  McpTool,
+  McpToolCallResult,
+} from "../types";
 import { StatusDot } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { Empty } from "../ui/Display";
-import { Checkbox } from "../ui/Field";
+import { Checkbox, Field, Select, Textarea } from "../ui/Field";
 import { PageHead, Panel, PanelBody, PanelHead } from "../ui/Panel";
 import { Table, TableWrap, Td, Th, Tr } from "../ui/Table";
 
@@ -19,6 +24,22 @@ export function Mcp() {
   const [importBusy, setImportBusy] = useState(false);
   const [importError, setImportError] = useState("");
   const [busy, setBusy] = useState("");
+
+  /* Tool runner: invoke a tool on a connected server, behind a confirm gate. */
+  const [runnerOpen, setRunnerOpen] = useState(false);
+  const [runnerServer, setRunnerServer] = useState("");
+  const [runnerTools, setRunnerTools] = useState<McpTool[]>([]);
+  const [runnerTool, setRunnerTool] = useState("");
+  const [runnerArgs, setRunnerArgs] = useState("{}");
+  const [runnerBusy, setRunnerBusy] = useState(false);
+  const [runnerError, setRunnerError] = useState("");
+  const [runnerResult, setRunnerResult] = useState<McpToolCallResult | null>(
+    null,
+  );
+
+  const connectedServers = ctx.mcpServers.filter(
+    (server) => server.status === "connected",
+  );
 
   const showImports = async () => {
     setImportOpen(true);
@@ -120,6 +141,93 @@ export function Mcp() {
     }
   };
 
+  /** Scaffold a starter JSON for a tool's required arguments. */
+  const scaffoldArgs = (tool: McpTool | undefined): string => {
+    const props = tool?.inputSchema?.properties || {};
+    const required = new Set(tool?.inputSchema?.required || []);
+    const obj: Record<string, unknown> = {};
+    for (const [key, raw] of Object.entries(props)) {
+      const schema = (raw || {}) as { type?: string; default?: unknown };
+      if (schema.default !== undefined) obj[key] = schema.default;
+      else if (schema.type === "number" || schema.type === "integer") obj[key] = 0;
+      else if (schema.type === "boolean") obj[key] = false;
+      else if (schema.type === "array") obj[key] = [];
+      else if (schema.type === "object") obj[key] = {};
+      else if (required.has(key)) obj[key] = "";
+    }
+    return JSON.stringify(obj, null, 2);
+  };
+
+  const pickRunnerServer = async (name: string) => {
+    setRunnerServer(name);
+    setRunnerTools([]);
+    setRunnerTool("");
+    setRunnerResult(null);
+    setRunnerError("");
+    if (!name) return;
+    try {
+      const data = await ctx.api<{ tools: McpTool[] }>(
+        `/api/mcp/tools?server=${encodeURIComponent(name)}`,
+      );
+      setRunnerTools(data.tools || []);
+      const first = (data.tools || [])[0];
+      if (first) {
+        setRunnerTool(first.name);
+        setRunnerArgs(scaffoldArgs(first));
+      } else {
+        setRunnerError("This server exposes no tools.");
+      }
+    } catch (error) {
+      setRunnerError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const openRunner = () => {
+    setRunnerOpen(true);
+    setRunnerResult(null);
+    setRunnerError("");
+    const first = connectedServers[0];
+    void pickRunnerServer(first ? first.name : "");
+  };
+
+  const pickRunnerTool = (name: string) => {
+    setRunnerTool(name);
+    setRunnerResult(null);
+    setRunnerArgs(scaffoldArgs(runnerTools.find((tool) => tool.name === name)));
+  };
+
+  const runTool = async () => {
+    if (runnerBusy || !runnerServer || !runnerTool) return;
+    let args: unknown;
+    try {
+      args = JSON.parse(runnerArgs.trim() || "{}");
+    } catch {
+      setRunnerError("Arguments are not valid JSON.");
+      return;
+    }
+    // Tools run third-party code with real side effects — never send without
+    // an explicit yes, even for a re-run.
+    const ok = await ctx.confirmAction(
+      `Run ${runnerTool}?`,
+      `This invokes "${runnerTool}" on ${runnerServer}. Tools can have side effects: files written, commands run, external calls made.`,
+      "Run tool",
+    );
+    if (!ok) return;
+    setRunnerBusy(true);
+    setRunnerError("");
+    try {
+      const result = await ctx.api<McpToolCallResult>("/api/mcp/call", {
+        method: "POST",
+        body: JSON.stringify({ server: runnerServer, tool: runnerTool, args }),
+      });
+      setRunnerResult(result);
+    } catch (error) {
+      setRunnerError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRunnerBusy(false);
+    }
+  };
+
   const total = ctx.mcpServers.length;
   const connected = ctx.mcpServers.reduce(
     (count, server) => count + (server.status === "connected" ? 1 : 0),
@@ -143,6 +251,9 @@ export function Mcp() {
         description="JIT manages its own MCP servers. Import servers from a client config, or add one manually. JIT's copy is separate from the client's."
         actions={
           <>
+            {connectedServers.length > 0 ? (
+              <Button onClick={openRunner}>Run a tool</Button>
+            ) : null}
             <Button onClick={() => void showImports()}>Import configs</Button>
             <Button variant="primary" onClick={ctx.openMcpAdd}>
               Add server
@@ -262,6 +373,125 @@ export function Mcp() {
           </TableWrap>
         </Panel>
       )}
+
+      {runnerOpen ? (
+        <Panel>
+          <PanelHead
+            title="Run a tool"
+            hint={`${fmt(connectedServers.length)} of ${fmt(total)} connected`}
+          />
+          <PanelBody className="space-y-4">
+            {connectedServers.length === 0 ? (
+              <p className="py-2 text-center text-sm text-ink-2">
+                Connect a server first.
+              </p>
+            ) : (
+              <>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="Server">
+                    <Select
+                      value={runnerServer}
+                      onChange={(event) =>
+                        void pickRunnerServer(event.target.value)
+                      }
+                    >
+                      {connectedServers.map((server) => (
+                        <option key={server.name} value={server.name}>
+                          {server.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="Tool">
+                    <Select
+                      value={runnerTool}
+                      onChange={(event) => pickRunnerTool(event.target.value)}
+                    >
+                      {runnerTools.length === 0 ? (
+                        <option value="">No tools loaded</option>
+                      ) : null}
+                      {runnerTools.map((tool) => (
+                        <option key={tool.name} value={tool.name}>
+                          {tool.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                </div>
+
+                {(() => {
+                  const tool = runnerTools.find(
+                    (entry) => entry.name === runnerTool,
+                  );
+                  return tool?.description ? (
+                    <p className="text-xs leading-relaxed text-ink-3">
+                      {tool.description}
+                    </p>
+                  ) : null;
+                })()}
+
+                <Field
+                  label="Arguments (JSON)"
+                  hint="Scaffolded from the tool's schema; edit freely."
+                >
+                  <Textarea
+                    value={runnerArgs}
+                    spellCheck={false}
+                    onChange={(event) => setRunnerArgs(event.target.value)}
+                  />
+                </Field>
+
+                {runnerError ? (
+                  <p className="text-xs text-danger">{runnerError}</p>
+                ) : null}
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="primary"
+                    disabled={runnerBusy || !runnerTool}
+                    onClick={() => void runTool()}
+                  >
+                    {runnerBusy ? "Running…" : "Run"}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setRunnerOpen(false);
+                      setRunnerResult(null);
+                      setRunnerError("");
+                    }}
+                  >
+                    Close
+                  </Button>
+                </div>
+
+                {runnerResult ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <StatusDot tone={runnerResult.isError ? "bad" : "ok"} />
+                      <span className="text-xs text-ink-2">
+                        {runnerResult.isError
+                          ? "The tool reported an error."
+                          : "Completed."}
+                      </span>
+                    </div>
+                    <pre className="surface max-h-72 overflow-auto rounded-xl border border-line p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-ink-2">
+                      {(runnerResult.content || [])
+                        .map((block) =>
+                          block.type === "text" && block.text
+                            ? block.text
+                            : JSON.stringify(block),
+                        )
+                        .filter(Boolean)
+                        .join("\n\n") || "(empty result)"}
+                    </pre>
+                  </div>
+                ) : null}
+              </>
+            )}
+          </PanelBody>
+        </Panel>
+      ) : null}
 
       {importOpen ? (
         <Panel>

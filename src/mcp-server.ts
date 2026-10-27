@@ -8,6 +8,7 @@ import { VERSION } from "./config.js";
 import { logger } from "./logger.js";
 import { warmupEmbeddingModel } from "./embedding.js";
 import { evaluate } from "./retrieval/retriever.js";
+import { getAllItems, getItem } from "./storage/store.js";
 
 // The server cannot push a reminder mid-session, so the one fresh channel it
 // controls is the tool's own result. This short cue rides on every result,
@@ -26,7 +27,9 @@ Call JIT_FIND at the start of any multi-step task — and again whenever the wor
 
 One intent per call. Work that spans several domains is several lookups, not one: call JIT_FIND separately for each intent. Packing multiple intents into a single query blurs the match and returns the wrong skill.
 
-Phrase the intent as a search query, not a task brief: one sentence, concrete action plus platform or domain — "deploy a node app to azure", "automate posting a twitter thread". Leave out file paths and task details; they dilute the match. Returns the skill body, or {"found": false} with near_misses; retry once with different phrasing, then proceed — a miss is normal, not an error. A hit may return several skills when more than one fits the same intent; read them all before starting.`;
+Phrase the intent as a search query, not a task brief: one sentence, concrete action plus platform or domain — "deploy a node app to azure", "automate posting a twitter thread". Leave out file paths and task details; they dilute the match. Returns the skill body, or {"found": false} with near_misses; retry once with different phrasing, then proceed — a miss is normal, not an error. A hit may return several skills when more than one fits the same intent; read them all before starting.
+
+When you already know exactly which skill you need — a name from near_misses or related, or one you loaded earlier and lost from context — call JIT_RUN with that exact name to load it directly, without searching.`;
 
 function textResult(payload: unknown, isError = false) {
   return {
@@ -41,6 +44,7 @@ function createServer(): McpServer {
     { instructions: INSTRUCTIONS },
   );
   registerFind(server);
+  registerRun(server);
   return server;
 }
 
@@ -139,11 +143,81 @@ export function registerFind(server: McpServer): void {
   );
 }
 
+export function registerRun(server: McpServer): void {
+  server.registerTool(
+    "JIT_RUN",
+    {
+      title: "Load a named skill",
+      description:
+        "Load a skill by its exact name, without searching. Use it when you " +
+        "already know which skill you need — a name from JIT_FIND's " +
+        "near_misses or related lists, or one you loaded earlier and lost " +
+        "from context. Returns the skill body and its path, or " +
+        '{"found": false} with close names to retry against.',
+      inputSchema: {
+        name: z.string().describe('Exact skill name, e.g. "deploy-node-azure".'),
+      },
+      // Read-only and idempotent like JIT_FIND: it fetches a skill's text from
+      // disk. It runs nothing.
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ name }) => {
+      const wanted = name.trim().toLowerCase();
+      const index = getAllItems(false);
+      const hit = index.find((item) => item.name.trim().toLowerCase() === wanted);
+      if (!hit) {
+        // Substring matches give a misspelled name somewhere to land.
+        const close = index
+          .filter((item) => {
+            const candidate = item.name.trim().toLowerCase();
+            return candidate.includes(wanted) || wanted.includes(candidate);
+          })
+          .slice(0, 5)
+          .map((item) => item.name);
+        return textResult({
+          found: false,
+          name,
+          ...(close.length > 0 ? { close_matches: close } : {}),
+        });
+      }
+      // getAllItems(false) skips bodies; re-read just this one from disk. The
+      // index never stores bodies — same serving-time read as JIT_FIND.
+      const full = getItem(hit.id);
+      const content = full?.body ?? "";
+      return textResult({
+        found: true,
+        skills: [
+          {
+            name: hit.name,
+            path: hit.path,
+            content,
+            ...(content
+              ? {}
+              : {
+                  note:
+                    "The body is unavailable — the file moved or was deleted " +
+                    "since indexing. Reindex from the dashboard; do not follow " +
+                    "an empty procedure.",
+                }),
+          },
+        ],
+        hint: CALL_HINT,
+      });
+    },
+  );
+}
+
 // The dashboard reports the fixed context cost of JIT's own MCP tool schema.
 // Measure the real tools/list payload once over an in-memory transport so the
 // number tracks the code instead of being hand-maintained. The fallback is the
 // last measured value.
-const FALLBACK_SCHEMA_TOKENS = 246;
+// Last measured tools/list cost for the JIT_FIND + JIT_RUN schema pair
+// (measured over the in-memory probe below).
+const FALLBACK_SCHEMA_TOKENS = 435;
 
 let schemaTokensPromise: Promise<number> | null = null;
 

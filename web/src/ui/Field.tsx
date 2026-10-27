@@ -4,6 +4,7 @@ import {
   type ChangeEvent,
   type InputHTMLAttributes,
   type ReactNode,
+  type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
 } from "react";
 
@@ -34,6 +35,13 @@ export function Textarea({
       {...props}
     />
   );
+}
+
+export function Select({
+  className,
+  ...props
+}: SelectHTMLAttributes<HTMLSelectElement>) {
+  return <select className={cx(CONTROL, "h-9", className)} {...props} />;
 }
 
 export interface CheckboxProps extends InputHTMLAttributes<HTMLInputElement> {
