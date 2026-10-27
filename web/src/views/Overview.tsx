@@ -72,7 +72,7 @@ function HeroRing({
           cy="50"
           r={radius}
           fill="none"
-          stroke="var(--color-info)"
+          stroke="var(--color-bad)"
           strokeOpacity={0.4}
           strokeWidth={THICKNESS}
         />
@@ -166,7 +166,7 @@ function Savings({ stats }: { stats: Stats }) {
             <span className="flex items-center gap-2 text-xs text-ink-2">
               <span
                 aria-hidden="true"
-                className="size-2 rounded-full bg-info"
+                className="size-2 rounded-full bg-bad"
               />
               Plain skills
               <span className="num text-ink">{fmt(catalog)}</span>
