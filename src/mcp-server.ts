@@ -8,6 +8,7 @@ import { VERSION } from "./config.js";
 import { logger } from "./logger.js";
 import { warmupEmbeddingModel } from "./embedding.js";
 import { evaluate } from "./retrieval/retriever.js";
+import { logLookup } from "./lookups.js";
 import { getAllItems, getItem } from "./storage/store.js";
 
 // The server cannot push a reminder mid-session, so the one fresh channel it
@@ -89,8 +90,18 @@ export function registerFind(server: McpServer): void {
       },
     },
     async ({ intent }) => {
+      const started = performance.now();
       const evaluation = await evaluate(intent, 3);
+      const ms = Number((performance.now() - started).toFixed(1));
       if (evaluation.warning) {
+        logLookup({
+          ts: new Date().toISOString(),
+          tool: "JIT_FIND",
+          intent,
+          found: false,
+          warning: evaluation.warning,
+          ms,
+        });
         return textResult({
           found: false,
           error: "embeddings_required_but_unavailable",
@@ -117,6 +128,15 @@ export function registerFind(server: McpServer): void {
         // empty skill, and the path the agent could fall back to is exactly
         // the file that is gone.
         const missing = skills.filter((skill) => !skill.content).length;
+        logLookup({
+          ts: new Date().toISOString(),
+          tool: "JIT_FIND",
+          intent,
+          found: true,
+          results: skills.map((skill) => skill.name),
+          ms,
+          trace: evaluation.trace,
+        });
         return textResult({
           found: true,
           skills,
@@ -133,12 +153,27 @@ export function registerFind(server: McpServer): void {
         });
       }
       if (evaluation.nearMisses.length > 0) {
+        logLookup({
+          ts: new Date().toISOString(),
+          tool: "JIT_FIND",
+          intent,
+          found: false,
+          near_misses: evaluation.nearMisses.map((miss) => miss.name),
+          ms,
+        });
         return textResult({
           found: false,
           near_misses: evaluation.nearMisses.map((miss) => miss.name),
           hint: CALL_HINT,
         });
       }
+      logLookup({
+        ts: new Date().toISOString(),
+        tool: "JIT_FIND",
+        intent,
+        found: false,
+        ms,
+      });
       return textResult({ found: false, hint: CALL_HINT });
     },
   );
@@ -167,9 +202,11 @@ export function registerRun(server: McpServer): void {
       },
     },
     async ({ name }) => {
+      const started = performance.now();
       const wanted = name.trim().toLowerCase();
       const index = getAllItems(false);
       const hit = index.find((item) => item.name.trim().toLowerCase() === wanted);
+      const ms = Number((performance.now() - started).toFixed(1));
       if (!hit) {
         // Substring matches give a misspelled name somewhere to land.
         const close = index
@@ -179,6 +216,14 @@ export function registerRun(server: McpServer): void {
           })
           .slice(0, 5)
           .map((item) => item.name);
+        logLookup({
+          ts: new Date().toISOString(),
+          tool: "JIT_RUN",
+          name,
+          found: false,
+          close_matches: close,
+          ms,
+        });
         return textResult({
           found: false,
           name,
@@ -189,6 +234,14 @@ export function registerRun(server: McpServer): void {
       // index never stores bodies — same serving-time read as JIT_FIND.
       const full = getItem(hit.id);
       const content = full?.body ?? "";
+      logLookup({
+        ts: new Date().toISOString(),
+        tool: "JIT_RUN",
+        name,
+        found: true,
+        results: [hit.name],
+        ms,
+      });
       return textResult({
         found: true,
         skills: [

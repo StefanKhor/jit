@@ -3,6 +3,7 @@ export type View =
   | "skills"
   | "mcp"
   | "search"
+  | "lookups"
   | "settings";
 
 export interface Health {
@@ -211,6 +212,21 @@ export interface RetrievalTrace {
     passed: number;
   };
   final: { id: string; name: string; via: "rerank" | "cosine" }[];
+}
+
+/** One agent-invoked lookup, from the shared lookup log (~/.jit/lookups.jsonl). */
+export interface LookupRecord {
+  ts: string;
+  tool: "JIT_FIND" | "JIT_RUN";
+  intent?: string;
+  name?: string;
+  found: boolean;
+  results?: string[];
+  near_misses?: string[];
+  close_matches?: string[];
+  warning?: string;
+  ms: number;
+  trace?: RetrievalTrace;
 }
 
 export interface DiscoveredSkill {

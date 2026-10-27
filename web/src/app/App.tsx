@@ -9,6 +9,7 @@ import { AppProvider, useJit } from "../state/store";
 import { Wordmark } from "../ui/Display";
 import { Toast } from "../ui/Toast";
 import { Mcp } from "../views/Mcp";
+import { Lookups } from "../views/Lookups";
 import { Overview } from "../views/Overview";
 import { Search } from "../views/Search";
 import { Settings } from "../views/Settings";
@@ -39,6 +40,7 @@ function Root() {
         {ctx.view === "skills" ? <Skills /> : null}
         {ctx.view === "mcp" ? <Mcp /> : null}
         {ctx.view === "search" ? <Search /> : null}
+        {ctx.view === "lookups" ? <Lookups /> : null}
         {ctx.view === "settings" ? <Settings /> : null}
       </Shell>
 

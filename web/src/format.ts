@@ -5,6 +5,7 @@ export const viewLabels: Record<View, string> = {
   skills: "Skills",
   mcp: "MCP",
   search: "Search",
+  lookups: "Lookups",
   settings: "Settings",
 };
 
@@ -18,6 +19,7 @@ export const NAV_VIEWS: View[] = [
   "skills",
   "mcp",
   "search",
+  "lookups",
   "settings",
 ];
 

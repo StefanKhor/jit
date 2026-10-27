@@ -40,6 +40,7 @@ import {
 } from "../mcp/client.js";
 import { jitSchemaTokens } from "../mcp-server.js";
 import { cloneRepo } from "../repo.js";
+import { readLookups } from "../lookups.js";
 import { rerankCandidates } from "../retrieval/rerank.js";
 import { evaluate } from "../retrieval/retriever.js";
 import {
@@ -755,6 +756,13 @@ export function createApp(): Hono {
   app.post("/api/search", async (c) => {
     const body = await readJson(c);
     return c.json(await search(String(body.intent || "").trim()));
+  });
+
+  // What agents actually asked JIT, newest first — every JIT_FIND / JIT_RUN
+  // from any process (the stdio server logs to the same file), with the full
+  // retrieval trace attached so each entry can be debugged like the Search page.
+  app.get("/api/lookups", (c) => {
+    return c.json({ lookups: readLookups(100) });
   });
 
   // Ping the configured rerank endpoint with a fixed probe through the exact
