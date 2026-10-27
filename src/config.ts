@@ -43,6 +43,9 @@ export const INDEX_FILE = path.join(INDEX_DIR, "index.json");
 export const CONFIG_FILE = path.join(INDEX_DIR, "config.json");
 export const MCP_CONFIG = path.join(INDEX_DIR, "mcp.json");
 export const JIT_SKILLS_DIR = path.join(INDEX_DIR, "skills");
+/** Cloned skill repos land here, one folder per repo, so a re-pull is a
+ *  plain `git pull` and the user can inspect everything JIT fetched. */
+export const REPOS_DIR = path.join(INDEX_DIR, "repos");
 export const MODEL_CACHE_DIR = path.resolve(
   (process.env.JIT_MODEL_CACHE || path.join(INDEX_DIR, "models")).replace(
     /^~(?=[\\/]|$)/,

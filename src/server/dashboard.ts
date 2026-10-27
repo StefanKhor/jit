@@ -39,6 +39,7 @@ import {
   shutdown as shutdownMcp,
 } from "../mcp/client.js";
 import { jitSchemaTokens } from "../mcp-server.js";
+import { cloneRepo } from "../repo.js";
 import { evaluate } from "../retrieval/retriever.js";
 import {
   createSkill,
@@ -496,6 +497,21 @@ export function createApp(): Hono {
     const enabled = boolValue(body.enabled, true);
     if (!setEnabled(id, enabled)) throw new HttpError(404, "not found");
     return c.json({ id, enabled });
+  });
+
+  // Pull a skill repo from a remote (github shorthand, https, or git@ url):
+  // clone into JIT's repo cache, then hand the local path back so the transfer
+  // picker treats it like any other folder. Repo content is only ever read.
+  app.post("/api/skills/clone", async (c) => {
+    const body = await readJson(c);
+    const rawRepo = String(body.repo || "").trim();
+    if (!rawRepo) throw new HttpError(400, "repo required");
+    try {
+      return c.json(cloneRepo(rawRepo));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new HttpError(400, message);
+    }
   });
 
   app.post("/api/skills/add", async (c) => {

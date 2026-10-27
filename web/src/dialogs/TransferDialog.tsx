@@ -21,8 +21,9 @@ export function TransferDialog({
   onClose: () => void;
 }) {
   const ctx = useJit();
-  const [tab, setTab] = useState<"in" | "out">(initialTab);
+  const [tab, setTab] = useState<"in" | "out" | "repo">(initialTab);
   const [path, setPath] = useState("");
+  const [repo, setRepo] = useState("");
   const [copy, setCopy] = useState(true);
   const [overwrite, setOverwrite] = useState(false);
   const [dest, setDest] = useState("~/jit-skills");
@@ -44,6 +45,7 @@ export function TransferDialog({
     if (!open) return;
     setTab(initialTab);
     setPath("");
+    setRepo("");
     setCopy(true);
     setOverwrite(false);
     setDest("~/jit-skills");
@@ -61,11 +63,11 @@ export function TransferDialog({
   const local = ctx.skills.filter((skill) => !skill.managed).length;
   const jit = ctx.skills.filter((skill) => skill.managed).length;
 
-  const scan = async () => {
+  const scan = async (target?: string) => {
     // The response must match the path the user is looking at now: editing the
     // path clears the results, and a slow scan for the old path landing later
     // would silently repopulate the picker with stale entries.
-    const requested = path;
+    const requested = target ?? path;
     setScanning(true);
     setScanError("");
     try {
@@ -86,6 +88,35 @@ export function TransferDialog({
       );
     } catch (caught) {
       if (pathRef.current !== requested) return;
+      setScanError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  /** Clone a remote repo into JIT's cache, then land the user on the import
+   *  tab with that folder scanned — a repo pull is just a folder import once
+   *  the clone exists. */
+  const clone = async () => {
+    if (!repo.trim()) {
+      setScanError("Enter a repo: owner/name or an https clone url.");
+      return;
+    }
+    setScanning(true);
+    setScanError("");
+    try {
+      const result = await ctx.api<{ repo: string; dir: string }>(
+        "/api/skills/clone",
+        { method: "POST", body: JSON.stringify({ repo }) },
+      );
+      setPath(result.dir);
+      // The ref mirrors state on render, but we scan before that happens.
+      pathRef.current = result.dir;
+      setTab("in");
+      setSelected(new Set());
+      await scan(result.dir);
+      ctx.toast(`Pulled ${result.repo}.`);
+    } catch (caught) {
       setScanError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setScanning(false);
@@ -216,7 +247,7 @@ export function TransferDialog({
         <Tabs
           value={tab}
           onValueChange={(next) => {
-            setTab(next === "out" ? "out" : "in");
+            setTab(next === "out" ? "out" : next === "repo" ? "repo" : "in");
             // Selections are direction-specific: ids picked for import must
             // not leak into the export list (and its destructive side), or
             // the other way around.
@@ -226,16 +257,49 @@ export function TransferDialog({
         >
           <TabList label="Transfer direction">
             <Tab value="in">Into JIT</Tab>
+            <Tab value="repo">Pull from repo</Tab>
             <Tab value="out">Out of JIT</Tab>
           </TabList>
 
           <div className="surface flex items-center gap-6 rounded-xl border border-line bg-inset/50 px-5 py-4">
             <Stat label="Local" value={fmt(local)} hint="indexed in place" />
             <span aria-hidden="true" className="shrink-0 text-ink-3">
-              {tab === "in" ? "→" : "←"}
+              {tab === "out" ? "←" : "→"}
             </span>
             <Stat label="JIT" value={fmt(jit)} hint="owned copies" />
           </div>
+
+          <TabPanel value="repo" className="space-y-4">
+            <Field
+              label="Repository"
+              hint="owner/name, an https clone url, or git@ — cloned once, then refreshed with git pull on later pulls."
+            >
+              <div className="flex gap-2">
+                <Input
+                  type="text"
+                  className="num"
+                  placeholder="anthropics/skills"
+                  spellCheck={false}
+                  autoComplete="off"
+                  value={repo}
+                  onChange={(event) => setRepo(event.target.value)}
+                />
+                <Button
+                  variant="outline"
+                  disabled={scanning}
+                  onClick={() => void clone()}
+                >
+                  {scanning ? "Pulling…" : "Pull"}
+                </Button>
+              </div>
+            </Field>
+            <p className="text-sm leading-relaxed text-ink-3">
+              The clone lands in{" "}
+              <span className="num">~/.jit/repos/&lt;repo&gt;</span> and opens on
+              the import tab — pick which skills to bring in. JIT only reads the
+              files; nothing in a repo is executed.
+            </p>
+          </TabPanel>
 
           <TabPanel value="in" className="space-y-4">
             <Field
