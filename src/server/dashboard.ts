@@ -88,16 +88,6 @@ function countSources(jitRoot: string): { local: number; jit: number } {
   return { local, jit };
 }
 
-function isSecureApiBase(value: string): boolean {
-  try {
-    const url = new URL(value);
-    if (url.protocol === "https:") return true;
-    return url.protocol === "http:" && isLocalEndpoint(value);
-  } catch {
-    return false;
-  }
-}
-
 function boolValue(value: unknown, fallback: boolean): boolean {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value !== 0;
@@ -239,11 +229,8 @@ function buildConfigUpdates(body: Record<string, unknown>): Partial<Config> {
       const base = String(updates.embedding_api_base ?? current.embedding_api_base);
       const model = String(updates.embedding_api_model ?? current.embedding_api_model);
       const key = String(updates.embedding_api_key ?? current.embedding_api_key);
-      if (!base || !isSecureApiBase(base)) {
-        throw new HttpError(
-          400,
-          "embeddings API base must use https:// (http:// is allowed only for localhost)",
-        );
+      if (!base) {
+        throw new HttpError(400, "an embeddings API base is required");
       }
       if (!model) throw new HttpError(400, "an embeddings model is required");
       if (!key && !isLocalEndpoint(base)) {
@@ -255,15 +242,8 @@ function buildConfigUpdates(body: Record<string, unknown>): Partial<Config> {
   for (const key of RERANK_UPDATE_KEYS) {
     if (key in body) updates[key] = String(body[key] || "").trim();
   }
-  const rerankBase = String(updates.rerank_api_base || "");
-  if (rerankBase && !isSecureApiBase(rerankBase)) {
-    throw new HttpError(
-      400,
-      "rerank API base must use https:// (http:// is allowed only for localhost)",
-    );
-  }
   if ("rerank_api_base" in updates) {
-    updates.rerank_api_base = rerankBase.replace(/\/+$/, "");
+    updates.rerank_api_base = String(updates.rerank_api_base).replace(/\/+$/, "");
   }
 
   if ("confidence_threshold" in body) {
