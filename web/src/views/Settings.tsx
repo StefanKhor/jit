@@ -17,6 +17,7 @@ export function Settings() {
   const [rerankKey, setRerankKey] = useState("");
   const [rerankBase, setRerankBase] = useState("");
   const [rerankModel, setRerankModel] = useState("");
+  const [rerankTest, setRerankTest] = useState<string | null>(null);
   const [embeddingProvider, setEmbeddingProvider] = useState<"local" | "openai-compatible">("local");
   const [localEmbeddingModel, setLocalEmbeddingModel] = useState("");
   const [localEmbeddingDim, setLocalEmbeddingDim] = useState("384");
@@ -146,6 +147,31 @@ export function Settings() {
       ctx.toast("Reranker API key removed.");
     } catch (error) {
       ctx.toast(error instanceof Error ? error.message : String(error), "error");
+    }
+  };
+
+  // Sends a fixed probe through the production rerank path, so a green result
+  // means a lookup would succeed too. Tests the saved settings, not the form.
+  const testRerank = async () => {
+    setSaving("rerank-test");
+    setRerankTest(null);
+    try {
+      const result = await ctx.api<{
+        ok: boolean;
+        selected: string[];
+        error: string | null;
+        ms: number;
+        model: string;
+      }>("/api/rerank/test", { method: "POST" });
+      setRerankTest(
+        result.ok
+          ? `Works — ${result.model} picked ${result.selected.length} candidate(s) in ${result.ms} ms.`
+          : `Failed in ${result.ms} ms — ${result.error}`,
+      );
+    } catch (error) {
+      setRerankTest(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSaving("");
     }
   };
 
@@ -526,7 +552,28 @@ export function Settings() {
                   >
                     Remove key
                   </Button>
+                  <Button
+                    type="button"
+                    disabled={saving !== "" || !config?.rerank_api_base}
+                    title="Sends a fixed probe through the real rerank path, using the saved settings."
+                    onClick={() => void testRerank()}
+                  >
+                    {saving === "rerank-test" ? "Testing…" : "Test endpoint"}
+                  </Button>
                 </div>
+                {rerankTest ? (
+                  <p
+                    className={
+                      "text-xs leading-relaxed " +
+                      (rerankTest.startsWith("Works")
+                        ? "text-ink-2"
+                        : "text-bad")
+                    }
+                    role="status"
+                  >
+                    {rerankTest}
+                  </p>
+                ) : null}
               </form>
             </PanelBody>
           </Panel>

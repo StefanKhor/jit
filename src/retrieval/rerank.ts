@@ -82,15 +82,28 @@ export async function rerankCandidates(
         },
       ],
       temperature: 0,
-      max_tokens: 32,
+      // Small, but enough headroom that a thinking model can finish its
+      // reasoning and still emit the JSON array; 32 left reasoning models
+      // truncated before the answer.
+      max_tokens: 256,
     });
-    const text = (response.choices[0]?.message?.content || "").trim();
+    const message = response.choices[0]?.message as
+      | (Record<string, unknown> | undefined);
+    // Reasoning models answer in `content`, but some OpenAI-compatible
+    // servers put the visible text in `reasoning_content` instead.
+    const raw = String(
+      message?.content ?? message?.reasoning_content ?? "",
+    );
+    // Thinking models wrap their reasoning in <think> blocks; the JSON can
+    // carry no brackets of its own there, so strip them before slicing.
+    const text = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+    const snippet = text.replace(/\s+/g, " ").slice(0, 120) || "(empty response)";
     const start = text.indexOf("[");
     const end = text.lastIndexOf("]");
     if (start === -1 || end <= start) {
       return {
         selected,
-        error: "rerank response unparseable",
+        error: `rerank response unparseable — raw: ${snippet}`,
         configured: true,
         sent: candidates.length,
         ms: performance.now() - started,
@@ -100,7 +113,7 @@ export async function rerankCandidates(
     if (!Array.isArray(parsed)) {
       return {
         selected,
-        error: "rerank response unparseable",
+        error: `rerank response unparseable — raw: ${snippet}`,
         configured: true,
         sent: candidates.length,
         ms: performance.now() - started,

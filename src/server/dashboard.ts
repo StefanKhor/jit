@@ -40,6 +40,7 @@ import {
 } from "../mcp/client.js";
 import { jitSchemaTokens } from "../mcp-server.js";
 import { cloneRepo } from "../repo.js";
+import { rerankCandidates } from "../retrieval/rerank.js";
 import { evaluate } from "../retrieval/retriever.js";
 import {
   discoverTransferable,
@@ -754,6 +755,45 @@ export function createApp(): Hono {
   app.post("/api/search", async (c) => {
     const body = await readJson(c);
     return c.json(await search(String(body.intent || "").trim()));
+  });
+
+  // Ping the configured rerank endpoint with a fixed probe through the exact
+  // production path, so "Test" in Settings exercises the same call a lookup
+  // would — same base, key, model, prompt shape and parsing.
+  app.post("/api/rerank/test", async (c) => {
+    const settings = loadConfig();
+    if (!settings.rerank_api_base || !settings.rerank_model) {
+      throw new HttpError(400, "rerank endpoint not configured");
+    }
+    // rerankCandidates only reads id, name and description; the probe rows
+    // are stand-ins, one clearly relevant and one clearly not, so a correct
+    // verdict is unambiguous.
+    const probe = [
+      {
+        id: "probe-relevant",
+        name: "deploy-node-app",
+        description: "Deploy a Node.js application to a cloud app service.",
+      },
+      {
+        id: "probe-irrelevant",
+        name: "tweet-thread",
+        description: "Post a thread of tweets to Twitter.",
+      },
+    ] as Parameters<typeof rerankCandidates>[1];
+    const started = performance.now();
+    const outcome = await rerankCandidates(
+      "deploy a node application",
+      probe,
+      settings,
+    );
+    return c.json({
+      base: settings.rerank_api_base,
+      model: settings.rerank_model,
+      ok: outcome.error === null,
+      selected: outcome.selected,
+      error: outcome.error,
+      ms: Number((performance.now() - started).toFixed(1)),
+    });
   });
 
   app.get("/api/export", (c) => {
