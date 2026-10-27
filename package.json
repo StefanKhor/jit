@@ -34,7 +34,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "dev": "concurrently -k -n server,web -c yellow,cyan \"npm run dev:server\" \"npm run dev:web\"",
+    "dev": "node scripts/dev.mjs",
     "dev:server": "tsx watch src/cli.ts dashboard",
     "dev:web": "vite --config web/vite.config.ts",
     "build": "npm run build:server && npm run build:web",
@@ -75,7 +75,6 @@
     "@vitejs/plugin-react": "^6.1.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "concurrently": "^10.0.6",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "tailwind-merge": "^3.7.0",
