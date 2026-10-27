@@ -9,13 +9,14 @@ export const viewLabels: Record<View, string> = {
 };
 
 /**
- * The sections the console shows today. Every view still exists and is wired
- * up — MCP included — but the product is skill-first for now, so mcp is kept
- * out of the navigation. Move a name back in here to surface it again.
+ * The sections the console shows today. Every view exists and is wired up;
+ * MCP now sits in the rail because it is more than a setting: servers are
+ * managed, imported, and their tools run from here.
  */
 export const NAV_VIEWS: View[] = [
   "overview",
   "skills",
+  "mcp",
   "search",
   "settings",
 ];
