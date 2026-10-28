@@ -92,6 +92,14 @@ function envNumber(
  */
 export const TOP_K_RETRIEVE = envNumber("JIT_TOP_K", 10, 1, 1000, true);
 
+/**
+ * How many entries a reranked lookup may answer with. A multi-part task can
+ * genuinely need more than one, but every extra body is context the agent pays
+ * for, so the set stays small and the model is told the ceiling. Raise it with
+ * JIT_MAX_SELECTIONS if your tasks routinely need more bodies at once.
+ */
+export const MAX_SELECTIONS = envNumber("JIT_MAX_SELECTIONS", 3, 1, 20, true);
+
 const MAX_EMBEDDING_DIM = 16384;
 
 export const DEFAULT_HOST = process.env.JIT_HOST || "127.0.0.1";

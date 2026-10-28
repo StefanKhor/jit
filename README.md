@@ -192,6 +192,7 @@ JIT does not load `.env` files.
 | `JIT_API_KEY` | Require a key for `/api/*` | unset |
 | `JIT_CONFIDENCE_THRESHOLD` | Minimum confidence to return a match (0–1) | `0.60` |
 | `JIT_TOP_K` | Candidates retrieved before rerank | `10` |
+| `JIT_MAX_SELECTIONS` | Max entries a reranked lookup may return | `3` |
 | `JIT_EMBEDDING_PROVIDER` | `local` or `openai-compatible` | `local` |
 | `JIT_EMBEDDING_API_KEY` / `JIT_EMBEDDING_API_BASE` / `JIT_EMBEDDING_API_MODEL` / `JIT_EMBEDDING_API_DIM` | Remote embeddings config (key not needed for localhost) | unset |
 | `JIT_RERANK_API_KEY` / `JIT_RERANK_API_BASE` / `JIT_RERANK_MODEL` | OpenAI-compatible reranker | unset |

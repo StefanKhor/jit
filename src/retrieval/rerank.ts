@@ -1,15 +1,9 @@
 import OpenAI from "openai";
 
+import { MAX_SELECTIONS } from "../config.js";
 import { logger } from "../logger.js";
 import { isLocalEndpoint } from "../net.js";
 import type { Config, StoredItem } from "../types.js";
-
-/**
- * How many skills one intent may be answered with. A multi-part task can
- * genuinely need more than one, but every extra body is context the agent pays
- * for, so the set stays small and the model is told the ceiling.
- */
-const MAX_SELECTIONS = 3;
 
 export interface RerankOutcome {
   // Candidate ids the reranker chose, most relevant first. An empty list is a
