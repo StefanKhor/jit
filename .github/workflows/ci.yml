@@ -111,6 +111,6 @@ jobs:
 
       # prepack runs `npm run build`, so the tarball is compiled fresh from
       # this tag. NPM_TOKEN is an npm automation token in repo secrets.
-      - run: npm publish --provenance
+      - run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
