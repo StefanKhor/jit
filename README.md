@@ -1,17 +1,28 @@
-# JIT — a search engine for agent skills and tools
+# JIT — the right playbook, right when your agent needs it
 
-**An agent describes the task; JIT returns the tested procedure — a skill
-body, or the right MCP tool from a connected server. Everything stays local.**
+**Stop stuffing every workflow into every prompt.** JIT lets an agent describe
+the task in plain language, then finds the relevant skill or connected MCP tool
+and gives the agent what it needs to proceed.
 
+```text
+"deploy a node app to azure"
+        ↓
+      JIT_FIND
+        ↓
+deploy-node-azure  →  the relevant procedure, ready to follow
+deploy_azure_app   →  an MCP tool + the server that owns it
 ```
-agent: "deploy a node app to azure"
-   |
-   v
-JIT_FIND  ->  deploy-node-azure    (skill: full procedure)
-          ->  deploy_azure_app     (MCP tool, server "tester")
-   |
-agent reads both, then runs the tool on that server itself
-```
+
+## Why use JIT?
+
+- **Less prompt clutter.** Keep procedures out of permanent prompts; retrieve
+  the useful ones for the task at hand.
+- **One place to search.** Find local `SKILL.md` instructions and tools from
+  connected MCP servers with the same natural-language lookup.
+- **Your agent stays in control.** JIT routes and provides instructions; the
+  agent follows the procedure and calls MCP tools directly on their servers.
+- **Local-first by default.** The index and default embeddings stay on your
+  machine. Data goes to a remote service only when you configure one.
 
 ## Quick start
 
@@ -33,7 +44,7 @@ npm run build
 npm run start
 ```
 
-The first dashboard run downloads the local embedding model (~30 MB, one
+The first dashboard run downloads the local embedding model (~130 MB, one
 time) into `~/.jit/models`; every run after that is fully offline.
 
 Open <http://localhost:3000>. For development: `npm run dev`
@@ -128,7 +139,8 @@ nothing is ever auto-scanned:
    import. Re-pulling runs `git pull`, so updates are one click.
 2. **Local folder** — point at a directory; copy the skills into JIT, or index
    them in place with no copy (JIT reads the files where they are).
-3. **Scan** — sweep the standard folders you already use (`~/.claude/skills`,
+3. **Scan** — use **Scan local folders** on Skills, or **Scan** in the transfer
+   dialog, to sweep the standard folders you already use (`~/.claude/skills`,
    `~/.agents/skills`, `~/.codex/skills`, `~/.config/opencode/skills`,
    `~/.skills`, and JIT's own `~/.jit/skills`). Only when you press the button.
 
