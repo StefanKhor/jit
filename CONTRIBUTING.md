@@ -55,6 +55,27 @@ Useful smoke checks:
 3. Update `README.md` when behavior or configuration changes.
 4. Run the checks above and describe how you verified the change.
 
+## Releases
+
+Publishing to npm is automated in CI. Cut a release like this:
+
+1. Bump `version` in `package.json` and commit it on `main`.
+2. Tag the release commit and push the tag:
+
+   ```
+   git tag v1.2.3
+   git push origin v1.2.3
+   ```
+
+3. CI runs the full gate (typecheck + build on Linux and Windows, docker image
+   smoke test), verifies the tag matches `package.json`, and runs
+   `npm publish --provenance`.
+
+One-time setup: add an npm *automation* token as the `NPM_TOKEN` repository
+secret. Provenance requires the public registry and GitHub-hosted runners.
+A tag that does not match `package.json` fails the release instead of
+publishing a surprise version.
+
 ## Reporting issues
 
 Use GitHub Issues. Include your Node version, OS, the exact command,
