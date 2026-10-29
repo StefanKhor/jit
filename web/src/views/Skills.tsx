@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 
 import { fmt, summary } from "../format";
 import { useJit } from "../state/store";
-import type { BulkResult } from "../types";
+import type { BulkResult, TransferResult } from "../types";
 import { Badge, StatusDot } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { cx } from "../ui/cx";
@@ -15,7 +15,7 @@ import { Table, TableWrap, Td, Th, Tr } from "../ui/Table";
 export function Skills() {
   const ctx = useJit();
   const [path, setPath] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"scan" | "path" | null>(null);
   const [busyId, setBusyId] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
   const sel = useSelection(ctx.skills.map((skill) => skill.id));
@@ -24,15 +24,10 @@ export function Skills() {
     event.preventDefault();
     const value = path.trim();
     if (!value) return;
-    setBusy(true);
+    if (busy) return;
+    setBusy("path");
     const post = (extra: Record<string, unknown>) =>
-      ctx.api<{
-        found?: number;
-        added?: number;
-        updated?: number;
-        skipped?: number;
-        errors?: string[];
-      }>("/api/skills/add", {
+      ctx.api<TransferResult>("/api/skills/add", {
         method: "POST",
         body: JSON.stringify({ path: value, ...extra }),
       });
@@ -47,7 +42,23 @@ export function Skills() {
     } catch (error) {
       ctx.toast(error instanceof Error ? error.message : String(error), "error");
     } finally {
-      setBusy(false);
+      setBusy(null);
+    }
+  };
+
+  const scanLocal = async () => {
+    if (busy) return;
+    setBusy("scan");
+    try {
+      const result = await ctx.api<TransferResult>("/api/skills/scan", {
+        method: "POST",
+      });
+      ctx.toast(summary(result), result.errors?.length ? "error" : "ok");
+      await ctx.refreshAll();
+    } catch (error) {
+      ctx.toast(error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -151,8 +162,24 @@ export function Skills() {
             <span className="num text-sm text-ink-3">{total}</span>
           </span>
         }
-        description="Only what you import is indexed. JIT never scans your skill folders on startup. Transfer copies files in or out; indexing a path leaves the file where it lives."
-        actions={<Button onClick={() => ctx.openTransfer("in")}>Transfer</Button>}
+        description="Only explicitly imported, scanned, or indexed skills are included. JIT never scans folders on startup."
+        actions={
+          <>
+            <Button
+              disabled={busy !== null}
+              onClick={() => void scanLocal()}
+              title="Indexes skills in the usual local folders, including JIT’s managed skills. Source files are not modified."
+            >
+              {busy === "scan" ? "Scanning…" : "Scan local folders"}
+            </Button>
+            <Button
+              disabled={busy !== null}
+              onClick={() => ctx.openTransfer("in")}
+            >
+              Transfer
+            </Button>
+          </>
+        }
       />
 
       {ctx.skillSources ? (
@@ -191,8 +218,8 @@ export function Skills() {
               onChange={(event) => setPath(event.target.value)}
               className="flex-1"
             />
-            <Button type="submit" variant="primary" disabled={busy}>
-              {busy ? "Indexing…" : "Index path"}
+            <Button type="submit" variant="primary" disabled={busy !== null}>
+              {busy === "path" ? "Indexing…" : "Index path"}
             </Button>
           </form>
         </PanelBody>
