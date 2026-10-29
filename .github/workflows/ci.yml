@@ -56,10 +56,15 @@ jobs:
         # The bind guard refuses 0.0.0.0 without an API key — deliberate, and
         # exactly what a production container should do. The smoke test gets a
         # throwaway key; /api/health is pre-auth, so the curl needs no header.
+        # --retry-connrefused alone is not enough: while the server is still
+        # importing its modules, Docker's proxy accepts the connection and then
+        # resets it, which curl reports as exit 56 and will not retry without
+        # --retry-all-errors. Twenty tries at 2s covers the multi-second boot.
         run: |
           docker run -d --name jit-ci -p 3000:3000 -e JIT_API_KEY=ci-smoke-key jit:ci
           curl --fail --silent --show-error --retry 20 --retry-delay 2 \
-            --retry-connrefused http://127.0.0.1:3000/api/health
+            --retry-connrefused --retry-all-errors \
+            http://127.0.0.1:3000/api/health
           docker exec jit-ci ls /app/dist /app/static
 
       - name: Container logs
