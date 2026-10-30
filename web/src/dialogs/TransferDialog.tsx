@@ -127,7 +127,7 @@ export function TransferDialog({
     const ok = await ctx.confirmAction(
       managed ? "Uninstall this skill?" : "Unindex this skill?",
       managed
-        ? `"${id}" is a JIT-owned copy. This deletes the copy and removes it from the index. Your original file, if any, is untouched.`
+        ? `"${id}" is a JIT-owned copy. This deletes its whole skill folder and removes it from the index. Your original source folder, if any, is untouched.`
         : `"${id}" will be removed from the JIT index. The source file is not touched.`,
       managed ? "Uninstall" : "Unindex",
     );
@@ -240,8 +240,8 @@ export function TransferDialog({
       />
       <DialogBody className="space-y-5">
         <p className="text-sm leading-relaxed text-ink-2">
-          Copy a local folder into JIT's own storage, index files where they
-          live, or export JIT entries back to a local skills folder.
+          Copy complete skill folders into JIT's own storage, index files where
+          they live, or export skills with their supporting files.
         </p>
 
         <Tabs
@@ -396,12 +396,13 @@ export function TransferDialog({
 
             <ToggleRow
               label={`Copy into ${ctx.config?.index_dir || "~/.jit"}/skills`}
-              hint="Checked: JIT owns the copy. Unchecked: JIT indexes the file where it lives."
+              hint="Checked: copy each SKILL.md folder with its scripts, references, and assets. Standalone .md files copy only that file. Unchecked: index in place."
               checked={copy}
               onCheckedChange={setCopy}
             />
             <ToggleRow
               label="Overwrite existing JIT copies"
+              hint="Replaces the whole selected skill folder, including its supporting files."
               checked={overwrite}
               onCheckedChange={setOverwrite}
             />
@@ -493,7 +494,7 @@ export function TransferDialog({
             )}
             <Field
               label="Destination folder"
-              hint="Each skill is written to <destination>/<id>/SKILL.md."
+              hint="Each skill folder and its supporting files are copied to <destination>/<id>/."
             >
               <Input
                 type="text"
@@ -505,7 +506,8 @@ export function TransferDialog({
               />
             </Field>
             <ToggleRow
-              label="Overwrite existing files"
+              label="Overwrite existing skill folders"
+              hint="Replaces selected destination folders, including their contents."
               checked={exportOverwrite}
               onCheckedChange={setExportOverwrite}
             />

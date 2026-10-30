@@ -29,7 +29,12 @@ npm run start
 ```bash
 npm run typecheck
 npm run build
+node scripts/check-mcp.mjs
+node scripts/check-transfer.mjs
 ```
+
+Transfer checks use temporary folders and a local stub embeddings endpoint; no
+model download or cloud credentials are needed.
 
 Verify behavior changes manually against the dashboard and the MCP server:
 

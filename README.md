@@ -148,8 +148,21 @@ nothing is ever auto-scanned:
 
 Skills are standard `SKILL.md` with YAML frontmatter; the id comes from
 `name` (or the folder name if omitted). Removal: **Unindex** drops just the
-index row (source file untouched); **Uninstall** deletes JIT's own copy too.
+index row (source folder untouched); **Uninstall** deletes the whole JIT-owned
+skill folder, including its supporting files.
 **Out of JIT** exports skills to a destination folder of your choice.
+
+Import and export copy the **whole folder containing `SKILL.md`**, preserving
+scripts, references, assets, and other supporting files with their relative
+paths. Other skills beside that folder are not copied. Standalone `.md` files
+remain single-file transfers. VCS metadata (`.git`, `.hg`, `.svn`) is excluded;
+symbolic links and special files are rejected rather than followed (use
+index-in-place instead). Nothing is executed during transfer.
+
+Existing destination folders are left untouched unless you enable overwrite,
+which replaces the entire selected skill folder. If an earlier JIT version
+copied only `SKILL.md`, re-import from the original source with overwrite to
+restore the missing supporting files.
 
 ## Skills and MCP tools live in one index
 

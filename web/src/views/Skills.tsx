@@ -84,7 +84,7 @@ export function Skills() {
     const ok = await ctx.confirmAction(
       managed ? "Uninstall this skill?" : "Unindex this skill?",
       managed
-        ? `"${id}" is a JIT-owned copy at ${pathLabel}. This deletes that copy and removes it from the index. Your original local file, if any, is untouched.`
+        ? `"${id}" is a JIT-owned copy at ${pathLabel}. This deletes its whole skill folder and removes it from the index. Your original source folder, if any, is untouched.`
         : `"${id}" will be removed from the JIT index. The source file at ${pathLabel} is not touched.`,
       managed ? "Uninstall" : "Unindex",
     );
@@ -114,7 +114,7 @@ export function Skills() {
       const ok = await ctx.confirmAction(
         `Remove ${ids.length} skill${ids.length === 1 ? "" : "s"}?`,
         managed
-          ? `${managed} of these are JIT-owned copies and will be deleted from disk. The rest are removed from the index only; their files stay put.`
+          ? `${managed} of these are JIT-owned copies; their whole skill folders will be deleted from disk. The rest are removed from the index only; their files stay put.`
           : "They are removed from the JIT index only. Their files are never touched.",
         "Remove",
       );
@@ -135,7 +135,7 @@ export function Skills() {
       const parts = [`${verb} ${result.ok.length}`];
       if (result.files_removed) {
         parts.push(
-          `${result.files_removed} file${result.files_removed === 1 ? "" : "s"} deleted`,
+          `${result.files_removed} JIT cop${result.files_removed === 1 ? "y" : "ies"} deleted`,
         );
       }
       if (result.failed.length) parts.push(`${result.failed.length} failed`);

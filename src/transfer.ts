@@ -1,18 +1,20 @@
 import {
+  cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
   rmdirSync,
   statSync,
   unlinkSync,
 } from "node:fs";
 import path from "node:path";
 
-import {
-  atomicWriteFile,
-  JIT_SKILLS_DIR,
-  MAX_SKILL_BYTES,
-} from "./config.js";
+import { JIT_SKILLS_DIR, MAX_SKILL_BYTES } from "./config.js";
 import {
   deleteItem,
   discoverSkills,
@@ -103,7 +105,72 @@ export function discoverTransferable(
 
 function inside(parent: string, child: string): boolean {
   const relative = path.relative(parent, child);
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+  return (
+    relative !== ".." &&
+    !relative.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relative)
+  );
+}
+
+function copySkill(source: string, destination: string): IndexItem {
+  const directory = path.dirname(destination);
+  const parent = path.dirname(directory);
+  const bundle = path.basename(source) === "SKILL.md";
+  mkdirSync(parent, { recursive: true });
+  const sourceDir = realpathSync(path.dirname(source));
+  const targetDir = path.join(realpathSync(parent), path.basename(directory));
+  if (
+    inside(targetDir, sourceDir) ||
+    (bundle && inside(sourceDir, targetDir))
+  ) {
+    throw new Error("source and destination skill folders must not overlap");
+  }
+  if (existsSync(directory) && lstatSync(directory).isSymbolicLink()) {
+    throw new Error("destination skill folder must not be a symbolic link");
+  }
+
+  const staging = mkdtempSync(path.join(parent, ".jit-transfer-"));
+  const incoming = path.join(staging, "incoming");
+  const previous = path.join(staging, "previous");
+  try {
+    const filter = (file: string): boolean => {
+      if ([".git", ".hg", ".svn"].includes(path.basename(file))) return false;
+      const stat = lstatSync(file);
+      if (stat.isSymbolicLink() || (!stat.isFile() && !stat.isDirectory())) {
+        throw new Error(
+          `cannot copy links or special files: ${file}; index in place instead`,
+        );
+      }
+      return true;
+    };
+    if (bundle) {
+      cpSync(path.dirname(source), incoming, { recursive: true, filter });
+    } else {
+      mkdirSync(incoming);
+      cpSync(source, path.join(incoming, "SKILL.md"), { filter });
+    }
+    const parsed = parseSkillText(
+      readFileSync(path.join(incoming, "SKILL.md"), "utf8"),
+      destination,
+    );
+    if (parsed.id !== path.basename(directory)) {
+      throw new Error("skill id changed while copying");
+    }
+
+    // Stage and validate the whole bundle before replacing a working copy.
+    if (existsSync(directory)) renameSync(directory, previous);
+    try {
+      renameSync(incoming, directory);
+    } catch (error) {
+      if (existsSync(previous)) renameSync(previous, directory);
+      throw error;
+    }
+    rmSync(previous, { recursive: true, force: true });
+    return parsed;
+  } finally {
+    // Keep the backup if rollback or cleanup failed; never discard the old copy.
+    if (!existsSync(previous)) rmSync(staging, { recursive: true, force: true });
+  }
 }
 
 async function indexParsed(
@@ -139,7 +206,7 @@ export async function copySkillsToJit(
         parsedItems.push(source);
         continue;
       }
-      if (existsSync(destination) && !overwrite) {
+      if (existsSync(path.dirname(destination)) && !overwrite) {
         errors.push(
           `${file}: a JIT copy of '${itemId}' already exists ` +
             "(enable overwrite to replace it)",
@@ -147,14 +214,7 @@ export async function copySkillsToJit(
         continue;
       }
 
-      const text = readFileSync(file, "utf8");
-      // Validate against the destination path before replacing an existing
-      // copy. This keeps the previous JIT-owned skill intact on bad input.
-      const parsed = parseSkillText(text, destination);
-      if (parsed.id !== itemId) {
-        throw new Error("skill id changed while copying");
-      }
-      atomicWriteFile(destination, text, 0o644);
+      const parsed = copySkill(file, destination);
       copied.push(destination);
       parsedItems.push(parsed);
     } catch (error) {
@@ -244,6 +304,9 @@ export async function exportSkills(
     throw new Error("none of the selected skills exist in the index");
   }
   mkdirSync(dest, { recursive: true });
+  if (existsSync(jitRoot) && inside(realpathSync(jitRoot), realpathSync(dest))) {
+    throw new Error("choose a folder outside ~/.jit/skills");
+  }
 
   const exported: Array<{ id: string; path: string }> = [];
   const skipped: string[] = [];
@@ -256,35 +319,33 @@ export async function exportSkills(
       errors.push(`${itemId}: not found`);
       continue;
     }
-    let dirName: string;
     try {
-      dirName = skillDirName(itemId);
+      const dirName = skillDirName(itemId);
+      const source = path.resolve(expandHome(item.path || ""));
+      if (!existsSync(source) || !statSync(source).isFile()) {
+        errors.push(`${itemId}: source file is missing`);
+        continue;
+      }
+      if (statSync(source).size > MAX_SKILL_BYTES) {
+        errors.push(`${itemId}: source file exceeds the size limit`);
+        continue;
+      }
+      const target = path.join(dest, dirName, "SKILL.md");
+      if (path.resolve(target) === source) {
+        skipped.push(itemId);
+        continue;
+      }
+      if (existsSync(path.dirname(target)) && !overwrite) {
+        skipped.push(itemId);
+        continue;
+      }
+      copySkill(source, target);
+      exported.push({ id: itemId, path: target });
     } catch (error) {
       errors.push(
         `${itemId}: ${error instanceof Error ? error.message : String(error)}`,
       );
-      continue;
     }
-    const source = path.resolve(expandHome(item.path || ""));
-    if (!existsSync(source) || !statSync(source).isFile()) {
-      errors.push(`${itemId}: source file is missing`);
-      continue;
-    }
-    if (statSync(source).size > MAX_SKILL_BYTES) {
-      errors.push(`${itemId}: source file exceeds the size limit`);
-      continue;
-    }
-    const target = path.join(dest, dirName, "SKILL.md");
-    if (path.resolve(target) === source) {
-      skipped.push(itemId);
-      continue;
-    }
-    if (existsSync(target) && !overwrite) {
-      skipped.push(itemId);
-      continue;
-    }
-    atomicWriteFile(target, readFileSync(source, "utf8"), 0o644);
-    exported.push({ id: itemId, path: target });
   }
 
   return { exported, skipped, errors, destination: dest };
@@ -299,16 +360,21 @@ export async function removeSkillCopy(id: string): Promise<boolean> {
   let removeIndex = true;
   if (inside(root, resolved) && existsSync(resolved)) {
     try {
-      unlinkSync(resolved);
-      fileRemoved = true;
-      try {
-        const parent = path.dirname(resolved);
-        if (path.resolve(parent) !== root) {
-          rmdirSync(parent);
-        }
-      } catch {
-        // Directory is not empty; leave it.
+      if (!inside(realpathSync(root), realpathSync(resolved))) {
+        throw new Error("skill copy resolves outside JIT storage");
       }
+      const parent = path.dirname(resolved);
+      if (path.basename(resolved) === "SKILL.md" && parent !== root) {
+        rmSync(parent, { recursive: true });
+      } else {
+        unlinkSync(resolved);
+        try {
+          if (parent !== root) rmdirSync(parent);
+        } catch {
+          // Directory is not empty; leave it.
+        }
+      }
+      fileRemoved = true;
     } catch (error) {
       removeIndex = false;
       logger.warn("could not remove JIT skill copy: %s", error);
