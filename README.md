@@ -285,7 +285,7 @@ src/mcp-server.ts (stdio) --> src/mcp/client.ts --> stdio / HTTP / SSE
 ## Hackathon
 
 Built for the Nebius x NVIDIA Global AI Hackathon. In Settings, select **Use
-Nebius Token Factory + NVIDIA Nemotron 3.5 Lightning** and enter a Nebius Token
-Factory API key to rerank every lookup through NVIDIA's open-weight
-`nvidia/Nemotron-3_5-Lightning`. Source is public under the MIT
+Nebius Token Factory + NVIDIA Nemotron 3 Nano 30B A3B** and enter a Nebius Token
+Factory API key to rerank every lookup through
+`nvidia/nvidia-nemotron-3-nano-30b-a3b`. Source is public under the MIT
 [LICENSE](LICENSE).

@@ -531,11 +531,11 @@ export function Settings() {
                   type="button"
                   onClick={() => {
                     setRerankBase("https://api.tokenfactory.nebius.com/v1/");
-                    setRerankModel("nvidia/Nemotron-3_5-Lightning");
-                    ctx.toast("Nebius + NVIDIA Nemotron preset selected. Add your API key and save.");
+                    setRerankModel("nvidia/nvidia-nemotron-3-nano-30b-a3b");
+                    ctx.toast("Nebius + NVIDIA Nemotron 3 Nano preset selected. Add your API key and save.");
                   }}
                 >
-                  Use Nebius Token Factory + NVIDIA Nemotron 3.5 Lightning
+                  Use Nebius Token Factory + NVIDIA Nemotron 3 Nano 30B A3B
                 </Button>
                 <div className="flex flex-wrap items-center gap-2">
                   <Button
