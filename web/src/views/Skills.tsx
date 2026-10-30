@@ -6,7 +6,7 @@ import type { BulkResult, TransferResult } from "../types";
 import { Badge, StatusDot } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { cx } from "../ui/cx";
-import { Empty, Stat } from "../ui/Display";
+import { ActivityStatus, Empty, Spinner, Stat } from "../ui/Display";
 import { Checkbox, Input } from "../ui/Field";
 import { PageHead, Panel, PanelBody, PanelHead } from "../ui/Panel";
 import { SelectAll, SelectionBar, useSelection } from "../ui/Selection";
@@ -151,6 +151,16 @@ export function Skills() {
 
   const total = ctx.skills.length;
   const enabled = ctx.skills.reduce((count, skill) => count + (skill.enabled ? 1 : 0), 0);
+  const activity =
+    busy === "scan"
+      ? "Scanning local folders and indexing discovered skills…"
+      : busy === "path"
+        ? "Indexing this path and building skill vectors…"
+        : bulkBusy
+          ? "Updating the selected skills…"
+          : busyId
+            ? "Updating this skill…"
+            : "";
 
   return (
     <div className="space-y-6">
@@ -167,6 +177,7 @@ export function Skills() {
           <>
             <Button
               disabled={busy !== null}
+              lead={busy === "scan" ? <Spinner /> : undefined}
               onClick={() => void scanLocal()}
               title="Indexes skills in the usual local folders, including JIT’s managed skills. Source files are not modified."
             >
@@ -181,6 +192,8 @@ export function Skills() {
           </>
         }
       />
+
+      {activity ? <ActivityStatus>{activity}</ActivityStatus> : null}
 
       {ctx.skillSources ? (
         <div className="surface flex flex-wrap items-center gap-x-8 gap-y-2 rounded-xl border border-line bg-inset/50 px-5 py-3.5">
@@ -218,7 +231,12 @@ export function Skills() {
               onChange={(event) => setPath(event.target.value)}
               className="flex-1"
             />
-            <Button type="submit" variant="primary" disabled={busy !== null}>
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={busy !== null}
+              lead={busy === "path" ? <Spinner /> : undefined}
+            >
               {busy === "path" ? "Indexing…" : "Index path"}
             </Button>
           </form>
@@ -266,6 +284,7 @@ export function Skills() {
                     size="sm"
                     variant="danger"
                     disabled={bulkBusy}
+                    lead={bulkBusy ? <Spinner /> : undefined}
                     onClick={() => void bulk("remove")}
                   >
                     {bulkBusy ? "Working…" : "Remove"}
@@ -386,6 +405,7 @@ export function Skills() {
                             size="sm"
                             variant="danger"
                             disabled={busyId === skill.id}
+                            lead={busyId === skill.id ? <Spinner /> : undefined}
                             title={actionTitle}
                             onClick={() => void remove(skill.id, managed)}
                           >

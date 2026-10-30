@@ -6,7 +6,7 @@ import type { DiscoverSkillsResult } from "../types";
 import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { Dialog, DialogBody, DialogFoot, DialogHead } from "../ui/Dialog";
-import { Stat } from "../ui/Display";
+import { ActivityStatus, Spinner, Stat } from "../ui/Display";
 import { Checkbox, Field, Input, ToggleRow } from "../ui/Field";
 import { Tab, TabList, TabPanel, Tabs } from "../ui/Tabs";
 
@@ -29,7 +29,7 @@ export function TransferDialog({
   const [dest, setDest] = useState("~/jit-skills");
   const [exportOverwrite, setExportOverwrite] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"in" | "out" | null>(null);
   const [error, setError] = useState("");
   const [discovered, setDiscovered] = useState<DiscoverSkillsResult | null>(
     null,
@@ -52,7 +52,7 @@ export function TransferDialog({
     setExportOverwrite(false);
     setSelected(new Set());
     setError("");
-    setBusy(false);
+    setBusy(null);
     setDiscovered(null);
     setScanError("");
     setDeletingId("");
@@ -62,6 +62,15 @@ export function TransferDialog({
 
   const local = ctx.skills.filter((skill) => !skill.managed).length;
   const jit = ctx.skills.filter((skill) => skill.managed).length;
+  const activity = busy
+    ? busy === "in"
+      ? "Importing selected skills and building their vectors…"
+      : "Exporting selected skill folders…"
+    : scanning
+      ? "Scanning folders or pulling the repository…"
+      : deletingId
+        ? "Removing this skill…"
+        : "";
 
   const scan = async (target?: string) => {
     // The response must match the path the user is looking at now: editing the
@@ -155,7 +164,7 @@ export function TransferDialog({
       setError("Scan and select at least one skill.");
       return;
     }
-    setBusy(true);
+    setBusy("in");
     setError("");
     try {
       const result = await ctx.api<{
@@ -181,7 +190,7 @@ export function TransferDialog({
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
@@ -195,7 +204,7 @@ export function TransferDialog({
       setError("Choose a destination folder.");
       return;
     }
-    setBusy(true);
+    setBusy("out");
     setError("");
     try {
       const result = await ctx.api<{
@@ -222,7 +231,7 @@ export function TransferDialog({
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
@@ -287,6 +296,7 @@ export function TransferDialog({
                 <Button
                   variant="outline"
                   disabled={scanning}
+                  lead={scanning ? <Spinner /> : undefined}
                   onClick={() => void clone()}
                 >
                   {scanning ? "Pulling…" : "Pull"}
@@ -324,6 +334,7 @@ export function TransferDialog({
                 <Button
                   variant="outline"
                   disabled={scanning}
+                  lead={scanning ? <Spinner /> : undefined}
                   onClick={() => void scan()}
                 >
                   {scanning ? "Scanning…" : discovered ? "Rescan" : "Scan"}
@@ -439,6 +450,7 @@ export function TransferDialog({
                         size="sm"
                         variant="ghost"
                         disabled={deletingId === skill.id}
+                        lead={deletingId === skill.id ? <Spinner /> : undefined}
                         onClick={() => void removeSkill(skill.id, skill.managed === true)}
                       >
                         {deletingId === skill.id ? "Removing…" : "Delete"}
@@ -514,6 +526,8 @@ export function TransferDialog({
           </TabPanel>
         </Tabs>
 
+        {activity ? <ActivityStatus>{activity}</ActivityStatus> : null}
+
         {error ? (
           <p className="text-xs text-bad" role="alert">
             {error}
@@ -527,20 +541,22 @@ export function TransferDialog({
         <Button
           variant="primary"
           disabled={
-            busy ||
+            busy !== null ||
+            scanning ||
             (tab === "in" && (discovered === null || selected.size === 0))
           }
+          lead={busy !== null ? <Spinner /> : undefined}
           onClick={() => void (tab === "in" ? transferIn() : transferOut())}
         >
-          {tab === "in"
-            ? busy
-              ? "Working…"
-              : discovered
-                ? `Import ${selected.size} selected`
-                : "Scan to import"
-            : busy
+          {busy === "in"
+            ? "Importing…"
+            : busy === "out"
               ? "Exporting…"
-              : "Export selected"}
+              : tab === "in"
+                ? discovered
+                  ? `Import ${selected.size} selected`
+                  : "Scan to import"
+                : "Export selected"}
         </Button>
       </DialogFoot>
     </Dialog>

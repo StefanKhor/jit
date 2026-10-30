@@ -10,7 +10,7 @@ import type {
 } from "../types";
 import { StatusDot } from "../ui/Badge";
 import { Button } from "../ui/Button";
-import { Empty } from "../ui/Display";
+import { ActivityStatus, Empty, Spinner } from "../ui/Display";
 import { Checkbox, Field, Select, Textarea } from "../ui/Field";
 import { PageHead, Panel, PanelBody, PanelHead } from "../ui/Panel";
 import { Table, TableWrap, Td, Th, Tr } from "../ui/Table";
@@ -20,10 +20,12 @@ export function Mcp() {
   const [importOpen, setImportOpen] = useState(false);
   const [imports, setImports] = useState<McpImportServer[]>([]);
   const [importPaths, setImportPaths] = useState<ConfigPath[]>([]);
+  const [importsLoading, setImportsLoading] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [importBusy, setImportBusy] = useState(false);
   const [importError, setImportError] = useState("");
   const [busy, setBusy] = useState("");
+  const [busyAction, setBusyAction] = useState<"connect" | "disconnect" | "remove" | "">("");
 
   /* Tool runner: invoke a tool on a connected server, behind a confirm gate. */
   const [runnerOpen, setRunnerOpen] = useState(false);
@@ -46,6 +48,7 @@ export function Mcp() {
     setImportError("");
     setImports([]);
     setImportPaths([]);
+    setImportsLoading(true);
     try {
       const data = await ctx.api<{
         paths: ConfigPath[];
@@ -62,6 +65,8 @@ export function Mcp() {
       );
     } catch (error) {
       setImportError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setImportsLoading(false);
     }
   };
 
@@ -113,6 +118,7 @@ export function Mcp() {
       if (!ok) return;
     }
     setBusy(server);
+    setBusyAction(action);
     try {
       if (action === "remove") {
         await ctx.api("/api/mcp/remove", {
@@ -138,6 +144,7 @@ export function Mcp() {
       ctx.toast(error instanceof Error ? error.message : String(error), "error");
     } finally {
       setBusy("");
+      setBusyAction("");
     }
   };
 
@@ -262,6 +269,16 @@ export function Mcp() {
         }
       />
 
+      {busy ? (
+        <ActivityStatus>
+          {busyAction === "connect"
+            ? `Connecting to ${busy} and discovering tools…`
+            : busyAction === "disconnect"
+              ? `Disconnecting ${busy}…`
+              : `Removing ${busy} from JIT…`}
+        </ActivityStatus>
+      ) : null}
+
       {total === 0 ? (
         <Panel className="border-dashed bg-panel/60">
           <Empty
@@ -303,6 +320,12 @@ export function Mcp() {
                         : server.status === "connecting"
                           ? "warn"
                           : "neutral";
+                  const connecting =
+                    busy === server.name && busyAction === "connect";
+                  const disconnecting =
+                    busy === server.name && busyAction === "disconnect";
+                  const removing =
+                    busy === server.name && busyAction === "remove";
                   return (
                     <Tr key={server.name}>
                       <Td>
@@ -340,28 +363,35 @@ export function Mcp() {
                               size="sm"
                               variant="outline"
                               disabled={busy === server.name}
+                              lead={disconnecting ? <Spinner /> : undefined}
                               onClick={() => void act(server.name, "disconnect")}
                             >
-                              Disconnect
+                              {disconnecting ? "Disconnecting…" : "Disconnect"}
                             </Button>
                           ) : (
                             <Button
                               size="sm"
                               variant="outline"
                               disabled={busy === server.name}
+                              lead={connecting ? <Spinner /> : undefined}
                               onClick={() => void act(server.name, "connect")}
                             >
-                              {server.status === "error" ? "Retry" : "Connect"}
+                              {connecting
+                                ? "Connecting…"
+                                : server.status === "error"
+                                  ? "Retry"
+                                  : "Connect"}
                             </Button>
                           )}
                           <Button
                             size="sm"
                             variant="danger"
                             disabled={busy === server.name}
+                            lead={removing ? <Spinner /> : undefined}
                             title="Remove from JIT; the external config is untouched"
                             onClick={() => void act(server.name, "remove")}
                           >
-                            {busy === server.name ? "…" : "Remove"}
+                            {removing ? "Removing…" : "Remove"}
                           </Button>
                         </div>
                       </Td>
@@ -449,6 +479,7 @@ export function Mcp() {
                   <Button
                     variant="primary"
                     disabled={runnerBusy || !runnerTool}
+                    lead={runnerBusy ? <Spinner /> : undefined}
                     onClick={() => void runTool()}
                   >
                     {runnerBusy ? "Running…" : "Run"}
@@ -464,6 +495,12 @@ export function Mcp() {
                     Close
                   </Button>
                 </div>
+
+                {runnerBusy ? (
+                  <ActivityStatus>
+                    Running {runnerTool} on {runnerServer}…
+                  </ActivityStatus>
+                ) : null}
 
                 {runnerResult ? (
                   <div className="space-y-2">
@@ -528,7 +565,9 @@ export function Mcp() {
               ))}
             </div>
 
-            {importError ? (
+            {importsLoading ? (
+              <ActivityStatus>Checking known MCP client configs…</ActivityStatus>
+            ) : importError ? (
               <p className="py-4 text-center text-sm text-ink-2">{importError}</p>
             ) : imports.length === 0 ? (
               <p className="py-4 text-center text-sm text-ink-2">
@@ -579,6 +618,7 @@ export function Mcp() {
               <Button
                 variant="primary"
                 onClick={() => void importSelected()}
+                lead={importBusy ? <Spinner /> : undefined}
                 disabled={
                   importBusy ||
                   !imports.some(
@@ -598,6 +638,9 @@ export function Mcp() {
                 Cancel
               </Button>
             </div>
+            {importBusy ? (
+              <ActivityStatus>Importing selected server configs…</ActivityStatus>
+            ) : null}
           </PanelBody>
         </Panel>
       ) : null}

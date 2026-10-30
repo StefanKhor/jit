@@ -274,6 +274,19 @@ export function Spinner({ className }: { className?: string }) {
   );
 }
 
+export function ActivityStatus({ children }: { children: ReactNode }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="surface flex items-center gap-3 rounded-xl border border-accent/20 bg-accent/[0.04] px-4 py-3 text-sm text-ink-2"
+    >
+      <Spinner className="shrink-0 text-accent" />
+      <span>{children}</span>
+    </div>
+  );
+}
+
 export function Kbd({ children }: { children: ReactNode }) {
   return (
     <kbd className="num surface rounded-md border border-line-2 bg-raised px-1.5 py-0.5 text-[10px] text-ink-3">

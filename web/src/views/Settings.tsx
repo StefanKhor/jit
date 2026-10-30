@@ -6,6 +6,7 @@ import { useJit } from "../state/store";
 import type { IndexExport } from "../types";
 import { Badge, Meta } from "../ui/Badge";
 import { Button } from "../ui/Button";
+import { ActivityStatus, Spinner } from "../ui/Display";
 import { Field, Input, ToggleRow } from "../ui/Field";
 import { PageHead, Panel, PanelBody, PanelHead } from "../ui/Panel";
 import { Select } from "../ui/Select";
@@ -27,6 +28,7 @@ export function Settings() {
   const [embeddingDim, setEmbeddingDim] = useState("1536");
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState("");
+  const [dataBusy, setDataBusy] = useState<"export" | "import" | "clear" | null>(null);
   const [threshold, setThreshold] = useState(0.6);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -99,6 +101,7 @@ export function Settings() {
   };
 
   const reindexEmbeddings = async () => {
+    if (saving) return;
     setSaving("embedding-reindex");
     try {
       const result = await ctx.api<{
@@ -216,6 +219,8 @@ export function Settings() {
   };
 
   const exportData = async () => {
+    if (dataBusy) return;
+    setDataBusy("export");
     try {
       const data = await ctx.api<IndexExport>("/api/export");
       const blob = new Blob([JSON.stringify(data, null, 2)], {
@@ -230,10 +235,14 @@ export function Settings() {
       ctx.toast(`Exported ${fmt(data.items.length)} items.`);
     } catch (error) {
       ctx.toast(error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      setDataBusy(null);
     }
   };
 
   const importData = async (file: File) => {
+    if (dataBusy) return;
+    setDataBusy("import");
     try {
       const text = await file.text();
       const parsed = JSON.parse(text) as unknown;
@@ -260,6 +269,8 @@ export function Settings() {
             : String(error),
         "error",
       );
+    } finally {
+      setDataBusy(null);
     }
   };
 
@@ -270,12 +281,16 @@ export function Settings() {
       "Clear index",
     );
     if (!ok) return;
+    if (dataBusy) return;
+    setDataBusy("clear");
     try {
       await ctx.api("/api/clear", { method: "POST" });
       ctx.toast("Index cleared.");
       await ctx.refreshAll();
     } catch (error) {
       ctx.toast(error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      setDataBusy(null);
     }
   };
 
@@ -462,11 +477,17 @@ export function Settings() {
                 <Button
                   type="button"
                   disabled={saving !== "" || !ctx.stats?.total}
+                  lead={saving === "embedding-reindex" ? <Spinner /> : undefined}
                   onClick={() => void reindexEmbeddings()}
                 >
                   {saving === "embedding-reindex" ? "Rebuilding…" : "Rebuild vector index"}
                 </Button>
               </div>
+              {saving === "embedding-reindex" ? (
+                <ActivityStatus>
+                  Rebuilding stored vectors. This can take a while for large indexes…
+                </ActivityStatus>
+              ) : null}
             </PanelBody>
           </Panel>
 
@@ -676,8 +697,20 @@ export function Settings() {
                 export.
               </p>
               <div className="flex flex-wrap items-center gap-2">
-                <Button onClick={() => void exportData()}>Export</Button>
-                <Button onClick={() => fileRef.current?.click()}>Import</Button>
+                <Button
+                  disabled={dataBusy !== null}
+                  lead={dataBusy === "export" ? <Spinner /> : undefined}
+                  onClick={() => void exportData()}
+                >
+                  {dataBusy === "export" ? "Exporting…" : "Export"}
+                </Button>
+                <Button
+                  disabled={dataBusy !== null}
+                  lead={dataBusy === "import" ? <Spinner /> : undefined}
+                  onClick={() => fileRef.current?.click()}
+                >
+                  {dataBusy === "import" ? "Importing…" : "Import"}
+                </Button>
                 <input
                   ref={fileRef}
                   type="file"
@@ -691,6 +724,11 @@ export function Settings() {
                   }}
                 />
               </div>
+              {dataBusy === "export" ? (
+                <ActivityStatus>Preparing the index export…</ActivityStatus>
+              ) : dataBusy === "import" ? (
+                <ActivityStatus>Importing entries and updating the index…</ActivityStatus>
+              ) : null}
             </PanelBody>
           </Panel>
 
@@ -722,9 +760,17 @@ export function Settings() {
                 Remove every item from the JIT index. JIT-owned skill files and
                 your source files stay on disk.
               </p>
-              <Button variant="danger" onClick={() => void clearIndex()}>
-                Clear index
+              <Button
+                variant="danger"
+                disabled={dataBusy !== null}
+                lead={dataBusy === "clear" ? <Spinner /> : undefined}
+                onClick={() => void clearIndex()}
+              >
+                {dataBusy === "clear" ? "Clearing…" : "Clear index"}
               </Button>
+              {dataBusy === "clear" ? (
+                <ActivityStatus>Clearing the index…</ActivityStatus>
+              ) : null}
             </PanelBody>
           </Panel>
         </div>

@@ -4,6 +4,7 @@ import { useJit } from "../state/store";
 import type { InstallResult } from "../types";
 import { Button } from "../ui/Button";
 import { Dialog, DialogBody, DialogFoot, DialogHead } from "../ui/Dialog";
+import { ActivityStatus, Spinner } from "../ui/Display";
 import { Field, Input, Textarea } from "../ui/Field";
 
 const DEFAULT_CONFIG =
@@ -95,6 +96,9 @@ export function McpAddDialog({
             </span>{" "}
             with mode 600.
           </p>
+          {busy ? (
+            <ActivityStatus>Adding the server and connecting…</ActivityStatus>
+          ) : null}
           <Field label="Name" hint="How the server is referenced in JIT.">
             <Input
               type="text"
@@ -125,7 +129,12 @@ export function McpAddDialog({
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" variant="primary" disabled={busy}>
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={busy}
+            lead={busy ? <Spinner /> : undefined}
+          >
             {busy ? "Connecting…" : "Add & connect"}
           </Button>
         </DialogFoot>

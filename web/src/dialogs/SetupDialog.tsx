@@ -4,7 +4,7 @@ import { summary } from "../format";
 import { useJit } from "../state/store";
 import { Button } from "../ui/Button";
 import { Dialog, DialogBody, DialogFoot, DialogHead } from "../ui/Dialog";
-import { Wordmark } from "../ui/Display";
+import { ActivityStatus, Spinner, Wordmark } from "../ui/Display";
 import { ToggleRow } from "../ui/Field";
 
 /** First-run configuration: optional local import and setup completion. */
@@ -95,6 +95,13 @@ export function SetupDialog({
             checked={scan}
             onCheckedChange={setScan}
           />
+          {busy ? (
+            <ActivityStatus>
+              {scan
+                ? "Saving setup and indexing local skills…"
+                : "Saving setup…"}
+            </ActivityStatus>
+          ) : null}
         </DialogBody>
         <DialogFoot>
           <Button
@@ -104,7 +111,12 @@ export function SetupDialog({
           >
             Skip for now
           </Button>
-          <Button variant="primary" type="submit" disabled={busy}>
+          <Button
+            variant="primary"
+            type="submit"
+            disabled={busy}
+            lead={busy ? <Spinner /> : undefined}
+          >
             {busy ? "Saving…" : "Finish setup"}
           </Button>
         </DialogFoot>
