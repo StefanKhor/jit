@@ -1,6 +1,6 @@
 {
   "name": "jit-mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A search engine for agent skills and MCP tools: one query routes the task to the tested procedure or the right tool — local and just-in-time.",
   "type": "module",
   "license": "MIT",
