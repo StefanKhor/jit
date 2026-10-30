@@ -9,7 +9,6 @@ import { logger } from "./logger.js";
 import { warmupEmbeddingModel } from "./embedding.js";
 import { evaluate } from "./retrieval/retriever.js";
 import { logLookup } from "./lookups.js";
-import { getAllItems, getItem } from "./storage/store.js";
 
 // The server cannot push a reminder mid-session, so the one fresh channel it
 // controls is the tool's own result. This short cue rides on every result,
@@ -17,6 +16,10 @@ import { getAllItems, getItem } from "./storage/store.js";
 // one-time system-prompt instruction cannot do once the session grows.
 const CALL_HINT =
   "Call JIT_FIND again whenever the work moves to a new domain or platform.";
+const LOADED_HINT =
+  "Follow the returned skill instructions directly. For an MCP tool, call it " +
+  "on its owning server. " +
+  CALL_HINT;
 
 // The rule that gets the agent to call JIT. It is deliberately a recurring
 // condition, not a one-time "start of task" cue: a trigger the agent meets once
@@ -28,9 +31,7 @@ Call JIT_FIND before starting a multi-step task, and again whenever the work shi
 
 One intent per call, phrased as a search query: one sentence, concrete action plus platform or domain — "deploy a node app to azure", "automate posting a twitter thread". No file paths or task details; they dilute the match. Work spanning several domains is several calls.
 
-A hit returns the procedure to follow: one skill, or several when more than one fits — read them all before starting. A hit can also be an MCP tool: its content names the owning server and the arguments it takes — call that tool on its server directly; JIT indexes and routes tools, it does not run them. {"found": false} with near_misses is normal, not an error: retry once with different phrasing, then proceed.
-
-When you already know the exact skill name — from near_misses, related, or one you loaded earlier and lost from context — call JIT_RUN with that name to load it directly, without searching.`;
+A hit already includes the full skill instructions: read and follow the returned content; no second load is needed. A hit can also be an MCP tool: its content names the owning server and the arguments it takes — call that tool on its server directly. JIT indexes and routes tools; it does not execute them. {"found": false} with near_misses is normal, not an error: retry once with different phrasing, then proceed.`;
 
 function textResult(payload: unknown, isError = false) {
   return {
@@ -45,7 +46,6 @@ function createServer(): McpServer {
     { instructions: INSTRUCTIONS },
   );
   registerFind(server);
-  registerRun(server);
   return server;
 }
 
@@ -62,6 +62,8 @@ export function findDescription(): string {
     'to azure". Returns the skill body — sometimes several when more ' +
     'than one fits — or {"found": false} plus near_misses; retry once ' +
     "with different phrasing, then proceed. " +
+    "Use returned skill content directly; no second lookup is needed. " +
+    "For a matched MCP tool, call it directly on its owning server. " +
     "Cheap to call, expensive to skip."
   );
 }
@@ -70,7 +72,7 @@ export function registerFind(server: McpServer): void {
   server.registerTool(
     "JIT_FIND",
     {
-      title: "Find a skill",
+      title: "Find skills and MCP tools",
       description: findDescription(),
       inputSchema: {
         intent: z
@@ -149,7 +151,7 @@ export function registerFind(server: McpServer): void {
                   "from the dashboard; do not follow the empty procedures.",
               }
             : {}),
-          hint: CALL_HINT,
+          hint: LOADED_HINT,
         });
       }
       if (evaluation.nearMisses.length > 0) {
@@ -179,99 +181,13 @@ export function registerFind(server: McpServer): void {
   );
 }
 
-export function registerRun(server: McpServer): void {
-  server.registerTool(
-    "JIT_RUN",
-    {
-      title: "Load a named skill",
-      description:
-        "Load a skill by its exact name, without searching. Use it when you " +
-        "already know which skill you need — a name from JIT_FIND's " +
-        "near_misses or related lists, or one you loaded earlier and lost " +
-        "from context. Returns the skill body and its path, or " +
-        '{"found": false} with close names to retry against.',
-      inputSchema: {
-        name: z.string().describe('Exact skill name, e.g. "deploy-node-azure".'),
-      },
-      // Read-only and idempotent like JIT_FIND: it fetches a skill's text from
-      // disk. It runs nothing.
-      annotations: {
-        readOnlyHint: true,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async ({ name }) => {
-      const started = performance.now();
-      const wanted = name.trim().toLowerCase();
-      const index = getAllItems(false);
-      const hit = index.find((item) => item.name.trim().toLowerCase() === wanted);
-      const ms = Number((performance.now() - started).toFixed(1));
-      if (!hit) {
-        // Substring matches give a misspelled name somewhere to land.
-        const close = index
-          .filter((item) => {
-            const candidate = item.name.trim().toLowerCase();
-            return candidate.includes(wanted) || wanted.includes(candidate);
-          })
-          .slice(0, 5)
-          .map((item) => item.name);
-        logLookup({
-          ts: new Date().toISOString(),
-          tool: "JIT_RUN",
-          name,
-          found: false,
-          close_matches: close,
-          ms,
-        });
-        return textResult({
-          found: false,
-          name,
-          ...(close.length > 0 ? { close_matches: close } : {}),
-        });
-      }
-      // getAllItems(false) skips bodies; re-read just this one from disk. The
-      // index never stores bodies — same serving-time read as JIT_FIND.
-      const full = getItem(hit.id);
-      const content = full?.body ?? "";
-      logLookup({
-        ts: new Date().toISOString(),
-        tool: "JIT_RUN",
-        name,
-        found: true,
-        results: [hit.name],
-        ms,
-      });
-      return textResult({
-        found: true,
-        skills: [
-          {
-            name: hit.name,
-            path: hit.path,
-            content,
-            ...(content
-              ? {}
-              : {
-                  note:
-                    "The body is unavailable — the file moved or was deleted " +
-                    "since indexing. Reindex from the dashboard; do not follow " +
-                    "an empty procedure.",
-                }),
-          },
-        ],
-        hint: CALL_HINT,
-      });
-    },
-  );
-}
-
 // The dashboard reports the fixed context cost of JIT's own MCP tool schema.
 // Measure the real tools/list payload once over an in-memory transport so the
 // number tracks the code instead of being hand-maintained. The fallback is the
 // last measured value.
-// Last measured tools/list cost for the JIT_FIND + JIT_RUN schema pair
+// Last measured tools/list cost for JIT_FIND
 // (measured over the in-memory probe below).
-const FALLBACK_SCHEMA_TOKENS = 435;
+const FALLBACK_SCHEMA_TOKENS = 314;
 
 let schemaTokensPromise: Promise<number> | null = null;
 

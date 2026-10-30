@@ -4,10 +4,9 @@ import type { UsageEntry, UsageSummary } from "./types.js";
 
 // Usage telemetry: what agents actually routed, computed from the shared
 // lookup log. A JIT_FIND that returned entries counts one find per returned
-// entry (that is how often the agent was handed that entry); a JIT_RUN counts
-// one run for its exact name. Entries the index holds but no lookup reached
-// are the actionable half of the report: candidates to disable, re-describe,
-// or delete.
+// entry (that is how often the agent was handed that entry). Historical
+// exact-name loads remain in the totals. Entries the index holds but no lookup
+// reached are candidates to disable, re-describe, or delete.
 
 const MAX_LISTED = 12;
 const MAX_MISSED = 6;
@@ -42,6 +41,7 @@ export function buildUsageSummary(): UsageSummary {
     else misses += 1;
 
     if (record.tool === "JIT_RUN") {
+      // Preserve usage from the retired tool without exposing it again.
       if (record.name) {
         runs += 1;
         touch(record.name, ts, "runs");

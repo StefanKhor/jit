@@ -96,16 +96,16 @@ For OpenCode:
 If you ran `npm link` in the repo (or `npm i -g jit-mcp` once published),
 `"command": "jit"` and `"args": ["serve"]` also work.
 
-Restart the client. The agent sees two tools:
+Restart the client. The agent sees one tool:
 
 | Tool | What it does |
 |---|---|
-| `JIT_FIND(intent)` | Search. One sentence like `"deploy a node app to azure"`. Returns the best-fitting skill body — or `{"found": false}` with `near_misses` when nothing clears the bar. A hit can also be an MCP tool: its content names the server to call it on and the arguments it takes. |
-| `JIT_RUN(name)` | Load one entry's body by exact name — a skill the agent wants directly, or the tool name `JIT_FIND` surfaced. |
+| `JIT_FIND(intent)` | Search with one sentence like `"deploy a node app to azure"`. Returns full skill instructions to follow directly, or an MCP tool's server and arguments. No second load is needed. Returns `{"found": false}` with `near_misses` when nothing clears the bar. |
 
-That is the whole agent-facing surface. JIT routes; it never executes an MCP
-tool for the agent — the agent calls it on the server that owns it. Indexing
-happens on the dashboard, not through the agent.
+For skills: **find → follow the returned instructions**. For MCP tools:
+**find → call the tool on its owning server**. No second loading step is
+needed. JIT routes; it never executes skills or MCP tools. Indexing happens
+on the dashboard, not through the agent.
 
 A short client instruction makes triggering reliable. Add this to your system
 prompt or `AGENTS.md`:
@@ -117,11 +117,13 @@ of the session — call JIT_FIND. Phrase the intent like a search query: one
 sentence, concrete action plus platform or domain, e.g. "deploy a node app to
 azure". Leave out file paths and task details. Skip it for single-step actions
 you can do directly, or when a skill for this kind of work is already in
-context. On {"found": false} with near_misses, retry once with different
-phrasing, then proceed normally. A hit may return several skills when more
-than one fits the same intent, and may list related skills — call again for
-the next domain. Checking is the default, skipping is the exception: a lookup is
-cheap, a missed skill is expensive.
+context. Follow skill content returned by JIT_FIND directly; no second load
+is needed. Call matched MCP tools directly on their owning servers. On
+{"found": false} with near_misses, retry once with different phrasing, then
+proceed normally. A hit may return several skills when more than one fits the
+same intent, and may list related skills — call again for the next domain.
+Checking is the default, skipping is the exception: a lookup is cheap, a
+missed skill is expensive.
 ```
 
 `JIT_FIND` is declared `readOnlyHint` and `idempotentHint`, so clients that
@@ -229,7 +231,7 @@ A single-file React SPA served by the Node process at <http://localhost:3000>.
 - **MCP** — add or import servers, connect/disconnect, inspect tools, run a
   tool manually.
 - **Search** — live retrieval against the real index.
-- **Lookups** — every JIT_FIND / JIT_RUN any agent made, with its retrieval
+- **Lookups** — every JIT_FIND any agent made, with its retrieval
   trace (`GET /api/lookups`, `GET /api/usage` for the rollup).
 - **Settings** — embeddings, reranker, threshold, auth, import/export, clear.
 

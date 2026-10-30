@@ -12,9 +12,10 @@ import type { RetrievalTrace } from "./types.js";
 
 export interface LookupRecord {
   ts: string; // ISO timestamp
+  // The retired tool is kept here only to read existing lookup history.
   tool: "JIT_FIND" | "JIT_RUN";
   intent?: string; // JIT_FIND: what the agent searched for
-  name?: string; // JIT_RUN: the exact name requested
+  name?: string; // Historical exact-name load
   found: boolean;
   results?: string[]; // hit names, bodies excluded
   near_misses?: string[];
@@ -30,7 +31,7 @@ const LOG_PATH = path.join(INDEX_DIR, "lookups.jsonl");
 // without limit.
 const MAX_RECORDS = 500;
 
-export function logLookup(record: LookupRecord): void {
+export function logLookup(record: LookupRecord & { tool: "JIT_FIND" }): void {
   try {
     fs.mkdirSync(INDEX_DIR, { recursive: true });
     fs.appendFileSync(LOG_PATH, JSON.stringify(record) + "\n");

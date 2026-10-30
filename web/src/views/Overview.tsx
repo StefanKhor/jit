@@ -642,13 +642,6 @@ function Usage({ usage }: { usage: UsageSummary | null }) {
       unit: "",
       hint: "searches by intent",
     },
-    {
-      key: "runs",
-      label: "JIT_RUN",
-      value: <AnimatedNumber value={usage?.runs ?? 0} />,
-      unit: "",
-      hint: "loads by exact name",
-    },
   ];
 
   return (
@@ -660,7 +653,7 @@ function Usage({ usage }: { usage: UsageSummary | null }) {
       {windowEmpty ? (
         <PanelBody className="space-y-4">
           <Empty title="No agent lookups logged yet.">
-            Connect an agent over MCP and every JIT_FIND / JIT_RUN lands here —
+            Connect an agent over MCP and every JIT_FIND lands here —
             which entries get called, how often, and what the index never
             answered.
           </Empty>
@@ -672,7 +665,7 @@ function Usage({ usage }: { usage: UsageSummary | null }) {
         </PanelBody>
       ) : (
         <PanelBody className="space-y-6">
-          <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line lg:grid-cols-4">
+          <div className="grid gap-px overflow-hidden rounded-2xl border border-line bg-line sm:grid-cols-3">
             {summary.map((figure) => (
               <div key={figure.key} className="surface bg-panel/60 p-4">
                 <div className="kicker">{figure.label}</div>
@@ -694,7 +687,7 @@ function Usage({ usage }: { usage: UsageSummary | null }) {
                   Most routed
                 </span>
                 <span className="num text-[11px] text-ink-3">
-                  find + run calls
+                  lookup calls
                 </span>
               </div>
               {entries.length === 0 ? (
@@ -725,8 +718,10 @@ function Usage({ usage }: { usage: UsageSummary | null }) {
                           />
                         </div>
                         <span className="num shrink-0 text-[10px] text-ink-3">
-                          {entry.finds} find{entry.finds === 1 ? "" : "s"} ·{" "}
-                          {entry.runs} run{entry.runs === 1 ? "" : "s"}
+                          {entry.finds} find{entry.finds === 1 ? "" : "s"}
+                          {entry.runs > 0
+                            ? ` · ${entry.runs} historical load${entry.runs === 1 ? "" : "s"}`
+                            : null}
                         </span>
                       </div>
                     </div>

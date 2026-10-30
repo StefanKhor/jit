@@ -759,9 +759,8 @@ export function createApp(): Hono {
     return c.json(await search(String(body.intent || "").trim()));
   });
 
-  // What agents actually asked JIT, newest first — every JIT_FIND / JIT_RUN
-  // from any process (the stdio server logs to the same file), with the full
-  // retrieval trace attached so each entry can be debugged like the Search page.
+  // What agents actually asked JIT, newest first, from the shared lookup log.
+  // Includes historical records; retrieval traces can be debugged like Search.
   app.get("/api/lookups", (c) => {
     return c.json({ lookups: readLookups(100) });
   });

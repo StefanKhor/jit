@@ -70,7 +70,7 @@ export interface UsageEntry {
   name: string;
   /** Times a JIT_FIND returned this entry to an agent. */
   finds: number;
-  /** Times a JIT_RUN loaded it by name. */
+  /** Historical loads from the retired exact-name tool. */
   runs: number;
   total: number;
   last_called: string | null;
@@ -81,6 +81,7 @@ export interface UsageSummary {
   window: number;
   total_lookups: number;
   finds: number;
+  /** Historical loads from the retired exact-name tool. */
   runs: number;
   hits: number;
   misses: number;
@@ -247,9 +248,10 @@ export interface RetrievalTrace {
 /** One agent-invoked lookup, from the shared lookup log (~/.jit/lookups.jsonl). */
 export interface LookupRecord {
   ts: string;
+  // The retired tool is kept here only to read existing lookup history.
   tool: "JIT_FIND" | "JIT_RUN";
   intent?: string;
-  name?: string;
+  name?: string; // Historical exact-name load
   found: boolean;
   results?: string[];
   near_misses?: string[];

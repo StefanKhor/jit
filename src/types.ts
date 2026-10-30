@@ -38,7 +38,7 @@ export interface UsageEntry {
   name: string;
   /** Times a JIT_FIND returned this entry to an agent. */
   finds: number;
-  /** Times a JIT_RUN loaded it by name. */
+  /** Historical loads from the retired exact-name tool. */
   runs: number;
   total: number;
   last_called: string | null;
@@ -49,6 +49,7 @@ export interface UsageSummary {
   window: number;
   total_lookups: number;
   finds: number;
+  /** Historical loads from the retired exact-name tool. */
   runs: number;
   hits: number;
   misses: number;

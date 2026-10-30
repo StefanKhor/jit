@@ -9,7 +9,7 @@ import { PageHead, Panel, PanelBody, PanelHead } from "../ui/Panel";
 import { TraceFlow } from "../ui/TraceFlow";
 
 /**
- * What agents actually asked JIT. Every JIT_FIND / JIT_RUN from any process —
+ * What agents actually asked JIT. Every lookup from any process —
  * the stdio MCP server and the dashboard share one log file — lands here with
  * its verdict and, for JIT_FIND, the full step-by-step retrieval trace, so an
  * agent's lookup can be debugged exactly like a manual Search.
@@ -39,7 +39,7 @@ export function Lookups() {
       <PageHead
         kicker="Observability"
         title="Lookups"
-        description="Every agent-invoked JIT_FIND and JIT_RUN, newest first. Expand a JIT_FIND entry to see the same step-by-step retrieval trace as the Search page."
+        description="Agent lookups, newest first. Expand a JIT_FIND entry to see the same step-by-step retrieval trace as the Search page."
         actions={
           <Button type="button" disabled={lookups === null && !error} onClick={() => void load()}>
             Refresh
@@ -58,7 +58,7 @@ export function Lookups() {
       ) : lookups !== null && lookups.length === 0 ? (
         <Empty title="No lookups logged yet">
           <p>
-            Connect an agent to <code>jit serve</code> and its JIT_FIND / JIT_RUN
+            Connect an agent to <code>jit serve</code> and its JIT_FIND
             calls will appear here as they happen.
           </p>
         </Empty>
@@ -86,6 +86,7 @@ export function Lookups() {
                       </span>
                       <span className="font-mono text-xs text-ink">
                         {lookup.tool}
+                        {lookup.tool === "JIT_RUN" ? " (legacy)" : null}
                       </span>
                       <span className="min-w-0 flex-1 truncate text-xs text-ink-2">
                         {lookup.intent ?? lookup.name}
@@ -127,9 +128,8 @@ export function Lookups() {
                           <TraceFlow trace={lookup.trace} />
                         ) : lookup.tool === "JIT_RUN" ? (
                           <p className="text-xs text-ink-3">
-                            JIT_RUN resolves by exact name — no vector search, no
-                            rerank; the only steps are the name match and the
-                            body read from disk.
+                            Historical exact-name load from the removed JIT_RUN
+                            tool. No vector search or reranking was performed.
                           </p>
                         ) : null}
                       </div>
